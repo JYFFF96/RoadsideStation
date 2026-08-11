@@ -2,7 +2,7 @@ carla:
   host: 127.0.0.1
   port: 2000
   timeout: 60.0
-  map: Town03
+  map: Town10HD_Opt
   synchronous_mode: false
 
 station:
