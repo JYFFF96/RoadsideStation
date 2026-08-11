@@ -19,14 +19,15 @@ def main():
     config = load_config()
     station_id = config["station"]["id"]
     station = CarlaRoadsideStation(config)
-    fusion = SimpleFusion(station_id, config["fusion"]["max_match_distance"])
+    fusion = SimpleFusion(station_id, config["fusion"])
     publisher = MqttPublisher(config["mqtt"])
 
-    print("RoadsideStation V0.1 starting...")
+    print("RoadsideStation V0.2 starting...")
     station.start()
     publisher.connect()
     print("CARLA roadside sensors started: %d" % len(station.sensors))
 
+    last_debug = 0.0
     try:
         while True:
             camera, lidar, radar = station.cache.snapshot()
@@ -36,12 +37,31 @@ def main():
 
             object_json = encode_object_list(object_list)
             rsm_json = encode_rsm(object_list)
-            print("Objects: %d | %s" % (len(object_list.objects), rsm_json))
+
+            now = time.time()
+            if now - last_debug >= 1.0:
+                stats = fusion.last_stats
+                camera_frame = camera[0] if camera else "-"
+                print("[RSU %s | %s] Camera:%s  LiDAR:%d pts/%d clusters  Radar:%d  Tracks:%d" % (
+                    station_id,
+                    station.map_name,
+                    camera_frame,
+                    stats["lidar_points"],
+                    stats["lidar_clusters"],
+                    stats["radar_detections"],
+                    stats["tracked_objects"]))
+                for obj in object_list.objects[:10]:
+                    print("  %-12s x=%7.2f y=%7.2f z=%6.2f vx=%6.2f vy=%6.2f conf=%.2f src=%s" % (
+                        obj.object_id, obj.x, obj.y, obj.z, obj.vx, obj.vy,
+                        obj.confidence, "+".join(obj.sources)))
+                if len(object_list.objects) > 10:
+                    print("  ... %d more objects" % (len(object_list.objects) - 10))
+                last_debug = now
 
             mqtt_cfg = config["mqtt"]
             publisher.publish(mqtt_cfg["topic_object_list"], object_json)
             publisher.publish(mqtt_cfg["topic_rsm"], rsm_json)
-            time.sleep(0.2)
+            time.sleep(0.1)
     except KeyboardInterrupt:
         print("Stopping RoadsideStation...")
     finally:
