@@ -20,9 +20,11 @@ class SimpleFusion(object):
             max_speed=config.get("track_max_speed", 20.0),
             velocity_alpha=config.get("velocity_alpha", 0.35))
         self.world_transform = None
+        self.candidate_validator = None
         self.last_stats = {
             "lidar_points": 0,
             "lidar_clusters": 0,
+            "roi_candidates": 0,
             "radar_detections": 0,
             "tracked_objects": 0,
         }
@@ -37,6 +39,9 @@ class SimpleFusion(object):
             "z": float(transform.location.z),
             "yaw": math.radians(float(transform.rotation.yaw)),
         }
+
+    def set_candidate_validator(self, validator):
+        self.candidate_validator = validator
 
     def _to_world(self, x, y, z):
         if self.world_transform is None:
@@ -84,13 +89,21 @@ class SimpleFusion(object):
                 radar_speed = float(radar.get("velocity", 0.0))
 
             wx, wy, wz = self._to_world(item["x"], item["y"], item["z"])
+            extent = item.get("extent", [0.0, 0.0, 0.0])
+            if self.candidate_validator is not None:
+                try:
+                    if not self.candidate_validator(wx, wy, wz, extent):
+                        continue
+                except Exception:
+                    continue
+
             candidates.append({
                 "x": wx, "y": wy, "z": wz,
                 "radar_speed": radar_speed,
                 "confidence": confidence,
                 "sources": sources,
                 "point_count": item.get("point_count", 0),
-                "extent": item.get("extent", [0.0, 0.0, 0.0]),
+                "extent": extent,
             })
 
         tracked = self.tracker.update(candidates, now)
@@ -105,6 +118,7 @@ class SimpleFusion(object):
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
             "lidar_clusters": len(clusters),
+            "roi_candidates": len(candidates),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "tracked_objects": len(objects),
         }
