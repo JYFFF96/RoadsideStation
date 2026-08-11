@@ -32,6 +32,7 @@ class CarlaRoadsideStation(object):
         self.camera_transform = None
         self.lidar_transform = None
         self.radar_transform = None
+        self.world_map = None
 
     def _wait_for_world_ready(self, requested, timeout_sec):
         deadline = time.time() + float(timeout_sec)
@@ -42,6 +43,7 @@ class CarlaRoadsideStation(object):
                 name = self.world.get_map().name.split("/")[-1]
                 if not requested or name == requested:
                     self.map_name = name
+                    self.world_map = self.world.get_map()
                     return
             except RuntimeError as exc:
                 last_error = exc
@@ -64,10 +66,11 @@ class CarlaRoadsideStation(object):
             self._wait_for_world_ready(requested, timeout_sec)
         else:
             self.map_name = current_name
+            self.world_map = self.world.get_map()
 
     def _find_junction_transform(self):
         station_cfg = self.config["station"]
-        world_map = self.world.get_map()
+        world_map = self.world_map or self.world.get_map()
         waypoints = world_map.generate_waypoints(2.0)
         junction_waypoints = []
         seen = set()
@@ -110,6 +113,42 @@ class CarlaRoadsideStation(object):
             carla.Rotation(pitch=float(cfg.get("pitch", 0)),
                            yaw=float(cfg.get("yaw", 0)),
                            roll=float(cfg.get("roll", 0))))
+
+    def is_driving_roi(self, x, y, z, extent=None):
+        """Return True when a world-frame candidate is plausibly on a driving lane.
+
+        V0.2.1 uses CARLA's HD map only as an ROI mask. Object position still
+        comes from LiDAR/Radar; the map is not used as object ground truth.
+        """
+        if self.world_map is None:
+            return True
+
+        cfg = self.config.get("fusion", {})
+        margin = float(cfg.get("road_roi_margin", 2.5))
+        min_above = float(cfg.get("road_min_height", -0.8))
+        max_above = float(cfg.get("road_max_height", 3.5))
+
+        location = carla.Location(x=float(x), y=float(y), z=float(z))
+        waypoint = self.world_map.get_waypoint(
+            location,
+            project_to_road=True,
+            lane_type=carla.LaneType.Driving)
+        if waypoint is None:
+            return False
+
+        lane_loc = waypoint.transform.location
+        dx = float(x) - float(lane_loc.x)
+        dy = float(y) - float(lane_loc.y)
+        lateral_distance = math.hypot(dx, dy)
+        allowed = float(waypoint.lane_width) * 0.5 + margin
+        if lateral_distance > allowed:
+            return False
+
+        dz = float(z) - float(lane_loc.z)
+        if dz < min_above or dz > max_above:
+            return False
+
+        return True
 
     def start(self):
         carla_cfg = self.config["carla"]
