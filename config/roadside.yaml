@@ -1,0 +1,47 @@
+carla:
+  host: 127.0.0.1
+  port: 2000
+  timeout: 10.0
+  synchronous_mode: false
+
+station:
+  id: RSU_001
+  transform:
+    x: 0.0
+    y: 0.0
+    z: 8.0
+    pitch: -15.0
+    yaw: 0.0
+    roll: 0.0
+
+camera:
+  enabled: true
+  width: 1280
+  height: 720
+  fov: 90
+  transform: {x: 0.0, y: 0.0, z: 0.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
+
+lidar:
+  enabled: true
+  channels: 32
+  range: 80.0
+  points_per_second: 56000
+  rotation_frequency: 10.0
+  transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
+
+radar:
+  enabled: true
+  horizontal_fov: 60.0
+  vertical_fov: 20.0
+  range: 80.0
+  transform: {x: 0.0, y: 0.0, z: 0.2, pitch: 0.0, yaw: 0.0, roll: 0.0}
+
+fusion:
+  max_match_distance: 3.0
+
+mqtt:
+  enabled: false
+  host: 127.0.0.1
+  port: 1883
+  topic_object_list: roadside/RSU_001/object_list
+  topic_rsm: roadside/RSU_001/rsm
