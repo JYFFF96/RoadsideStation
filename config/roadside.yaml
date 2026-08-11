@@ -11,13 +11,7 @@ station:
   junction_index: 0
   height: 8.0
   lateral_offset: 5.0
-  transform:
-    x: 0.0
-    y: 0.0
-    z: 8.0
-    pitch: 0.0
-    yaw: 0.0
-    roll: 0.0
+  transform: {x: 0.0, y: 0.0, z: 8.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 camera:
   enabled: true
@@ -63,10 +57,12 @@ fusion:
   road_min_height: -0.8
   road_max_height: 3.5
   background_calibration_seconds: 6.0
-  background_cell_size: 1.5
-  background_occupancy_ratio: 0.60
-  background_moving_radar_speed: 0.8
-  background_neighbor_radius_cells: 1
+  background_cell_size: 1.0
+  background_occupancy_ratio: 0.45
+  background_moving_radar_speed: 1.2
+  background_neighbor_radius_cells: 2
+  static_confirm_seconds: 3.0
+  static_max_speed: 0.8
 
 mqtt:
   enabled: false
