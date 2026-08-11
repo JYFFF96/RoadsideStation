@@ -1,86 +1,39 @@
 from __future__ import print_function
-
-import math
-import time
-
+import math,time
 
 class NearestTracker(object):
-    """Nearest-neighbor tracker with V0.2.1 velocity stabilization."""
-
-    def __init__(self, max_distance=4.0, max_age=1.5,
-                 max_speed=20.0, velocity_alpha=0.35):
-        self.max_distance = float(max_distance)
-        self.max_age = float(max_age)
-        self.max_speed = float(max_speed)
-        self.velocity_alpha = float(velocity_alpha)
-        self._tracks = {}
-        self._next_id = 1
-
-    def _clamp_velocity(self, vx, vy):
-        speed = math.hypot(vx, vy)
-        if speed <= self.max_speed or speed < 1e-6:
-            return vx, vy
-        scale = self.max_speed / speed
-        return vx * scale, vy * scale
-
-    def update(self, detections, timestamp=None):
-        now = time.time() if timestamp is None else float(timestamp)
-        unmatched_tracks = set(self._tracks.keys())
-        results = []
-
-        for det in detections:
-            best_id = None
-            best_dist = self.max_distance
-            for track_id in list(unmatched_tracks):
-                track = self._tracks[track_id]
-                dt = max(1e-3, now - track["timestamp"])
-                pred_x = track["x"] + track["vx"] * dt
-                pred_y = track["y"] + track["vy"] * dt
-                dist = math.hypot(det["x"] - pred_x, det["y"] - pred_y)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_id = track_id
-
-            if best_id is None:
-                best_id = "vehicle_%03d" % self._next_id
-                self._next_id += 1
-                vx = float(det.get("vx", 0.0))
-                vy = float(det.get("vy", 0.0))
+    """Prediction-based nearest tracker with velocity and extent EMA smoothing."""
+    def __init__(self,max_distance=4.0,max_age=1.5,max_speed=20.0,velocity_alpha=.35,extent_alpha=.25):
+        self.max_distance=float(max_distance);self.max_age=float(max_age);self.max_speed=float(max_speed);self.velocity_alpha=float(velocity_alpha);self.extent_alpha=float(extent_alpha);self._tracks={};self._next_id=1
+    def _clamp_velocity(self,vx,vy):
+        s=math.hypot(vx,vy)
+        if s<=self.max_speed or s<1e-6:return vx,vy
+        k=self.max_speed/s;return vx*k,vy*k
+    def update(self,detections,timestamp=None):
+        now=time.time() if timestamp is None else float(timestamp);unmatched=set(self._tracks);results=[]
+        # Match closest detections first to reduce ID swaps in dense traffic.
+        pending=[]
+        for di,det in enumerate(detections):
+            for tid in unmatched:
+                t=self._tracks[tid];dt=max(1e-3,now-t["timestamp"]);px=t["x"]+t["vx"]*dt;py=t["y"]+t["vy"]*dt;d=math.hypot(det["x"]-px,det["y"]-py)
+                if d<self.max_distance:pending.append((d,di,tid))
+        pending.sort();assigned_det={};assigned_track=set()
+        for d,di,tid in pending:
+            if di not in assigned_det and tid not in assigned_track:assigned_det[di]=tid;assigned_track.add(tid)
+        for di,det in enumerate(detections):
+            tid=assigned_det.get(di);old=self._tracks.get(tid) if tid else None
+            if old is None:
+                tid="vehicle_%03d"%self._next_id;self._next_id+=1;vx=float(det.get("vx",0));vy=float(det.get("vy",0));extent=list(det.get("extent",[0,0,0]))
             else:
-                old = self._tracks[best_id]
-                dt = max(1e-3, now - old["timestamp"])
-                raw_vx = (float(det["x"]) - old["x"]) / dt
-                raw_vy = (float(det["y"]) - old["y"]) / dt
-                raw_vx, raw_vy = self._clamp_velocity(raw_vx, raw_vy)
-
-                radar_speed = det.get("radar_speed")
-                if radar_speed is not None:
-                    speed_xy = math.hypot(raw_vx, raw_vy)
-                    radar_abs = min(abs(float(radar_speed)), self.max_speed)
-                    if speed_xy > 0.2:
-                        scale = radar_abs / speed_xy
-                        raw_vx *= scale
-                        raw_vy *= scale
-
-                alpha = self.velocity_alpha
-                vx = (1.0 - alpha) * old["vx"] + alpha * raw_vx
-                vy = (1.0 - alpha) * old["vy"] + alpha * raw_vy
-                vx, vy = self._clamp_velocity(vx, vy)
-                unmatched_tracks.discard(best_id)
-
-            self._tracks[best_id] = {
-                "x": float(det["x"]), "y": float(det["y"]),
-                "vx": vx, "vy": vy, "timestamp": now,
-            }
-            item = dict(det)
-            item["id"] = best_id
-            item["vx"] = vx
-            item["vy"] = vy
-            results.append(item)
-
-        stale = [track_id for track_id, track in self._tracks.items()
-                 if now - track["timestamp"] > self.max_age]
-        for track_id in stale:
-            del self._tracks[track_id]
-
+                dt=max(1e-3,now-old["timestamp"]);rvx=(float(det["x"])-old["x"])/dt;rvy=(float(det["y"])-old["y"])/dt;rvx,rvy=self._clamp_velocity(rvx,rvy)
+                rs=det.get("radar_speed")
+                if rs is not None:
+                    ss=math.hypot(rvx,rvy);ra=min(abs(float(rs)),self.max_speed)
+                    if ss>.2:rvx*=ra/ss;rvy*=ra/ss
+                a=self.velocity_alpha;vx=(1-a)*old["vx"]+a*rvx;vy=(1-a)*old["vy"]+a*rvy;vx,vy=self._clamp_velocity(vx,vy)
+                cur=list(det.get("extent",old.get("extent",[0,0,0])));prev=old.get("extent",cur);ea=self.extent_alpha;extent=[(1-ea)*prev[k]+ea*cur[k] for k in range(3)]
+            self._tracks[tid]={"x":float(det["x"]),"y":float(det["y"]),"z":float(det.get("z",0)),"vx":vx,"vy":vy,"extent":extent,"timestamp":now}
+            item=dict(det);item.update({"id":tid,"vx":vx,"vy":vy,"extent":extent});results.append(item)
+        stale=[tid for tid,t in self._tracks.items() if now-t["timestamp"]>self.max_age]
+        for tid in stale:del self._tracks[tid]
         return results
