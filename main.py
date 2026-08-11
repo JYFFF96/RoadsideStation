@@ -31,6 +31,7 @@ def main():
     if station.lidar_transform is not None:
         print("Object coordinates: CARLA world frame (LiDAR transformed to world)")
     print("Road ROI filter: enabled (CARLA driving-lane map used only as ROI)")
+    print("Static background calibration: keep the scene empty until calibration is READY")
 
     last_debug = 0.0
     try:
@@ -47,15 +48,20 @@ def main():
             if now - last_debug >= 1.0:
                 stats = fusion.last_stats
                 camera_frame = camera[0] if camera else "-"
-                print("[RSU %s | %s] Camera:%s  LiDAR:%d pts/%d clusters -> ROI:%d  Radar:%d  Tracks:%d" % (
+                bg_state = ("READY/%d cells" % stats["background_cells"]
+                            if stats["background_ready"] else
+                            "LEARNING %.1fs" % stats["background_remaining"])
+                print("[RSU %s | %s] Camera:%s  LiDAR:%d pts/%d clusters -> ROI:%d -> BG:%d  Radar:%d  Tracks:%d  BG:%s" % (
                     station_id,
                     station.map_name,
                     camera_frame,
                     stats["lidar_points"],
                     stats["lidar_clusters"],
                     stats["roi_candidates"],
+                    stats["background_candidates"],
                     stats["radar_detections"],
-                    stats["tracked_objects"]))
+                    stats["tracked_objects"],
+                    bg_state))
                 for obj in object_list.objects[:10]:
                     print("  %-12s Xw=%8.2f Yw=%8.2f Zw=%6.2f vx=%6.2f vy=%6.2f conf=%.2f src=%s" % (
                         obj.object_id, obj.x, obj.y, obj.z, obj.vx, obj.vy,
