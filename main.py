@@ -25,10 +25,12 @@ def main():
     print("RoadsideStation V0.2.1 starting...")
     station.start()
     fusion.set_world_transform(station.lidar_transform)
+    fusion.set_candidate_validator(station.is_driving_roi)
     publisher.connect()
     print("CARLA roadside sensors started: %d" % len(station.sensors))
     if station.lidar_transform is not None:
         print("Object coordinates: CARLA world frame (LiDAR transformed to world)")
+    print("Road ROI filter: enabled (CARLA driving-lane map used only as ROI)")
 
     last_debug = 0.0
     try:
@@ -45,12 +47,13 @@ def main():
             if now - last_debug >= 1.0:
                 stats = fusion.last_stats
                 camera_frame = camera[0] if camera else "-"
-                print("[RSU %s | %s] Camera:%s  LiDAR:%d pts/%d clusters  Radar:%d  Tracks:%d" % (
+                print("[RSU %s | %s] Camera:%s  LiDAR:%d pts/%d clusters -> ROI:%d  Radar:%d  Tracks:%d" % (
                     station_id,
                     station.map_name,
                     camera_frame,
                     stats["lidar_points"],
                     stats["lidar_clusters"],
+                    stats["roi_candidates"],
                     stats["radar_detections"],
                     stats["tracked_objects"]))
                 for obj in object_list.objects[:10]:
