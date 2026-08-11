@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+import signal
+import sys
 import time
 
 import yaml
@@ -10,12 +12,26 @@ from roadside.messages import encode_object_list, encode_rsm
 from roadside.mqtt_pub import MqttPublisher
 
 
+_STOP_REQUESTED = False
+
+
+def _request_stop(signum, frame):
+    global _STOP_REQUESTED
+    if not _STOP_REQUESTED:
+        print("\nStop requested (signal %s). Shutting down RoadsideStation..." % signum)
+    _STOP_REQUESTED = True
+
+
 def load_config(path="config/roadside.yaml"):
     with open(path, "r") as fp:
         return yaml.safe_load(fp)
 
 
 def main():
+    global _STOP_REQUESTED
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+
     config = load_config()
     station_id = config["station"]["id"]
     station = CarlaRoadsideStation(config)
@@ -32,10 +48,11 @@ def main():
         print("Object coordinates: CARLA world frame (LiDAR transformed to world)")
     print("Road ROI filter: enabled (CARLA driving-lane map used only as ROI)")
     print("Static background calibration: keep the scene empty until calibration is READY")
+    print("Press Ctrl+C once to stop RoadsideStation cleanly.")
 
     last_debug = 0.0
     try:
-        while True:
+        while not _STOP_REQUESTED:
             camera, lidar, radar = station.cache.snapshot()
             lidar_points = lidar[1] if lidar else None
             radar_detections = radar[1] if radar else None
@@ -73,13 +90,23 @@ def main():
             mqtt_cfg = config["mqtt"]
             publisher.publish(mqtt_cfg["topic_object_list"], object_json)
             publisher.publish(mqtt_cfg["topic_rsm"], rsm_json)
-            time.sleep(0.1)
+            time.sleep(0.05)
     except KeyboardInterrupt:
-        print("Stopping RoadsideStation...")
+        _STOP_REQUESTED = True
     finally:
-        publisher.close()
-        station.stop()
+        print("Stopping RoadsideStation sensors and MQTT...")
+        try:
+            publisher.close()
+        except Exception as exc:
+            print("MQTT shutdown warning: %s" % exc)
+        try:
+            station.stop()
+        except Exception as exc:
+            print("Sensor shutdown warning: %s" % exc)
+        print("RoadsideStation stopped cleanly.")
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
