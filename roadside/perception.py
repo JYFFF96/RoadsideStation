@@ -1,126 +1,63 @@
 from __future__ import print_function
-
 from collections import defaultdict, deque
-
+import math
 import numpy as np
 
+def _bounds(c):
+    e=c.get("extent",[0,0,0]); return (c["x"]-e[0]/2,c["x"]+e[0]/2,c["y"]-e[1]/2,c["y"]+e[1]/2,c["z"]-e[2]/2,c["z"]+e[2]/2)
 
-def voxel_cluster_lidar(points, voxel_size=0.8, min_points=6,
-                         min_z=-7.5, max_z=2.0, max_range=70.0,
-                         min_length=0.6, max_length=8.0,
-                         min_width=0.4, max_width=4.0,
-                         min_height=0.25, max_height=4.0,
-                         max_objects=80):
-    """NumPy-only LiDAR clustering with V0.2.1 geometry rejection.
+def _gap(a,b):
+    A=_bounds(a);B=_bounds(b)
+    gx=max(0.0,max(A[0],B[0])-min(A[1],B[1])); gy=max(0.0,max(A[2],B[2])-min(A[3],B[3])); gz=max(0.0,max(A[4],B[4])-min(A[5],B[5]))
+    return math.sqrt(gx*gx+gy*gy+gz*gz)
 
-    The result remains deliberately lightweight for Python 3.7, but now rejects
-    many poles, walls, curbs and giant connected structures before tracking.
-    Extents are axis-aligned in the LiDAR frame, so the limits are intentionally
-    generous enough for rotated vehicles.
-    """
-    if points is None or len(points) == 0:
-        return []
+def merge_lidar_clusters(clusters,max_gap=1.8,max_merged_length=14.0,max_merged_width=4.5,max_merged_height=4.5):
+    """Merge nearby fragments while preventing adjacent lane vehicles from becoming one object."""
+    items=[dict(c) for c in clusters]; changed=True
+    while changed:
+        changed=False
+        for i in range(len(items)):
+            for j in range(i+1,len(items)):
+                if _gap(items[i],items[j])>float(max_gap): continue
+                A=_bounds(items[i]);B=_bounds(items[j]); xmin=min(A[0],B[0]);xmax=max(A[1],B[1]);ymin=min(A[2],B[2]);ymax=max(A[3],B[3]);zmin=min(A[4],B[4]);zmax=max(A[5],B[5])
+                ex=xmax-xmin;ey=ymax-ymin;ez=zmax-zmin
+                if max(ex,ey)>float(max_merged_length) or min(ex,ey)>float(max_merged_width) or ez>float(max_merged_height): continue
+                na=max(1,items[i].get("point_count",1));nb=max(1,items[j].get("point_count",1));n=na+nb
+                items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez]}
+                del items[j];changed=True;break
+            if changed: break
+    items.sort(key=lambda x:x.get("point_count",0),reverse=True);return items
 
-    pts = np.asarray(points, dtype=np.float32)
-    r2 = pts[:, 0] * pts[:, 0] + pts[:, 1] * pts[:, 1]
-    mask = ((pts[:, 2] >= float(min_z)) &
-            (pts[:, 2] <= float(max_z)) &
-            (r2 <= float(max_range) * float(max_range)))
-    pts = pts[mask]
-    if len(pts) == 0:
-        return []
-
-    size = float(voxel_size)
-    keys = np.floor(pts / size).astype(np.int32)
-    buckets = defaultdict(list)
-    for i, key in enumerate(keys):
-        buckets[(int(key[0]), int(key[1]), int(key[2]))].append(i)
-
-    occupied = set(buckets.keys())
-    visited = set()
-    clusters = []
-    neighbor_offsets = [(dx, dy, dz)
-                        for dx in (-1, 0, 1)
-                        for dy in (-1, 0, 1)
-                        for dz in (-1, 0, 1)]
-
+def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,max_range=70.0,min_length=.6,max_length=8.0,min_width=.4,max_width=4.0,min_height=.25,max_height=4.0,max_objects=80):
+    if points is None or len(points)==0:return []
+    pts=np.asarray(points,dtype=np.float32);r2=pts[:,0]*pts[:,0]+pts[:,1]*pts[:,1];mask=(pts[:,2]>=min_z)&(pts[:,2]<=max_z)&(r2<=max_range*max_range);pts=pts[mask]
+    if len(pts)==0:return []
+    size=float(voxel_size);keys=np.floor(pts/size).astype(np.int32);buckets=defaultdict(list)
+    for i,k in enumerate(keys):buckets[(int(k[0]),int(k[1]),int(k[2]))].append(i)
+    occupied=set(buckets);visited=set();clusters=[];offs=[(a,b,c) for a in (-1,0,1) for b in (-1,0,1) for c in (-1,0,1)]
     for start in occupied:
-        if start in visited:
-            continue
-        visited.add(start)
-        queue = deque([start])
-        indices = []
-        while queue:
-            cell = queue.popleft()
-            indices.extend(buckets[cell])
-            cx, cy, cz = cell
-            for dx, dy, dz in neighbor_offsets:
-                nxt = (cx + dx, cy + dy, cz + dz)
-                if nxt in occupied and nxt not in visited:
-                    visited.add(nxt)
-                    queue.append(nxt)
+        if start in visited:continue
+        visited.add(start);q=deque([start]);idx=[]
+        while q:
+            cell=q.popleft();idx.extend(buckets[cell]);cx,cy,cz=cell
+            for dx,dy,dz in offs:
+                n=(cx+dx,cy+dy,cz+dz)
+                if n in occupied and n not in visited:visited.add(n);q.append(n)
+        if len(idx)<int(min_points):continue
+        cp=pts[idx];cen=cp.mean(axis=0);pmin=cp.min(axis=0);pmax=cp.max(axis=0);e=pmax-pmin;ex,ey,ez=map(float,e);hl=max(ex,ey);hs=min(ex,ey)
+        if hl<min_length or hl>max_length or hs<min_width or hs>max_width or ez<min_height or ez>max_height:continue
+        clusters.append({"x":float(cen[0]),"y":float(cen[1]),"z":float(cen[2]),"point_count":len(idx),"extent":[ex,ey,ez]})
+    clusters.sort(key=lambda x:x["point_count"],reverse=True);return clusters[:int(max_objects)]
 
-        if len(indices) < int(min_points):
-            continue
-
-        cpts = pts[indices]
-        centroid = cpts.mean(axis=0)
-        pmin = cpts.min(axis=0)
-        pmax = cpts.max(axis=0)
-        extent = pmax - pmin
-        ex = float(extent[0])
-        ey = float(extent[1])
-        ez = float(extent[2])
-
-        horizontal_long = max(ex, ey)
-        horizontal_short = min(ex, ey)
-        if horizontal_long < float(min_length) or horizontal_long > float(max_length):
-            continue
-        if horizontal_short < float(min_width) or horizontal_short > float(max_width):
-            continue
-        if ez < float(min_height) or ez > float(max_height):
-            continue
-
-        clusters.append({
-            "x": float(centroid[0]),
-            "y": float(centroid[1]),
-            "z": float(centroid[2]),
-            "point_count": int(len(indices)),
-            "extent": [ex, ey, ez],
-        })
-
-    # Larger clusters are usually more reliable than small isolated clutter.
-    clusters.sort(key=lambda item: item["point_count"], reverse=True)
-    return clusters[:int(max_objects)]
-
-
-def associate_radar(clusters, radar_detections, max_distance=3.0):
-    """Attach the closest unused radar return to each LiDAR cluster."""
-    if not clusters:
-        return []
-    radar = radar_detections or []
-    max_d2 = float(max_distance) ** 2
-    used = set()
-    output = []
-
-    for cluster in clusters:
-        best = None
-        best_index = None
-        best_d2 = max_d2
-        for index, det in enumerate(radar):
-            if index in used:
-                continue
-            dx = float(det["x"]) - cluster["x"]
-            dy = float(det["y"]) - cluster["y"]
-            dz = float(det["z"]) - cluster["z"]
-            d2 = dx * dx + dy * dy + dz * dz
-            if d2 < best_d2:
-                best_d2 = d2
-                best = det
-                best_index = index
-        if best_index is not None:
-            used.add(best_index)
-        item = dict(cluster)
-        item["radar"] = best
-        output.append(item)
-    return output
+def associate_radar(clusters,radar_detections,max_distance=3.0):
+    if not clusters:return []
+    radar=radar_detections or [];used=set();out=[];md2=float(max_distance)**2
+    for c in clusters:
+        best=None;bi=None;bd=md2
+        for i,d in enumerate(radar):
+            if i in used:continue
+            dd=(float(d["x"])-c["x"])**2+(float(d["y"])-c["y"])**2+(float(d["z"])-c["z"])**2
+            if dd<bd:bd=dd;best=d;bi=i
+        if bi is not None:used.add(bi)
+        item=dict(c);item["radar"]=best;out.append(item)
+    return out
