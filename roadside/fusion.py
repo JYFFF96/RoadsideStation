@@ -13,11 +13,13 @@ class StaticBackgroundFilter(object):
     """Learn persistent roadside clusters during a short empty-scene warmup."""
 
     def __init__(self, calibration_seconds=6.0, cell_size=1.5,
-                 occupancy_ratio=0.60, moving_radar_speed=0.8):
+                 occupancy_ratio=0.60, moving_radar_speed=0.8,
+                 neighbor_radius_cells=1):
         self.calibration_seconds = float(calibration_seconds)
         self.cell_size = float(cell_size)
         self.occupancy_ratio = float(occupancy_ratio)
         self.moving_radar_speed = float(moving_radar_speed)
+        self.neighbor_radius_cells = int(neighbor_radius_cells)
         self.started_at = None
         self.frames = 0
         self.counts = defaultdict(int)
@@ -28,6 +30,15 @@ class StaticBackgroundFilter(object):
         s = self.cell_size
         return (int(math.floor(float(x) / s)),
                 int(math.floor(float(y) / s)))
+
+    def _is_near_static_cell(self, key):
+        radius = max(0, self.neighbor_radius_cells)
+        kx, ky = key
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if (kx + dx, ky + dy) in self.static_cells:
+                    return True
+        return False
 
     def update_and_filter(self, candidates, now):
         if self.started_at is None:
@@ -47,7 +58,8 @@ class StaticBackgroundFilter(object):
                     key for key, count in self.counts.items()
                     if count >= threshold)
                 self.ready = True
-            # Do not publish detections while the empty-scene background is learning.
+            # Never publish detections during the empty-scene calibration frame,
+            # including the frame in which READY first becomes true.
             return []
 
         output = []
@@ -56,7 +68,10 @@ class StaticBackgroundFilter(object):
             radar_speed = item.get("radar_speed")
             moving = (radar_speed is not None and
                       abs(float(radar_speed)) >= self.moving_radar_speed)
-            if key in self.static_cells and not moving:
+            # LiDAR centroids jitter by a few tenths of a metre frame-to-frame.
+            # Check neighboring background cells so a static object sitting near
+            # a cell boundary does not repeatedly leak into ObjectList.
+            if self._is_near_static_cell(key) and not moving:
                 continue
             output.append(item)
         return output
@@ -84,7 +99,8 @@ class SimpleFusion(object):
             calibration_seconds=config.get("background_calibration_seconds", 6.0),
             cell_size=config.get("background_cell_size", 1.5),
             occupancy_ratio=config.get("background_occupancy_ratio", 0.60),
-            moving_radar_speed=config.get("background_moving_radar_speed", 0.8))
+            moving_radar_speed=config.get("background_moving_radar_speed", 0.8),
+            neighbor_radius_cells=config.get("background_neighbor_radius_cells", 1))
         self.world_transform = None
         self.candidate_validator = None
         self.last_stats = {
