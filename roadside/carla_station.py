@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import math
+import time
 
 import carla
 
@@ -29,14 +30,37 @@ class CarlaRoadsideStation(object):
         self.base_transform = None
         self.map_name = None
 
+    def _wait_for_world_ready(self, requested, timeout_sec):
+        deadline = time.time() + float(timeout_sec)
+        last_error = None
+        while time.time() < deadline:
+            try:
+                self.world = self.client.get_world()
+                name = self.world.get_map().name.split("/")[-1]
+                if not requested or name == requested:
+                    self.map_name = name
+                    return
+            except RuntimeError as exc:
+                last_error = exc
+            time.sleep(1.0)
+        if last_error is not None:
+            raise RuntimeError("CARLA map load timeout after %.0fs: %s" % (timeout_sec, last_error))
+        raise RuntimeError("CARLA map load timeout after %.0fs" % timeout_sec)
+
     def _ensure_map(self):
-        requested = self.config["carla"].get("map")
+        carla_cfg = self.config["carla"]
+        requested = carla_cfg.get("map")
+        timeout_sec = float(carla_cfg.get("timeout", 60.0))
+
         self.world = self.client.get_world()
         current_name = self.world.get_map().name.split("/")[-1]
         if requested and current_name != requested:
             print("Loading CARLA map: %s" % requested)
-            self.world = self.client.load_world(requested)
-        self.map_name = self.world.get_map().name.split("/")[-1]
+            self.client.load_world(requested)
+            print("Waiting for CARLA world to become ready...")
+            self._wait_for_world_ready(requested, timeout_sec)
+        else:
+            self.map_name = current_name
 
     def _find_junction_transform(self):
         station_cfg = self.config["station"]
@@ -64,7 +88,6 @@ class CarlaRoadsideStation(object):
         height = float(station_cfg.get("height", 8.0))
         yaw_rad = math.radians(yaw)
 
-        # Shift from lane center toward the roadside using the lane normal.
         x = float(location.x) - math.sin(yaw_rad) * lateral
         y = float(location.y) + math.cos(yaw_rad) * lateral
         z = float(location.z) + height
@@ -89,7 +112,7 @@ class CarlaRoadsideStation(object):
         carla_cfg = self.config["carla"]
         self.client = carla.Client(carla_cfg.get("host", "127.0.0.1"),
                                    int(carla_cfg.get("port", 2000)))
-        self.client.set_timeout(float(carla_cfg.get("timeout", 10.0)))
+        self.client.set_timeout(float(carla_cfg.get("timeout", 60.0)))
         self._ensure_map()
         blueprints = self.world.get_blueprint_library()
         self.base_transform = self._resolve_base_transform()
