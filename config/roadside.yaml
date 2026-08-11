@@ -59,6 +59,9 @@ fusion:
   track_max_age: 1.5
   track_max_speed: 20.0
   velocity_alpha: 0.35
+  road_roi_margin: 2.5
+  road_min_height: -0.8
+  road_max_height: 3.5
 
 mqtt:
   enabled: false
