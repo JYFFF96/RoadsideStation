@@ -22,10 +22,13 @@ def main():
     fusion = SimpleFusion(station_id, config["fusion"])
     publisher = MqttPublisher(config["mqtt"])
 
-    print("RoadsideStation V0.2 starting...")
+    print("RoadsideStation V0.2.1 starting...")
     station.start()
+    fusion.set_world_transform(station.lidar_transform)
     publisher.connect()
     print("CARLA roadside sensors started: %d" % len(station.sensors))
+    if station.lidar_transform is not None:
+        print("Object coordinates: CARLA world frame (LiDAR transformed to world)")
 
     last_debug = 0.0
     try:
@@ -51,7 +54,7 @@ def main():
                     stats["radar_detections"],
                     stats["tracked_objects"]))
                 for obj in object_list.objects[:10]:
-                    print("  %-12s x=%7.2f y=%7.2f z=%6.2f vx=%6.2f vy=%6.2f conf=%.2f src=%s" % (
+                    print("  %-12s Xw=%8.2f Yw=%8.2f Zw=%6.2f vx=%6.2f vy=%6.2f conf=%.2f src=%s" % (
                         obj.object_id, obj.x, obj.y, obj.z, obj.vx, obj.vy,
                         obj.confidence, "+".join(obj.sources)))
                 if len(object_list.objects) > 10:
