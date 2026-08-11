@@ -1,7 +1,6 @@
 from __future__ import print_function
 
 import math
-import time
 
 import carla
 
@@ -34,39 +33,14 @@ class CarlaRoadsideStation(object):
         self.radar_transform = None
         self.world_map = None
 
-    def _wait_for_world_ready(self, requested, timeout_sec):
-        deadline = time.time() + float(timeout_sec)
-        last_error = None
-        while time.time() < deadline:
-            try:
-                self.world = self.client.get_world()
-                name = self.world.get_map().name.split("/")[-1]
-                if not requested or name == requested:
-                    self.map_name = name
-                    self.world_map = self.world.get_map()
-                    return
-            except RuntimeError as exc:
-                last_error = exc
-            time.sleep(1.0)
-        if last_error is not None:
-            raise RuntimeError("CARLA map load timeout after %.0fs: %s" % (timeout_sec, last_error))
-        raise RuntimeError("CARLA map load timeout after %.0fs" % timeout_sec)
-
-    def _ensure_map(self):
-        carla_cfg = self.config["carla"]
-        requested = carla_cfg.get("map")
-        timeout_sec = float(carla_cfg.get("timeout", 60.0))
-
+    def _attach_current_world(self):
         self.world = self.client.get_world()
-        current_name = self.world.get_map().name.split("/")[-1]
-        if requested and current_name != requested:
-            print("Loading CARLA map: %s" % requested)
-            self.client.load_world(requested)
-            print("Waiting for CARLA world to become ready...")
-            self._wait_for_world_ready(requested, timeout_sec)
-        else:
-            self.map_name = current_name
-            self.world_map = self.world.get_map()
+        self.world_map = self.world.get_map()
+        self.map_name = self.world_map.name.split("/")[-1]
+        requested = self.config.get("carla", {}).get("map")
+        if requested and requested != self.map_name:
+            print("WARNING: CARLA is running map %s, config prefers %s." % (self.map_name, requested))
+            print("RoadsideStation will NOT call load_world(); start CARLA with the desired map instead.")
 
     def _find_junction_transform(self):
         station_cfg = self.config["station"]
@@ -82,10 +56,8 @@ class CarlaRoadsideStation(object):
                 continue
             seen.add(junction.id)
             junction_waypoints.append(waypoint)
-
         if not junction_waypoints:
             raise RuntimeError("No junction found in map %s" % self.map_name)
-
         index = int(station_cfg.get("junction_index", 0)) % len(junction_waypoints)
         waypoint = junction_waypoints[index]
         location = waypoint.transform.location
@@ -93,13 +65,11 @@ class CarlaRoadsideStation(object):
         lateral = float(station_cfg.get("lateral_offset", 5.0))
         height = float(station_cfg.get("height", 8.0))
         yaw_rad = math.radians(yaw)
-
         x = float(location.x) - math.sin(yaw_rad) * lateral
         y = float(location.y) + math.cos(yaw_rad) * lateral
         z = float(location.z) + height
-        return carla.Transform(
-            carla.Location(x=x, y=y, z=z),
-            carla.Rotation(pitch=0.0, yaw=yaw, roll=0.0))
+        return carla.Transform(carla.Location(x=x, y=y, z=z),
+                               carla.Rotation(pitch=0.0, yaw=yaw, roll=0.0))
 
     def _resolve_base_transform(self):
         station_cfg = self.config["station"]
@@ -107,64 +77,38 @@ class CarlaRoadsideStation(object):
             return self._find_junction_transform()
         cfg = station_cfg["transform"]
         return carla.Transform(
-            carla.Location(x=float(cfg.get("x", 0)),
-                           y=float(cfg.get("y", 0)),
-                           z=float(cfg.get("z", 8))),
-            carla.Rotation(pitch=float(cfg.get("pitch", 0)),
-                           yaw=float(cfg.get("yaw", 0)),
-                           roll=float(cfg.get("roll", 0))))
+            carla.Location(x=float(cfg.get("x", 0)), y=float(cfg.get("y", 0)), z=float(cfg.get("z", 8))),
+            carla.Rotation(pitch=float(cfg.get("pitch", 0)), yaw=float(cfg.get("yaw", 0)), roll=float(cfg.get("roll", 0))))
 
     def is_driving_roi(self, x, y, z, extent=None):
-        """Return True when a world-frame candidate is plausibly on a driving lane.
-
-        V0.2.1 uses CARLA's HD map only as an ROI mask. Object position still
-        comes from LiDAR/Radar; the map is not used as object ground truth.
-        """
         if self.world_map is None:
             return True
-
         cfg = self.config.get("fusion", {})
         margin = float(cfg.get("road_roi_margin", 2.5))
         min_above = float(cfg.get("road_min_height", -0.8))
         max_above = float(cfg.get("road_max_height", 3.5))
-
         location = carla.Location(x=float(x), y=float(y), z=float(z))
-        waypoint = self.world_map.get_waypoint(
-            location,
-            project_to_road=True,
-            lane_type=carla.LaneType.Driving)
+        waypoint = self.world_map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
         if waypoint is None:
             return False
-
         lane_loc = waypoint.transform.location
-        dx = float(x) - float(lane_loc.x)
-        dy = float(y) - float(lane_loc.y)
-        lateral_distance = math.hypot(dx, dy)
+        lateral_distance = math.hypot(float(x) - float(lane_loc.x), float(y) - float(lane_loc.y))
         allowed = float(waypoint.lane_width) * 0.5 + margin
         if lateral_distance > allowed:
             return False
-
         dz = float(z) - float(lane_loc.z)
-        if dz < min_above or dz > max_above:
-            return False
-
-        return True
+        return min_above <= dz <= max_above
 
     def start(self):
         carla_cfg = self.config["carla"]
-        self.client = carla.Client(carla_cfg.get("host", "127.0.0.1"),
-                                   int(carla_cfg.get("port", 2000)))
+        self.client = carla.Client(carla_cfg.get("host", "127.0.0.1"), int(carla_cfg.get("port", 2000)))
         self.client.set_timeout(float(carla_cfg.get("timeout", 60.0)))
-        self._ensure_map()
+        self._attach_current_world()
         blueprints = self.world.get_blueprint_library()
         self.base_transform = self._resolve_base_transform()
-
         print("RSU deployment: map=%s x=%.2f y=%.2f z=%.2f yaw=%.1f" % (
-            self.map_name,
-            self.base_transform.location.x,
-            self.base_transform.location.y,
-            self.base_transform.location.z,
-            self.base_transform.rotation.yaw))
+            self.map_name, self.base_transform.location.x, self.base_transform.location.y,
+            self.base_transform.location.z, self.base_transform.rotation.yaw))
 
         if self.config["camera"].get("enabled", True):
             cfg = self.config["camera"]
