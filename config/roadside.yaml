@@ -4,7 +4,6 @@ carla:
   timeout: 60.0
   map: Town10HD_Opt
   synchronous_mode: false
-
 station:
   id: RSU_001
   deployment: auto_junction
@@ -12,14 +11,12 @@ station:
   height: 8.0
   lateral_offset: 5.0
   transform: {x: 0.0, y: 0.0, z: 8.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
-
 camera:
   enabled: true
   width: 1280
   height: 720
   fov: 90
   transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
-
 lidar:
   enabled: true
   channels: 32
@@ -27,14 +24,12 @@ lidar:
   points_per_second: 120000
   rotation_frequency: 10.0
   transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
-
 radar:
   enabled: true
   horizontal_fov: 80.0
   vertical_fov: 25.0
   range: 80.0
   transform: {x: 0.0, y: 0.0, z: 0.2, pitch: -5.0, yaw: 0.0, roll: 0.0}
-
 fusion:
   voxel_size: 0.8
   cluster_min_points: 6
@@ -48,11 +43,17 @@ fusion:
   vehicle_min_height: 0.25
   vehicle_max_height: 4.0
   max_objects: 80
+  cluster_merge_enabled: true
+  cluster_merge_gap: 1.8
+  merged_vehicle_max_length: 14.0
+  merged_vehicle_max_width: 4.5
+  merged_vehicle_max_height: 4.5
   radar_match_distance: 3.0
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
   velocity_alpha: 0.35
+  extent_alpha: 0.25
   road_roi_margin: 2.5
   road_min_height: -0.8
   road_max_height: 3.5
@@ -63,7 +64,6 @@ fusion:
   background_neighbor_radius_cells: 2
   static_confirm_seconds: 3.0
   static_max_speed: 0.8
-
 mqtt:
   enabled: false
   host: 127.0.0.1
