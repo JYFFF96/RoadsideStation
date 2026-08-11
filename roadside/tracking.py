@@ -5,13 +5,23 @@ import time
 
 
 class NearestTracker(object):
-    """Small nearest-neighbor tracker for stable V0.2 object IDs."""
+    """Nearest-neighbor tracker with V0.2.1 velocity stabilization."""
 
-    def __init__(self, max_distance=4.0, max_age=1.5):
+    def __init__(self, max_distance=4.0, max_age=1.5,
+                 max_speed=20.0, velocity_alpha=0.35):
         self.max_distance = float(max_distance)
         self.max_age = float(max_age)
+        self.max_speed = float(max_speed)
+        self.velocity_alpha = float(velocity_alpha)
         self._tracks = {}
         self._next_id = 1
+
+    def _clamp_velocity(self, vx, vy):
+        speed = math.hypot(vx, vy)
+        if speed <= self.max_speed or speed < 1e-6:
+            return vx, vy
+        scale = self.max_speed / speed
+        return vx * scale, vy * scale
 
     def update(self, detections, timestamp=None):
         now = time.time() if timestamp is None else float(timestamp)
@@ -39,17 +49,23 @@ class NearestTracker(object):
             else:
                 old = self._tracks[best_id]
                 dt = max(1e-3, now - old["timestamp"])
-                vx = (float(det["x"]) - old["x"]) / dt
-                vy = (float(det["y"]) - old["y"]) / dt
-                # Prefer radar radial speed when available, but preserve
-                # position-derived direction for the V0.2 tracker.
+                raw_vx = (float(det["x"]) - old["x"]) / dt
+                raw_vy = (float(det["y"]) - old["y"]) / dt
+                raw_vx, raw_vy = self._clamp_velocity(raw_vx, raw_vy)
+
                 radar_speed = det.get("radar_speed")
                 if radar_speed is not None:
-                    speed_xy = math.hypot(vx, vy)
+                    speed_xy = math.hypot(raw_vx, raw_vy)
+                    radar_abs = min(abs(float(radar_speed)), self.max_speed)
                     if speed_xy > 0.2:
-                        scale = abs(float(radar_speed)) / speed_xy
-                        vx *= scale
-                        vy *= scale
+                        scale = radar_abs / speed_xy
+                        raw_vx *= scale
+                        raw_vy *= scale
+
+                alpha = self.velocity_alpha
+                vx = (1.0 - alpha) * old["vx"] + alpha * raw_vx
+                vy = (1.0 - alpha) * old["vy"] + alpha * raw_vy
+                vx, vy = self._clamp_velocity(vx, vy)
                 unmatched_tracks.discard(best_id)
 
             self._tracks[best_id] = {
