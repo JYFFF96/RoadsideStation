@@ -44,16 +44,21 @@ fusion:
   vehicle_max_height: 4.0
   max_objects: 80
   cluster_merge_enabled: true
-  cluster_merge_gap: 1.8
+  cluster_merge_gap: 1.4
   merged_vehicle_max_length: 14.0
-  merged_vehicle_max_width: 4.5
-  merged_vehicle_max_height: 4.5
+  merged_vehicle_max_width: 4.2
+  merged_vehicle_max_height: 4.2
+  pole_short_max: 0.75
+  pole_long_max: 2.5
+  pole_height_min: 1.5
   radar_match_distance: 3.0
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
   velocity_alpha: 0.35
   extent_alpha: 0.25
+  extent_shrink_alpha: 0.05
+  extent_lock_hits: 5
   road_roi_margin: 2.5
   road_min_height: -0.8
   road_max_height: 3.5
