@@ -7,6 +7,24 @@ import time
 import carla
 
 
+def _get_traffic_manager(client, preferred_port):
+    ports = [preferred_port]
+    for port in range(8000, 8011):
+        if port not in ports:
+            ports.append(port)
+
+    last_error = None
+    for port in ports:
+        try:
+            tm = client.get_trafficmanager(port)
+            return tm, port
+        except RuntimeError as exc:
+            last_error = exc
+            print("Traffic Manager port %d unavailable: %s" % (port, exc))
+
+    raise RuntimeError("No free Traffic Manager port found in 8000-8010: %s" % last_error)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Spawn CARLA traffic for RoadsideStation testing")
     parser.add_argument("--host", default="127.0.0.1")
@@ -17,10 +35,12 @@ def main():
     args = parser.parse_args()
 
     client = carla.Client(args.host, args.port)
-    client.set_timeout(10.0)
+    client.set_timeout(30.0)
     world = client.get_world()
-    tm = client.get_trafficmanager(args.tm_port)
+
+    tm, tm_port = _get_traffic_manager(client, args.tm_port)
     tm.set_global_distance_to_leading_vehicle(2.5)
+    print("Traffic Manager connected on port %d" % tm_port)
 
     blueprints = [bp for bp in world.get_blueprint_library().filter("vehicle.*")
                   if bp.has_attribute("number_of_wheels")]
@@ -37,7 +57,7 @@ def main():
                 bp.set_attribute("color", random.choice(colors))
         actor = world.try_spawn_actor(bp, transform)
         if actor is not None:
-            actor.set_autopilot(True, args.tm_port)
+            actor.set_autopilot(True, tm_port)
             actors.append(actor)
 
     print("Spawned %d vehicles. Press Ctrl+C to remove them." % len(actors))
