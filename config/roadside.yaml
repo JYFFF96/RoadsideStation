@@ -66,6 +66,7 @@ fusion:
   background_cell_size: 1.5
   background_occupancy_ratio: 0.60
   background_moving_radar_speed: 0.8
+  background_neighbor_radius_cells: 1
 
 mqtt:
   enabled: false
