@@ -6,13 +6,17 @@ import numpy as np
 
 
 def voxel_cluster_lidar(points, voxel_size=0.8, min_points=6,
-                         min_z=-7.5, max_z=2.0, max_range=70.0):
-    """Lightweight NumPy-only Euclidean-style clustering for Python 3.7.
+                         min_z=-7.5, max_z=2.0, max_range=70.0,
+                         min_length=0.6, max_length=8.0,
+                         min_width=0.4, max_width=4.0,
+                         min_height=0.25, max_height=4.0,
+                         max_objects=80):
+    """NumPy-only LiDAR clustering with V0.2.1 geometry rejection.
 
-    Points are filtered, voxelized, and neighboring occupied voxels are flood
-    filled. The result is one centroid per cluster plus point count and bounds.
-    This avoids a SciPy/sklearn dependency while giving V0.2 a real object
-    proposal stage instead of treating every sensor return as an object.
+    The result remains deliberately lightweight for Python 3.7, but now rejects
+    many poles, walls, curbs and giant connected structures before tracking.
+    Extents are axis-aligned in the LiDAR frame, so the limits are intentionally
+    generous enough for rotated vehicles.
     """
     if points is None or len(points) == 0:
         return []
@@ -58,16 +62,23 @@ def voxel_cluster_lidar(points, voxel_size=0.8, min_points=6,
 
         if len(indices) < int(min_points):
             continue
+
         cpts = pts[indices]
         centroid = cpts.mean(axis=0)
         pmin = cpts.min(axis=0)
         pmax = cpts.max(axis=0)
         extent = pmax - pmin
+        ex = float(extent[0])
+        ey = float(extent[1])
+        ez = float(extent[2])
 
-        # Reject giant connected background structures and tiny speckles.
-        if extent[0] > 15.0 or extent[1] > 15.0 or extent[2] > 8.0:
+        horizontal_long = max(ex, ey)
+        horizontal_short = min(ex, ey)
+        if horizontal_long < float(min_length) or horizontal_long > float(max_length):
             continue
-        if extent[0] < 0.15 and extent[1] < 0.15:
+        if horizontal_short < float(min_width) or horizontal_short > float(max_width):
+            continue
+        if ez < float(min_height) or ez > float(max_height):
             continue
 
         clusters.append({
@@ -75,23 +86,30 @@ def voxel_cluster_lidar(points, voxel_size=0.8, min_points=6,
             "y": float(centroid[1]),
             "z": float(centroid[2]),
             "point_count": int(len(indices)),
-            "extent": [float(extent[0]), float(extent[1]), float(extent[2])],
+            "extent": [ex, ey, ez],
         })
 
-    return clusters
+    # Larger clusters are usually more reliable than small isolated clutter.
+    clusters.sort(key=lambda item: item["point_count"], reverse=True)
+    return clusters[:int(max_objects)]
 
 
 def associate_radar(clusters, radar_detections, max_distance=3.0):
-    """Attach the closest radar return to each LiDAR cluster."""
+    """Attach the closest unused radar return to each LiDAR cluster."""
     if not clusters:
         return []
     radar = radar_detections or []
     max_d2 = float(max_distance) ** 2
+    used = set()
     output = []
+
     for cluster in clusters:
         best = None
+        best_index = None
         best_d2 = max_d2
-        for det in radar:
+        for index, det in enumerate(radar):
+            if index in used:
+                continue
             dx = float(det["x"]) - cluster["x"]
             dy = float(det["y"]) - cluster["y"]
             dz = float(det["z"]) - cluster["z"]
@@ -99,6 +117,9 @@ def associate_radar(clusters, radar_detections, max_distance=3.0):
             if d2 < best_d2:
                 best_d2 = d2
                 best = det
+                best_index = index
+        if best_index is not None:
+            used.add(best_index)
         item = dict(cluster)
         item["radar"] = best
         output.append(item)
