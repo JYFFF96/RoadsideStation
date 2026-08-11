@@ -29,6 +29,9 @@ class CarlaRoadsideStation(object):
         self.sensors = []
         self.base_transform = None
         self.map_name = None
+        self.camera_transform = None
+        self.lidar_transform = None
+        self.radar_transform = None
 
     def _wait_for_world_ready(self, requested, timeout_sec):
         deadline = time.time() + float(timeout_sec)
@@ -130,7 +133,8 @@ class CarlaRoadsideStation(object):
             bp.set_attribute("image_size_x", str(cfg.get("width", 1280)))
             bp.set_attribute("image_size_y", str(cfg.get("height", 720)))
             bp.set_attribute("fov", str(cfg.get("fov", 90)))
-            actor = self.world.spawn_actor(bp, _combine_transform(self.base_transform, cfg["transform"]))
+            self.camera_transform = _combine_transform(self.base_transform, cfg["transform"])
+            actor = self.world.spawn_actor(bp, self.camera_transform)
             actor.listen(lambda data: self.cache.set_camera(data.frame, image_to_bgra(data)))
             self.sensors.append(actor)
 
@@ -141,7 +145,8 @@ class CarlaRoadsideStation(object):
                               ("points_per_second", "points_per_second"),
                               ("rotation_frequency", "rotation_frequency")]:
                 bp.set_attribute(attr, str(cfg[key]))
-            actor = self.world.spawn_actor(bp, _combine_transform(self.base_transform, cfg["transform"]))
+            self.lidar_transform = _combine_transform(self.base_transform, cfg["transform"])
+            actor = self.world.spawn_actor(bp, self.lidar_transform)
             actor.listen(lambda data: self.cache.set_lidar(data.frame, lidar_to_xyz(data)))
             self.sensors.append(actor)
 
@@ -151,7 +156,8 @@ class CarlaRoadsideStation(object):
             bp.set_attribute("horizontal_fov", str(cfg["horizontal_fov"]))
             bp.set_attribute("vertical_fov", str(cfg["vertical_fov"]))
             bp.set_attribute("range", str(cfg["range"]))
-            actor = self.world.spawn_actor(bp, _combine_transform(self.base_transform, cfg["transform"]))
+            self.radar_transform = _combine_transform(self.base_transform, cfg["transform"])
+            actor = self.world.spawn_actor(bp, self.radar_transform)
             actor.listen(lambda data: self.cache.set_radar(data.frame, radar_to_cartesian(data)))
             self.sensors.append(actor)
 
