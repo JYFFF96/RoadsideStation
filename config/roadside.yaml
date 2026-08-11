@@ -17,6 +17,12 @@ camera:
   height: 720
   fov: 90
   transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
+camera_detection:
+  enabled: true
+  model: models/yolov5n.onnx
+  input_size: 640
+  confidence: 0.35
+  nms: 0.45
 lidar:
   enabled: true
   channels: 32
