@@ -2,10 +2,71 @@ from __future__ import print_function
 
 import math
 import time
+from collections import defaultdict
 
 from .models import DetectedObject, ObjectList
 from .perception import voxel_cluster_lidar, associate_radar
 from .tracking import NearestTracker
+
+
+class StaticBackgroundFilter(object):
+    """Learn persistent roadside clusters during a short empty-scene warmup."""
+
+    def __init__(self, calibration_seconds=6.0, cell_size=1.5,
+                 occupancy_ratio=0.60, moving_radar_speed=0.8):
+        self.calibration_seconds = float(calibration_seconds)
+        self.cell_size = float(cell_size)
+        self.occupancy_ratio = float(occupancy_ratio)
+        self.moving_radar_speed = float(moving_radar_speed)
+        self.started_at = None
+        self.frames = 0
+        self.counts = defaultdict(int)
+        self.static_cells = set()
+        self.ready = False
+
+    def _key(self, x, y):
+        s = self.cell_size
+        return (int(math.floor(float(x) / s)),
+                int(math.floor(float(y) / s)))
+
+    def update_and_filter(self, candidates, now):
+        if self.started_at is None:
+            self.started_at = float(now)
+
+        if not self.ready:
+            self.frames += 1
+            seen = set()
+            for item in candidates:
+                seen.add(self._key(item["x"], item["y"]))
+            for key in seen:
+                self.counts[key] += 1
+
+            if float(now) - self.started_at >= self.calibration_seconds:
+                threshold = max(1, int(math.ceil(self.frames * self.occupancy_ratio)))
+                self.static_cells = set(
+                    key for key, count in self.counts.items()
+                    if count >= threshold)
+                self.ready = True
+            # Do not publish detections while the empty-scene background is learning.
+            return []
+
+        output = []
+        for item in candidates:
+            key = self._key(item["x"], item["y"])
+            radar_speed = item.get("radar_speed")
+            moving = (radar_speed is not None and
+                      abs(float(radar_speed)) >= self.moving_radar_speed)
+            if key in self.static_cells and not moving:
+                continue
+            output.append(item)
+        return output
+
+    def remaining_seconds(self, now):
+        if self.ready:
+            return 0.0
+        if self.started_at is None:
+            return self.calibration_seconds
+        return max(0.0, self.calibration_seconds - (float(now) - self.started_at))
 
 
 class SimpleFusion(object):
@@ -19,12 +80,21 @@ class SimpleFusion(object):
             max_age=config.get("track_max_age", 1.5),
             max_speed=config.get("track_max_speed", 20.0),
             velocity_alpha=config.get("velocity_alpha", 0.35))
+        self.background = StaticBackgroundFilter(
+            calibration_seconds=config.get("background_calibration_seconds", 6.0),
+            cell_size=config.get("background_cell_size", 1.5),
+            occupancy_ratio=config.get("background_occupancy_ratio", 0.60),
+            moving_radar_speed=config.get("background_moving_radar_speed", 0.8))
         self.world_transform = None
         self.candidate_validator = None
         self.last_stats = {
             "lidar_points": 0,
             "lidar_clusters": 0,
             "roi_candidates": 0,
+            "background_candidates": 0,
+            "background_ready": False,
+            "background_remaining": 0.0,
+            "background_cells": 0,
             "radar_detections": 0,
             "tracked_objects": 0,
         }
@@ -77,7 +147,7 @@ class SimpleFusion(object):
             radar_detections,
             max_distance=cfg.get("radar_match_distance", 3.0))
 
-        candidates = []
+        roi_candidates = []
         for item in associated:
             radar = item.get("radar")
             confidence = 0.72
@@ -97,7 +167,7 @@ class SimpleFusion(object):
                 except Exception:
                     continue
 
-            candidates.append({
+            roi_candidates.append({
                 "x": wx, "y": wy, "z": wz,
                 "radar_speed": radar_speed,
                 "confidence": confidence,
@@ -106,6 +176,7 @@ class SimpleFusion(object):
                 "extent": extent,
             })
 
+        candidates = self.background.update_and_filter(roi_candidates, now)
         tracked = self.tracker.update(candidates, now)
         objects = []
         for item in tracked:
@@ -118,7 +189,11 @@ class SimpleFusion(object):
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
             "lidar_clusters": len(clusters),
-            "roi_candidates": len(candidates),
+            "roi_candidates": len(roi_candidates),
+            "background_candidates": len(candidates),
+            "background_ready": self.background.ready,
+            "background_remaining": self.background.remaining_seconds(now),
+            "background_cells": len(self.background.static_cells),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "tracked_objects": len(objects),
         }
