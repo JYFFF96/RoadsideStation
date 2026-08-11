@@ -4,7 +4,6 @@ import argparse
 import time
 import yaml
 import cv2
-import numpy as np
 
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
@@ -41,9 +40,15 @@ def main():
             if camera is None or lidar is None:
                 time.sleep(.02); continue
             ol = fusion.fuse(lidar[1], radar[1] if radar else None)
-            raw = camera[1]
-            a = np.frombuffer(raw.raw_data, dtype=np.uint8).reshape((raw.height, raw.width, 4))
-            view = a[:, :, :3].copy()
+
+            # SensorCache already stores the camera image as a BGRA numpy array
+            # via roadside.sensors.image_to_bgra(). Do not try to read raw_data
+            # again here.
+            bgra = camera[1]
+            if bgra is None or getattr(bgra, "ndim", 0) != 3 or bgra.shape[2] < 3:
+                time.sleep(.02); continue
+            view = bgra[:, :, :3].copy()
+
             visible = 0
             for obj in ol.objects:
                 p = projector.project(obj.x, obj.y, obj.z)
