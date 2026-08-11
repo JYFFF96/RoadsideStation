@@ -2,15 +2,20 @@ carla:
   host: 127.0.0.1
   port: 2000
   timeout: 10.0
+  map: Town03
   synchronous_mode: false
 
 station:
   id: RSU_001
+  deployment: auto_junction
+  junction_index: 0
+  height: 8.0
+  lateral_offset: 5.0
   transform:
     x: 0.0
     y: 0.0
     z: 8.0
-    pitch: -15.0
+    pitch: 0.0
     yaw: 0.0
     roll: 0.0
 
@@ -19,25 +24,32 @@ camera:
   width: 1280
   height: 720
   fov: 90
-  transform: {x: 0.0, y: 0.0, z: 0.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
+  transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
 
 lidar:
   enabled: true
   channels: 32
   range: 80.0
-  points_per_second: 56000
+  points_per_second: 120000
   rotation_frequency: 10.0
   transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 radar:
   enabled: true
-  horizontal_fov: 60.0
-  vertical_fov: 20.0
+  horizontal_fov: 80.0
+  vertical_fov: 25.0
   range: 80.0
-  transform: {x: 0.0, y: 0.0, z: 0.2, pitch: 0.0, yaw: 0.0, roll: 0.0}
+  transform: {x: 0.0, y: 0.0, z: 0.2, pitch: -5.0, yaw: 0.0, roll: 0.0}
 
 fusion:
-  max_match_distance: 3.0
+  voxel_size: 0.8
+  cluster_min_points: 6
+  lidar_min_z: -7.5
+  lidar_max_z: 2.0
+  max_range: 70.0
+  radar_match_distance: 3.0
+  track_match_distance: 4.0
+  track_max_age: 1.5
 
 mqtt:
   enabled: false
