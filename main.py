@@ -50,12 +50,12 @@ def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.5.5 Adaptive LiDAR starting...")
+ print("RoadsideStation V0.5.6 Far-range BEV Clustering starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
   gz=station.junction_center.z if station.junction_center is not None else None;print("Ground removal: enabled reference_z=%s clearance=%.2fm"%(("-" if gz is None else "%.2f"%gz),float(fc.get("ground_clearance",0.30))))
- print("LiDAR clustering: %s"%("range-adaptive" if fc.get("range_adaptive_clustering",False) else "fixed"))
+ print("LiDAR clustering: %s"%("hybrid range-adaptive (3D near/mid + BEV far)" if fc.get("range_adaptive_clustering",False) else "fixed"))
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled (ROI candidates pass directly to tracker)"))
  projector=None;width=0;height=0
@@ -69,9 +69,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.5 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.6 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: external traffic -> ground removal -> adaptive geometry -> road ROI -> tracking -> fusion")
+ print("ARCH: external traffic -> ground removal -> 3D/BEV adaptive geometry -> road ROI -> tracking -> fusion")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
