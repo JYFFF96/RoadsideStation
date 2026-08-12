@@ -26,7 +26,8 @@ def merge_lidar_clusters(clusters,max_gap=1.8,max_merged_length=14.0,max_merged_
                 ex=xmax-xmin;ey=ymax-ymin;ez=zmax-zmin
                 if max(ex,ey)>float(max_merged_length) or min(ex,ey)>float(max_merged_width) or ez>float(max_merged_height): continue
                 na=max(1,items[i].get("point_count",1));nb=max(1,items[j].get("point_count",1));n=na+nb
-                items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez],"cluster_mode":items[i].get("cluster_mode",items[j].get("cluster_mode","3d"))}
+                modes=set(items[i].get("scale_modes",[items[i].get("cluster_mode","3d")]))|set(items[j].get("scale_modes",[items[j].get("cluster_mode","3d")]))
+                items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez],"cluster_mode":items[i].get("cluster_mode",items[j].get("cluster_mode","3d")),"scale_votes":max(int(items[i].get("scale_votes",1)),int(items[j].get("scale_votes",1))),"scale_modes":sorted(modes)}
                 del items[j];changed=True;break
             if changed: break
     items.sort(key=lambda x:x.get("point_count",0),reverse=True);return items
@@ -36,7 +37,7 @@ def _accept_geometry(cp,min_points,min_length,max_length,min_width,max_width,min
     if len(cp)<int(min_points):return None
     cen=cp.mean(axis=0);pmin=cp.min(axis=0);pmax=cp.max(axis=0);e=pmax-pmin;ex,ey,ez=map(float,e);hl=max(ex,ey);hs=min(ex,ey)
     if hl<float(min_length) or hl>float(max_length) or hs<float(min_width) or hs>float(max_width) or ez<float(min_height) or ez>float(max_height):return None
-    return {"x":float(cen[0]),"y":float(cen[1]),"z":float(cen[2]),"point_count":len(cp),"extent":[ex,ey,ez],"cluster_mode":mode}
+    return {"x":float(cen[0]),"y":float(cen[1]),"z":float(cen[2]),"point_count":len(cp),"extent":[ex,ey,ez],"cluster_mode":mode,"scale_votes":1,"scale_modes":[mode]}
 
 
 def _cluster_array(pts,voxel_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects):
@@ -77,15 +78,18 @@ def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,
 
 
 def _dedupe_multiscale(clusters,center_gate=1.4):
-    """Keep the strongest candidate when two BEV scales describe the same object."""
+    """Keep the strongest candidate and record how many BEV scales agree on it."""
     ordered=sorted(clusters,key=lambda x:x.get("point_count",0),reverse=True);out=[];gate2=float(center_gate)*float(center_gate)
     for c in ordered:
-        duplicate=False
+        matched=None
         for k in out:
             d2=(float(c["x"])-float(k["x"]))**2+(float(c["y"])-float(k["y"]))**2
             if d2<=gate2:
-                duplicate=True;break
-        if not duplicate:out.append(c)
+                matched=k;break
+        if matched is None:
+            item=dict(c);item["scale_modes"]=[c.get("cluster_mode","bev")];item["scale_votes"]=1;out.append(item)
+        else:
+            modes=set(matched.get("scale_modes",[]));modes.add(c.get("cluster_mode","bev"));matched["scale_modes"]=sorted(modes);matched["scale_votes"]=len(modes)
     return out
 
 
