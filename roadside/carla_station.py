@@ -92,8 +92,11 @@ class CarlaRoadsideStation(object):
             cfg=self.config["camera"];bp=blueprints.find("sensor.camera.rgb");bp.set_attribute("image_size_x",str(cfg.get("width",1280)));bp.set_attribute("image_size_y",str(cfg.get("height",720)));bp.set_attribute("fov",str(cfg.get("fov",90)));self.camera_transform=_combine_transform(self.base_transform,cfg["transform"]);a=self.world.spawn_actor(bp,self.camera_transform);a.listen(lambda d:self.cache.set_camera(d.frame,image_to_bgra(d)));self.sensors.append(a)
         if self.config["lidar"].get("enabled",True):
             cfg=self.config["lidar"];bp=blueprints.find("sensor.lidar.ray_cast")
-            for key,attr in [("channels","channels"),("range","range"),("points_per_second","points_per_second"),("rotation_frequency","rotation_frequency")]:bp.set_attribute(attr,str(cfg[key]))
-            self.lidar_transform=_combine_transform(self.base_transform,cfg["transform"]);a=self.world.spawn_actor(bp,self.lidar_transform);a.listen(lambda d:self.cache.set_lidar(d.frame,lidar_to_xyz(d)));self.sensors.append(a)
+            for key,attr in [("channels","channels"),("range","range"),("points_per_second","points_per_second"),("rotation_frequency","rotation_frequency"),("upper_fov","upper_fov"),("lower_fov","lower_fov")]:
+                if key in cfg: bp.set_attribute(attr,str(cfg[key]))
+            self.lidar_transform=_combine_transform(self.base_transform,cfg["transform"])
+            print("LiDAR config: channels=%s pps=%s range=%sm vertical_fov=[%s,%s] height=%.2fm"%(cfg.get("channels"),cfg.get("points_per_second"),cfg.get("range"),cfg.get("lower_fov","default"),cfg.get("upper_fov","default"),self.lidar_transform.location.z))
+            a=self.world.spawn_actor(bp,self.lidar_transform);a.listen(lambda d:self.cache.set_lidar(d.frame,lidar_to_xyz(d)));self.sensors.append(a)
         if self.config["radar"].get("enabled",True):
             cfg=self.config["radar"];bp=blueprints.find("sensor.other.radar");bp.set_attribute("horizontal_fov",str(cfg["horizontal_fov"]));bp.set_attribute("vertical_fov",str(cfg["vertical_fov"]));bp.set_attribute("range",str(cfg["range"]));self.radar_transform=_combine_transform(self.base_transform,cfg["transform"]);a=self.world.spawn_actor(bp,self.radar_transform);a.listen(lambda d:self.cache.set_radar(d.frame,radar_to_cartesian(d)));self.sensors.append(a)
 
