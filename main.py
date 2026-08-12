@@ -37,15 +37,13 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config)
  sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.4.5 Camera/LiDAR FusedObjectList starting...")
- station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
+ print("RoadsideStation V0.4.5 Stage3 Radar/Camera/LiDAR FusedObjectList starting...")
+ station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None;width=0;height=0
  if station.camera_transform is not None:
   cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
- camera_id=config.get("camera",{}).get("id","CAM_01")
- camera_source=config.get("camera_fusion",{}).get("source","none")
- assoc_cfg=config.get("camera_lidar_association",{})
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("FusedObjectList boundary: enabled")
+ camera_id=config.get("camera",{}).get("id","CAM_01");camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("FusedObjectList boundary: enabled");print("Radar world-frame association: enabled")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("WARNING: CARLA truth is simulation-only and validates association/fusion interfaces, not detector accuracy.")
  print("Static background calibration: keep the scene empty until calibration is READY")
@@ -57,8 +55,7 @@ def main():
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
-     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp)
-     camera_objects=cam_list.objects
+     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp);camera_objects=cam_list.objects
      raw_pairs=associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0))
      for pair in raw_pairs:
       p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
@@ -66,7 +63,7 @@ def main():
    oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";bg=("READY/%d cells"%s["background_cells"] if s["background_ready"] else "LEARNING %.1fs"%s["background_remaining"])
-    print("[RSU %s | %s] Camera:%s LiDAR:%d pts/%d clusters -> ROI:%d -> BG:%d Radar:%d Tracks:%d Fused:%d CamObjects:%d Matched:%d BG:%s"%(sid,station.map_name,cf,s["lidar_points"],s["lidar_clusters"],s["roi_candidates"],s["background_candidates"],s["radar_detections"],s["tracked_objects"],len(fol.objects),len(camera_objects),len(pairs),bg))
+    print("[RSU %s | %s] Camera:%s LiDAR:%d pts/%d clusters -> ROI:%d -> BG:%d Radar:%d/%d world RadarMatched:%d Tracks:%d Fused:%d CamObjects:%d CamMatched:%d BG:%s"%(sid,station.map_name,cf,s["lidar_points"],s["lidar_clusters"],s["roi_candidates"],s["background_candidates"],s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),s["tracked_objects"],len(fol.objects),len(camera_objects),len(pairs),bg))
     for o in fol.objects[:10]:
      size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-"
      if o.camera is not None:cam="%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"))
