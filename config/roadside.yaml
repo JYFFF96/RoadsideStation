@@ -52,10 +52,15 @@ camera_lidar_association:
 
 lidar:
   enabled: true
-  channels: 32
+  # High-mounted roadside LiDAR: denser scan and explicit vertical FoV.
+  # The sensor is ~8.5 m above road level (station 8.0 + lidar 0.5), so
+  # downward rays and points below -7.5 m in sensor coordinates are essential.
+  channels: 64
   range: 80.0
-  points_per_second: 120000
+  points_per_second: 400000
   rotation_frequency: 10.0
+  upper_fov: 5.0
+  lower_fov: -35.0
   transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 radar:
@@ -66,20 +71,22 @@ radar:
   transform: {x: 0.0, y: 0.0, z: 0.2, pitch: -5.0, yaw: 0.0, roll: 0.0}
 
 fusion:
-  voxel_size: 0.8
-  cluster_min_points: 6
-  lidar_min_z: -7.5
-  lidar_max_z: 2.0
-  max_range: 70.0
-  vehicle_min_length: 0.6
+  # Tuned for sparse, high-mounted roadside point clouds. The previous
+  # lidar_min_z=-7.5 clipped road-level vehicle returns at an 8.5 m sensor.
+  voxel_size: 0.5
+  cluster_min_points: 4
+  lidar_min_z: -9.5
+  lidar_max_z: 1.0
+  max_range: 80.0
+  vehicle_min_length: 0.4
   vehicle_max_length: 8.0
-  vehicle_min_width: 0.4
+  vehicle_min_width: 0.25
   vehicle_max_width: 4.0
-  vehicle_min_height: 0.25
+  vehicle_min_height: 0.15
   vehicle_max_height: 4.0
-  max_objects: 80
+  max_objects: 100
   cluster_merge_enabled: true
-  cluster_merge_gap: 1.4
+  cluster_merge_gap: 1.2
   merged_vehicle_max_length: 14.0
   merged_vehicle_max_width: 4.2
   merged_vehicle_max_height: 4.2
@@ -100,9 +107,9 @@ fusion:
   extent_alpha: 0.25
   extent_shrink_alpha: 0.05
   extent_lock_hits: 5
-  road_roi_margin: 2.5
-  road_min_height: -0.8
-  road_max_height: 3.5
+  road_roi_margin: 3.0
+  road_min_height: -1.0
+  road_max_height: 2.8
   background_calibration_seconds: 6.0
   background_cell_size: 1.0
   background_occupancy_ratio: 0.45
@@ -116,8 +123,6 @@ evaluation:
   radius: 80.0
   range_bins: [30.0, 50.0, 80.0]
   match_distance: 4.0
-  # CARLA's official generate_traffic.py normally uses role_name=autopilot.
-  # Keep the RoadsideStation-specific roles for compatibility with old tools.
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   report_interval: 2.0
 
