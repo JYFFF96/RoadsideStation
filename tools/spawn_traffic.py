@@ -1,5 +1,11 @@
 from __future__ import print_function
-import argparse, math, random, signal, sys, time
+
+import argparse
+import random
+import signal
+import sys
+import time
+
 import carla
 
 _STOP_REQUESTED = False
@@ -8,17 +14,15 @@ _STOP_REQUESTED = False
 def _request_stop(signum, frame):
     global _STOP_REQUESTED
     if not _STOP_REQUESTED:
-        print("\nStop requested. Cleaning up...")
+        print("\nStop requested. Cleaning up RoadsideStation traffic...")
     _STOP_REQUESTED = True
 
 
-def _angle_diff(a, b):
-    return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
-
-
 def _get_tm(client, preferred):
+    """Connect to a Traffic Manager port, falling back when a stale TM owns one."""
     last = None
-    for port in [preferred] + [x for x in range(8000, 8011) if x != preferred]:
+    ports = [preferred] + [p for p in range(8000, 8011) if p != preferred]
+    for port in ports:
         try:
             return client.get_trafficmanager(port), port
         except RuntimeError as exc:
@@ -27,163 +31,51 @@ def _get_tm(client, preferred):
     raise RuntimeError("No free Traffic Manager port: %s" % last)
 
 
-def _blueprints(world):
-    out = []
-    for bp in world.get_blueprint_library().filter("vehicle.*"):
+def _vehicle_blueprints(world, safe=True):
+    """Follow the spirit of CARLA examples/generate_traffic.py blueprint filtering."""
+    blueprints = list(world.get_blueprint_library().filter("vehicle.*"))
+    if not safe:
+        return blueprints
+
+    safe_bps = []
+    for bp in blueprints:
         try:
-            if bp.has_attribute("number_of_wheels") and int(bp.get_attribute("number_of_wheels").as_int()) == 4:
-                out.append(bp)
+            if bp.has_attribute("number_of_wheels"):
+                if int(bp.get_attribute("number_of_wheels").as_int()) != 4:
+                    continue
+            # Keep normal passenger/commercial vehicles. Exclude a few unusual models
+            # that are less useful for roadside perception tests.
+            bid = bp.id.lower()
+            if any(x in bid for x in ("carlacola", "cybertruck", "t2", "sprinter")):
+                continue
+            safe_bps.append(bp)
         except Exception:
             pass
-    return out
+    return safe_bps or blueprints
 
 
-def _find_cross_junction(world):
-    candidates = []
-    seen = set()
-    for wp in world.get_map().generate_waypoints(2.0):
-        if not wp.is_junction:
-            continue
-        junction = wp.get_junction()
-        if junction is None or junction.id in seen:
-            continue
-        seen.add(junction.id)
-        try:
-            pairs = list(junction.get_waypoints(carla.LaneType.Driving))
-        except Exception:
-            pairs = []
-        headings = []
-        for entry, _ in pairs:
-            yaw = float(entry.transform.rotation.yaw) % 360.0
-            if all(_angle_diff(yaw, h) > 35.0 for h in headings):
-                headings.append(yaw)
-        area = max(1.0, junction.bounding_box.extent.x * 2.0) * max(1.0, junction.bounding_box.extent.y * 2.0)
-        score = len(headings) * 1000.0 + min(area, 500.0)
-        candidates.append((score, len(headings), junction, pairs))
-    if not candidates:
-        raise RuntimeError("No junction found")
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    pool = [x for x in candidates if x[1] >= 4] or candidates
-    _, directions, junction, pairs = pool[0]
-    center = junction.bounding_box.location
-    print("Selected traffic junction id=%s center=(%.2f, %.2f) directions=%d" %
-          (junction.id, center.x, center.y, directions))
-    return junction, pairs
+def _prepare_blueprint(bp, rng):
+    if bp.has_attribute("color"):
+        colors = bp.get_attribute("color").recommended_values
+        if colors:
+            bp.set_attribute("color", rng.choice(colors))
+    if bp.has_attribute("driver_id"):
+        drivers = bp.get_attribute("driver_id").recommended_values
+        if drivers:
+            bp.set_attribute("driver_id", rng.choice(drivers))
+    if bp.has_attribute("role_name"):
+        bp.set_attribute("role_name", "roadside_autopilot")
+    return bp
 
 
-def _pick_straight(options, reference_yaw):
-    if not options:
-        return None
-    return min(options, key=lambda w: _angle_diff(w.transform.rotation.yaw, reference_yaw))
-
-
-def _walk_previous(wp, distance, step=4.0):
-    cur = wp
-    travelled = 0.0
-    ref_yaw = float(wp.transform.rotation.yaw)
-    visited = set()
-    while travelled < distance:
-        key = (cur.road_id, cur.section_id, cur.lane_id, int(cur.s * 2.0))
-        if key in visited:
-            break
-        visited.add(key)
-        options = cur.previous(min(step, distance - travelled))
-        nxt = _pick_straight(options, ref_yaw)
-        if nxt is None:
-            break
-        cur = nxt
-        ref_yaw = float(cur.transform.rotation.yaw)
-        travelled += step
-    return cur
-
-
-def _walk_next(wp, distance, step=4.0):
-    cur = wp
-    travelled = 0.0
-    ref_yaw = float(wp.transform.rotation.yaw)
-    visited = set()
-    path = []
-    while travelled < distance:
-        key = (cur.road_id, cur.section_id, cur.lane_id, int(cur.s * 2.0))
-        if key in visited:
-            break
-        visited.add(key)
-        options = cur.next(min(step, distance - travelled))
-        nxt = _pick_straight(options, ref_yaw)
-        if nxt is None:
-            break
-        cur = nxt
-        ref_yaw = float(cur.transform.rotation.yaw)
-        path.append(carla.Location(x=cur.transform.location.x,
-                                   y=cur.transform.location.y,
-                                   z=cur.transform.location.z))
-        travelled += step
-    return cur, path
-
-
-def _build_straight_routes(junction_pairs, approach_distance=65.0, exit_distance=90.0):
-    """Create explicit lane-to-lane straight-through routes across one junction.
-
-    Junction.get_waypoints() gives the exact entry/exit lane connection.  We only
-    keep pairs whose heading changes little, so Traffic Manager never needs to
-    choose a branch while inside the junction.
-    """
-    routes = []
-    used = set()
-    for entry, exit_wp in junction_pairs:
-        in_yaw = float(entry.transform.rotation.yaw)
-        out_yaw = float(exit_wp.transform.rotation.yaw)
-        if _angle_diff(in_yaw, out_yaw) > 35.0:
-            continue
-        key = (entry.road_id, entry.lane_id, exit_wp.road_id, exit_wp.lane_id)
-        if key in used:
-            continue
-        used.add(key)
-        spawn_wp = _walk_previous(entry, approach_distance)
-        _, downstream = _walk_next(exit_wp, exit_distance)
-        path = [carla.Location(x=entry.transform.location.x,
-                               y=entry.transform.location.y,
-                               z=entry.transform.location.z),
-                carla.Location(x=exit_wp.transform.location.x,
-                               y=exit_wp.transform.location.y,
-                               z=exit_wp.transform.location.z)] + downstream
-        routes.append({"spawn_wp": spawn_wp, "entry": entry, "exit": exit_wp, "path": path})
-    return routes
-
-
-def _spawn_offsets(route, count, spacing=22.0):
-    """Return several spawn waypoints upstream on one exact lane."""
-    result = []
-    base = route["spawn_wp"]
-    for i in range(count):
-        wp = _walk_previous(base, i * spacing)
-        if wp is None or wp.is_junction:
-            continue
-        result.append(wp)
-    return result
-
-
-def _cleanup_existing(client, world):
-    vehicles = list(world.get_actors().filter("vehicle.*"))
-    if vehicles:
-        client.apply_batch_sync([carla.command.DestroyActor(a.id) for a in vehicles], True)
-    return len(vehicles)
-
-
-def _destroy(client, actors):
-    ids = []
-    for actor in actors:
-        try:
-            if actor and actor.is_alive:
-                ids.append(actor.id)
-        except Exception:
-            pass
-    if not ids:
+def _destroy(client, actor_ids):
+    if not actor_ids:
         print("No spawned vehicles need cleanup.")
         return
-    print("Destroying %d vehicles..." % len(ids))
+    print("Destroying %d vehicles..." % len(actor_ids))
     try:
-        client.apply_batch_sync([carla.command.DestroyActor(i) for i in ids], True)
+        client.apply_batch_sync(
+            [carla.command.DestroyActor(actor_id) for actor_id in actor_ids], True)
         print("Cleanup complete.")
     except Exception as exc:
         print("Cleanup failed: %s" % exc)
@@ -194,42 +86,48 @@ def main():
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
 
-    parser = argparse.ArgumentParser(description="RoadsideStation explicit straight-route CARLA traffic generator")
+    parser = argparse.ArgumentParser(
+        description="RoadsideStation CARLA official-style Traffic Manager generator")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=2000)
-    parser.add_argument("--vehicles", type=int, default=24)
+    parser.add_argument("--vehicles", "-n", type=int, default=30)
     parser.add_argument("--tm-port", type=int, default=8000)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--speed-diff", type=float, default=40.0)
-    parser.add_argument("--spacing", type=float, default=24.0)
-    parser.add_argument("--keep-existing", action="store_true")
+    parser.add_argument("--speed-diff", type=float, default=30.0,
+                        help="Traffic Manager percentage speed reduction")
+    parser.add_argument("--distance", type=float, default=3.0,
+                        help="global following distance in metres")
+    parser.add_argument("--safe", action="store_true", default=True,
+                        help="filter to normal four-wheel vehicles (default enabled)")
+    parser.add_argument("--all-blueprints", action="store_true",
+                        help="disable safe vehicle filtering")
+    parser.add_argument("--keep-existing", action="store_true",
+                        help="do not remove existing vehicle actors before spawning")
     args = parser.parse_args()
 
-    random.seed(args.seed)
+    rng = random.Random(args.seed)
     client = carla.Client(args.host, args.port)
     client.set_timeout(10.0)
-    actors = []
+    spawned_ids = []
 
     try:
         world = client.get_world()
-        junction, pairs = _find_cross_junction(world)
-        routes = _build_straight_routes(pairs)
-        if not routes:
-            raise RuntimeError("No straight-through lane connections found at selected junction")
-        print("Built %d explicit straight-through lane routes." % len(routes))
-        for idx, route in enumerate(routes):
-            print("  Route %d: road/lane %s/%s -> %s/%s, path points=%d" %
-                  (idx + 1, route["entry"].road_id, route["entry"].lane_id,
-                   route["exit"].road_id, route["exit"].lane_id, len(route["path"])))
+        map_name = world.get_map().name.split("/")[-1]
+        print("RoadsideStation V0.4.4 official-style traffic generator")
+        print("CARLA map: %s" % map_name)
 
         if not args.keep_existing:
-            removed = _cleanup_existing(client, world)
-            if removed:
-                print("Removed %d existing/stale vehicles." % removed)
-                time.sleep(.5)
+            existing = list(world.get_actors().filter("vehicle.*"))
+            if existing:
+                ids = [a.id for a in existing]
+                client.apply_batch_sync(
+                    [carla.command.DestroyActor(actor_id) for actor_id in ids], True)
+                print("Removed %d existing/stale vehicles." % len(ids))
+                time.sleep(0.5)
 
         tm, tm_port = _get_tm(client, args.tm_port)
-        tm.set_global_distance_to_leading_vehicle(8.0)
+        print("Traffic Manager connected on port %d" % tm_port)
+        tm.set_global_distance_to_leading_vehicle(args.distance)
         tm.global_percentage_speed_difference(args.speed_diff)
         tm.set_hybrid_physics_mode(False)
         try:
@@ -237,50 +135,55 @@ def main():
         except Exception:
             pass
 
-        bps = _blueprints(world)
-        if not bps:
-            raise RuntimeError("No four-wheel vehicle blueprints found")
+        blueprints = _vehicle_blueprints(world, safe=not args.all_blueprints)
+        spawn_points = list(world.get_map().get_spawn_points())
+        if not blueprints:
+            raise RuntimeError("No vehicle blueprints available")
+        if not spawn_points:
+            raise RuntimeError("No map spawn points available")
 
-        per_route = max(1, int(math.ceil(float(args.vehicles) / len(routes))))
-        spawn_jobs = []
-        for route_index, route in enumerate(routes):
-            for wp in _spawn_offsets(route, per_route, args.spacing):
-                spawn_jobs.append((route_index, route, wp))
-        random.shuffle(spawn_jobs)
+        # This is intentionally the same basic strategy as CARLA's official
+        # generate_traffic.py: use map spawn points and let Traffic Manager own
+        # routing. Do NOT call set_path(), force junction branches, or manually
+        # construct waypoints here.
+        rng.shuffle(spawn_points)
+        requested = min(args.vehicles, len(spawn_points))
+        if args.vehicles > len(spawn_points):
+            print("Requested %d vehicles but map has only %d spawn points; limiting request." %
+                  (args.vehicles, len(spawn_points)))
 
-        for route_index, route, wp in spawn_jobs:
-            if _STOP_REQUESTED or len(actors) >= args.vehicles:
-                break
-            transform = wp.transform
-            transform.location.z += 0.35
-            bp = random.choice(bps)
-            if bp.has_attribute("role_name"):
-                bp.set_attribute("role_name", "roadside_route_%02d" % (route_index + 1))
-            actor = world.try_spawn_actor(bp, transform)
-            if actor is None:
-                continue
-            actors.append(actor)
-            actor.set_autopilot(True, tm_port)
-            try:
-                tm.auto_lane_change(actor, False)
-                tm.random_left_lanechange_percentage(actor, 0.0)
-                tm.random_right_lanechange_percentage(actor, 0.0)
-                tm.distance_to_leading_vehicle(actor, 8.0)
-                tm.vehicle_percentage_speed_difference(actor, args.speed_diff)
-                tm.set_path(actor, route["path"])
-            except Exception as exc:
-                print("Route setup warning for actor %s: %s" % (actor.id, exc))
+        batch = []
+        for transform in spawn_points[:requested]:
+            bp = _prepare_blueprint(rng.choice(blueprints), rng)
+            batch.append(
+                carla.command.SpawnActor(bp, transform).then(
+                    carla.command.SetAutopilot(
+                        carla.command.FutureActor, True, tm_port)))
 
-        print("Spawned %d explicit-route vehicles on %s." %
-              (len(actors), world.get_map().name.split("/")[-1]))
-        print("Only straight junction lane connections are used; no branch selection occurs inside the junction.")
-        print("Press Ctrl+C to stop and remove all spawned vehicles.")
+        responses = client.apply_batch_sync(batch, True)
+        failures = 0
+        for response in responses:
+            if response.error:
+                failures += 1
+            else:
+                spawned_ids.append(response.actor_id)
+
+        print("Spawned %d/%d vehicles using CARLA map spawn points." %
+              (len(spawned_ids), requested))
+        if failures:
+            print("%d spawn points were occupied or unavailable." % failures)
+        print("Routing is controlled entirely by CARLA Traffic Manager (no RoadsideStation set_path).")
+        print("Safe four-wheel blueprint filtering: %s" % ("ON" if not args.all_blueprints else "OFF"))
+        print("Press Ctrl+C to stop and remove all vehicles spawned by this script.")
+
         while not _STOP_REQUESTED:
-            time.sleep(.1)
+            time.sleep(0.1)
+
     except KeyboardInterrupt:
         _STOP_REQUESTED = True
     finally:
-        _destroy(client, actors)
+        _destroy(client, spawned_ids)
+
     print("Traffic generator stopped cleanly.")
     return 0
 
