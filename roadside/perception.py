@@ -57,13 +57,8 @@ def _cluster_array(pts,voxel_size,min_points,min_length,max_length,min_width,max
     clusters.sort(key=lambda x:x["point_count"],reverse=True);return clusters[:int(max_objects)]
 
 
-def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=1):
-    """Cluster sparse points in bird's-eye view, then recover 3D extents.
-
-    Z is deliberately ignored for connectivity. This is useful for distant
-    roadside-LiDAR returns where only a few vertical scan lines hit a vehicle
-    and ordinary 3D voxel flood fill fragments one car into disconnected pieces.
-    """
+def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=1,mode_name="bev"):
+    """Cluster sparse points in bird's-eye view, then recover 3D extents."""
     if pts is None or len(pts)==0:return []
     size=float(cell_size);keys=np.floor(pts[:,:2]/size).astype(np.int32);buckets=defaultdict(list)
     for i,k in enumerate(keys):buckets[(int(k[0]),int(k[1]))].append(i)
@@ -76,9 +71,32 @@ def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,
             for dx,dy in offs:
                 n=(cx+dx,cy+dy)
                 if n in occupied and n not in visited:visited.add(n);q.append(n)
-        item=_accept_geometry(pts[idx],min_points,min_length,max_length,min_width,max_width,min_height,max_height,"bev")
+        item=_accept_geometry(pts[idx],min_points,min_length,max_length,min_width,max_width,min_height,max_height,mode_name)
         if item is not None:clusters.append(item)
     clusters.sort(key=lambda x:x["point_count"],reverse=True);return clusters[:int(max_objects)]
+
+
+def _dedupe_multiscale(clusters,center_gate=1.4):
+    """Keep the strongest candidate when two BEV scales describe the same object."""
+    ordered=sorted(clusters,key=lambda x:x.get("point_count",0),reverse=True);out=[];gate2=float(center_gate)*float(center_gate)
+    for c in ordered:
+        duplicate=False
+        for k in out:
+            d2=(float(c["x"])-float(k["x"]))**2+(float(c["y"])-float(k["y"]))**2
+            if d2<=gate2:
+                duplicate=True;break
+        if not duplicate:out.append(c)
+    return out
+
+
+def _cluster_array_bev_multiscale(pts,cell_sizes,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=1,dedupe_distance=1.4):
+    candidates=[]
+    for size in cell_sizes:
+        mode="bev@%.2f"%float(size)
+        candidates.extend(_cluster_array_bev(pts,size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=neighbor_cells,mode_name=mode))
+    out=_dedupe_multiscale(candidates,dedupe_distance)
+    out.sort(key=lambda x:x.get("point_count",0),reverse=True)
+    return out[:int(max_objects)]
 
 
 def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,max_range=70.0,min_length=.6,max_length=8.0,min_width=.4,max_width=4.0,min_height=.25,max_height=4.0,max_objects=80):
@@ -88,7 +106,7 @@ def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,
 
 
 def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.0,max_length=8.0,max_width=4.0,max_height=4.0,max_objects=120):
-    """Range-adaptive roadside clustering with optional far-range BEV mode."""
+    """Range-adaptive roadside clustering with optional single/multi-scale BEV modes."""
     if points is None or len(points)==0:return []
     pts=np.asarray(points,dtype=np.float32)
     r=np.sqrt(pts[:,0]*pts[:,0]+pts[:,1]*pts[:,1])
@@ -102,7 +120,10 @@ def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.
         mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper);bp=pts[mask]
         mode=str(band.get("mode","3d")).lower()
         common=(band.get("min_points",4),band.get("min_length",0.4),max_length,band.get("min_width",0.25),max_width,band.get("min_height",0.15),max_height,max_objects)
-        if mode=="bev":
+        if mode in ("bev_multiscale","multiscale_bev"):
+            sizes=band.get("bev_cell_sizes",[0.55,0.85])
+            out.extend(_cluster_array_bev_multiscale(bp,sizes,*common,neighbor_cells=band.get("bev_neighbor_cells",1),dedupe_distance=band.get("bev_dedupe_distance",1.4)))
+        elif mode=="bev":
             out.extend(_cluster_array_bev(bp,band.get("bev_cell_size",band.get("voxel_size",0.65)),*common,neighbor_cells=band.get("bev_neighbor_cells",1)))
         else:
             out.extend(_cluster_array(bp,band.get("voxel_size",0.5),*common))
