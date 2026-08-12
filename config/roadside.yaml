@@ -66,9 +66,12 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
+  # V0.6.1: teaching-equipment profile. 0-30m is now the primary acceptance
+  # range, so the near band uses a finer voxel and lower point threshold.
+  # Mid/far settings remain available but are no longer the optimization focus.
   range_adaptive_clustering: true
   range_bands:
-    - {max_range: 30.0, mode: 3d, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
+    - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.35, min_width: 0.20, min_height: 0.12}
     - {max_range: 50.0, mode: 3d, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
     - {max_range: 80.0, mode: bev_multiscale, bev_cell_sizes: [0.55, 0.85], bev_neighbor_cells: 1, bev_dedupe_distance: 1.40, min_points: 2, min_length: 0.18, min_width: 0.10, min_height: 0.07}
 
@@ -90,6 +93,14 @@ fusion:
   merged_vehicle_max_length: 14.0
   merged_vehicle_max_width: 4.2
   merged_vehicle_max_height: 4.2
+
+  # V0.6.1 conservative near merge. Prevents two close vehicles at the
+  # junction from being combined into one oversized target.
+  near_merge_range: 30.0
+  near_merge_gap: 0.65
+  near_merged_vehicle_max_length: 7.5
+  near_merged_vehicle_max_width: 3.2
+
   pole_short_max: 0.75
   pole_long_max: 2.5
   pole_height_min: 1.5
@@ -122,10 +133,6 @@ fusion:
   road_min_height: -1.0
   road_max_height: 2.8
 
-  # V0.6.0 geometry-aware ROI: if a distant cluster centroid is just outside
-  # the road corridor, retain it only when its bbox short side still overlaps
-  # the corridor by a minimum amount. This targets sparse far-range centroid
-  # shifts without globally widening the road ROI.
   geometry_aware_roi_enabled: true
   geometry_aware_roi_min_range: 30.0
   geometry_aware_roi_min_overlap: 0.25
