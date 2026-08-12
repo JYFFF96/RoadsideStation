@@ -26,10 +26,17 @@ def merge_lidar_clusters(clusters,max_gap=1.8,max_merged_length=14.0,max_merged_
                 ex=xmax-xmin;ey=ymax-ymin;ez=zmax-zmin
                 if max(ex,ey)>float(max_merged_length) or min(ex,ey)>float(max_merged_width) or ez>float(max_merged_height): continue
                 na=max(1,items[i].get("point_count",1));nb=max(1,items[j].get("point_count",1));n=na+nb
-                items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez]}
+                items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez],"cluster_mode":items[i].get("cluster_mode",items[j].get("cluster_mode","3d"))}
                 del items[j];changed=True;break
             if changed: break
     items.sort(key=lambda x:x.get("point_count",0),reverse=True);return items
+
+
+def _accept_geometry(cp,min_points,min_length,max_length,min_width,max_width,min_height,max_height,mode):
+    if len(cp)<int(min_points):return None
+    cen=cp.mean(axis=0);pmin=cp.min(axis=0);pmax=cp.max(axis=0);e=pmax-pmin;ex,ey,ez=map(float,e);hl=max(ex,ey);hs=min(ex,ey)
+    if hl<float(min_length) or hl>float(max_length) or hs<float(min_width) or hs>float(max_width) or ez<float(min_height) or ez>float(max_height):return None
+    return {"x":float(cen[0]),"y":float(cen[1]),"z":float(cen[2]),"point_count":len(cp),"extent":[ex,ey,ez],"cluster_mode":mode}
 
 
 def _cluster_array(pts,voxel_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects):
@@ -45,10 +52,32 @@ def _cluster_array(pts,voxel_size,min_points,min_length,max_length,min_width,max
             for dx,dy,dz in offs:
                 n=(cx+dx,cy+dy,cz+dz)
                 if n in occupied and n not in visited:visited.add(n);q.append(n)
-        if len(idx)<int(min_points):continue
-        cp=pts[idx];cen=cp.mean(axis=0);pmin=cp.min(axis=0);pmax=cp.max(axis=0);e=pmax-pmin;ex,ey,ez=map(float,e);hl=max(ex,ey);hs=min(ex,ey)
-        if hl<float(min_length) or hl>float(max_length) or hs<float(min_width) or hs>float(max_width) or ez<float(min_height) or ez>float(max_height):continue
-        clusters.append({"x":float(cen[0]),"y":float(cen[1]),"z":float(cen[2]),"point_count":len(idx),"extent":[ex,ey,ez]})
+        item=_accept_geometry(pts[idx],min_points,min_length,max_length,min_width,max_width,min_height,max_height,"3d")
+        if item is not None:clusters.append(item)
+    clusters.sort(key=lambda x:x["point_count"],reverse=True);return clusters[:int(max_objects)]
+
+
+def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=1):
+    """Cluster sparse points in bird's-eye view, then recover 3D extents.
+
+    Z is deliberately ignored for connectivity. This is useful for distant
+    roadside-LiDAR returns where only a few vertical scan lines hit a vehicle
+    and ordinary 3D voxel flood fill fragments one car into disconnected pieces.
+    """
+    if pts is None or len(pts)==0:return []
+    size=float(cell_size);keys=np.floor(pts[:,:2]/size).astype(np.int32);buckets=defaultdict(list)
+    for i,k in enumerate(keys):buckets[(int(k[0]),int(k[1]))].append(i)
+    occupied=set(buckets);visited=set();clusters=[];radius=max(1,int(neighbor_cells));offs=[(a,b) for a in range(-radius,radius+1) for b in range(-radius,radius+1)]
+    for start in occupied:
+        if start in visited:continue
+        visited.add(start);q=deque([start]);idx=[]
+        while q:
+            cell=q.popleft();idx.extend(buckets[cell]);cx,cy=cell
+            for dx,dy in offs:
+                n=(cx+dx,cy+dy)
+                if n in occupied and n not in visited:visited.add(n);q.append(n)
+        item=_accept_geometry(pts[idx],min_points,min_length,max_length,min_width,max_width,min_height,max_height,"bev")
+        if item is not None:clusters.append(item)
     clusters.sort(key=lambda x:x["point_count"],reverse=True);return clusters[:int(max_objects)]
 
 
@@ -59,13 +88,7 @@ def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,
 
 
 def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.0,max_length=8.0,max_width=4.0,max_height=4.0,max_objects=120):
-    """Cluster near/mid/far point clouds with progressively larger voxels.
-
-    High-mounted roadside LiDAR becomes sparse with range. A fixed 0.5 m voxel
-    grid and one geometry threshold works well nearby but fragments distant
-    vehicles. Bands are non-overlapping annuli and therefore do not duplicate
-    points. Each band can relax voxel size, point count and minimum geometry.
-    """
+    """Range-adaptive roadside clustering with optional far-range BEV mode."""
     if points is None or len(points)==0:return []
     pts=np.asarray(points,dtype=np.float32)
     r=np.sqrt(pts[:,0]*pts[:,0]+pts[:,1]*pts[:,1])
@@ -76,15 +99,13 @@ def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.
     for band in bands or []:
         upper=min(float(band.get("max_range",max_range)),float(max_range))
         if upper<=lower:continue
-        mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper)
-        bp=pts[mask]
-        out.extend(_cluster_array(
-            bp,
-            band.get("voxel_size",0.5),band.get("min_points",4),
-            band.get("min_length",0.4),max_length,
-            band.get("min_width",0.25),max_width,
-            band.get("min_height",0.15),max_height,
-            max_objects))
+        mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper);bp=pts[mask]
+        mode=str(band.get("mode","3d")).lower()
+        common=(band.get("min_points",4),band.get("min_length",0.4),max_length,band.get("min_width",0.25),max_width,band.get("min_height",0.15),max_height,max_objects)
+        if mode=="bev":
+            out.extend(_cluster_array_bev(bp,band.get("bev_cell_size",band.get("voxel_size",0.65)),*common,neighbor_cells=band.get("bev_neighbor_cells",1)))
+        else:
+            out.extend(_cluster_array(bp,band.get("voxel_size",0.5),*common))
         lower=upper
         if lower>=float(max_range):break
     out.sort(key=lambda x:x.get("point_count",0),reverse=True)
