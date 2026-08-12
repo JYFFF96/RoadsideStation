@@ -12,6 +12,7 @@ station:
   lateral_offset: 5.0
   transform: {x: 0.0, y: 0.0, z: 8.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
 camera:
+  id: CAM_01
   enabled: true
   width: 1280
   height: 720
@@ -19,10 +20,14 @@ camera:
   transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
 camera_detection:
   enabled: true
+  backend: yolov5_onnx_opencv
   model: models/yolov5n.onnx
   input_size: 640
   confidence: 0.35
   nms: 0.45
+camera_lidar_association:
+  min_iou: 0.05
+  max_center_distance: 120.0
 lidar:
   enabled: true
   channels: 32
