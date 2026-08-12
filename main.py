@@ -6,6 +6,7 @@ from roadside.fusion import SimpleFusion
 from roadside.camera_fusion import CameraProjector
 from roadside.camera_lidar_association import associate_camera_to_lidar
 from roadside.fused_objects import build_fused_object_list
+from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.lidar_projection import project_lidar_tracks
 from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
@@ -29,19 +30,35 @@ def _try_load_configured_map(config):
  if current!=target:
   print("Calling client.load_world('%s')..."%target);world=client.load_world(target);print("CARLA map switch completed: %s"%world.get_map().name.split("/")[-1]);time.sleep(2.0)
 
+def _pct(v):
+ return "-" if v is None else "%.1f%%"%(100.0*float(v))
+
+def _meters(v):
+ return "-" if v is None else "%.2fm"%float(v)
+
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.4.5 Stage4 Fusion Diagnostics + Stable Kinematics starting...")
+ print("RoadsideStation V0.5.0 Ground Truth Evaluation starting...")
  station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None;width=0;height=0
  if station.camera_transform is not None:
   cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
  camera_id=config.get("camera",{}).get("id","CAM_01");camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("Stage4: multi-frame velocity + position smoothing enabled");print("Stage4: Radar nearest-distance diagnostics enabled")
- print("Camera fusion source: %s"%camera_source);print("Static background calibration: keep the scene empty until calibration is READY")
- last=0.0
+ eval_cfg=config.get("evaluation",{});evaluator=None
+ if eval_cfg.get("enabled",True):
+  def eval_center():
+   if station.junction_center is not None:return station.junction_center
+   if station.base_transform is not None:return station.base_transform.location
+   return None
+  evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.0 evaluator: %s"%("enabled" if evaluator else "disabled"))
+ if evaluator:print("Evaluation radius: %.1fm, truth-track match gate: %.1fm"%(evaluator.radius,evaluator.match_distance))
+ print("Camera fusion source: %s"%camera_source)
+ if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
+ print("Static background calibration: keep the scene empty until calibration is READY")
+ last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
  try:
   while not _STOP_REQUESTED:
    camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None);camera_objects=[];pairs=[]
@@ -59,6 +76,10 @@ def main():
      t=fusion.last_tracked_candidates[idx];size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-" if o.camera is None else "%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"));near=t.get("radar_nearest_xy");near_txt="-" if near is None else "%.2f"%near;raw_speed=math.hypot(t.get("raw_vx",0),t.get("raw_vy",0));fused_speed=math.hypot(o.vx,o.vy)
      print("  %-12s type=%-7s pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
+   if evaluator is not None and now-last_eval>=eval_interval:
+    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0))
+    print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr(avg/max):%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
+    last_eval=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj);time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
  finally:
