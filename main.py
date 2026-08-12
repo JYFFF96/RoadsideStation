@@ -1,26 +1,58 @@
 from __future__ import print_function
 import signal,sys,time,yaml
+import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
 from roadside.camera_fusion import CameraProjector
 from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
+
 _STOP_REQUESTED=False
+
 def _request_stop(signum,frame):
  global _STOP_REQUESTED
  if not _STOP_REQUESTED:print("\nStop requested. Shutting down RoadsideStation...")
  _STOP_REQUESTED=True
+
 def load_config(path="config/roadside.yaml"):
  with open(path,"r") as fp:return yaml.safe_load(fp)
+
+def _try_load_configured_map(config):
+ """Experimental map switch requested by V0.4.3 config.
+
+ Set carla.load_world_on_start=false to return to the previous behavior where
+ RoadsideStation only attaches to the already-running CARLA world.
+ """
+ cc=config.get("carla",{});target=cc.get("map")
+ if not target or not cc.get("load_world_on_start",False):return
+ host=cc.get("host","127.0.0.1");port=int(cc.get("port",2000));timeout=float(cc.get("timeout",60.0))
+ print("Experimental CARLA map switch enabled. Target map: %s"%target)
+ client=carla.Client(host,port);client.set_timeout(timeout)
+ try:
+  current=client.get_world().get_map().name.split("/")[-1]
+  print("Current CARLA map: %s"%current)
+  if current==target:
+   print("CARLA already uses %s; no reload needed."%target);return
+  print("Calling client.load_world('%s')..."%target)
+  world=client.load_world(target)
+  loaded=world.get_map().name.split("/")[-1]
+  print("CARLA map switch completed: %s"%loaded)
+  time.sleep(2.0)
+ except Exception as exc:
+  print("CARLA map switch failed: %s"%exc)
+  print("If CARLA crashed, restart it and set carla.load_world_on_start: false.")
+  raise
+
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
- config=load_config();sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.3 starting...");station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
+ config=load_config();_try_load_configured_map(config)
+ sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
+ print("RoadsideStation V0.4.3 starting...");station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None
  if station.camera_transform is not None:
   cc=config["camera"];projector=CameraProjector(cc.get("width",1280),cc.get("height",720),cc.get("fov",90),station.camera_transform)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.3 Camera-LiDAR projection: enabled" if projector else "V0.3 Camera-LiDAR projection: disabled")
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("Camera-LiDAR projection: enabled" if projector else "Camera-LiDAR projection: disabled")
  print("Static background calibration: keep the scene empty until calibration is READY")
  last=0.0
  try:
