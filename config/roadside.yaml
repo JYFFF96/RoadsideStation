@@ -77,7 +77,10 @@ fusion:
   pole_short_max: 0.75
   pole_long_max: 2.5
   pole_height_min: 1.5
-  radar_match_distance: 3.0
+  radar_match_distance: 4.0
+  radar_match_z: 2.5
+  radar_min_hits: 1
+  radar_velocity_alpha: 0.35
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
