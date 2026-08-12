@@ -1,5 +1,5 @@
 from __future__ import print_function
-import signal,sys,time,yaml
+import signal,sys,time,yaml,math
 import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
@@ -24,50 +24,40 @@ def load_config(path="config/roadside.yaml"):
 def _try_load_configured_map(config):
  cc=config.get("carla",{});target=cc.get("map")
  if not target or not cc.get("load_world_on_start",False):return
- host=cc.get("host","127.0.0.1");port=int(cc.get("port",2000));timeout=float(cc.get("timeout",60.0))
- print("Experimental CARLA map switch enabled. Target map: %s"%target)
- client=carla.Client(host,port);client.set_timeout(timeout)
- current=client.get_world().get_map().name.split("/")[-1];print("Current CARLA map: %s"%current)
- if current==target:return
- print("Calling client.load_world('%s')..."%target);world=client.load_world(target)
- print("CARLA map switch completed: %s"%world.get_map().name.split("/")[-1]);time.sleep(2.0)
+ client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
+ current=client.get_world().get_map().name.split("/")[-1];print("Experimental CARLA map switch enabled. Target map: %s"%target);print("Current CARLA map: %s"%current)
+ if current!=target:
+  print("Calling client.load_world('%s')..."%target);world=client.load_world(target);print("CARLA map switch completed: %s"%world.get_map().name.split("/")[-1]);time.sleep(2.0)
 
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
- config=load_config();_try_load_configured_map(config)
- sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.4.5 Stage3 Radar/Camera/LiDAR FusedObjectList starting...")
+ config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
+ print("RoadsideStation V0.4.5 Stage4 Fusion Diagnostics + Stable Kinematics starting...")
  station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None;width=0;height=0
  if station.camera_transform is not None:
   cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
  camera_id=config.get("camera",{}).get("id","CAM_01");camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("FusedObjectList boundary: enabled");print("Radar world-frame association: enabled")
- print("Camera fusion source: %s"%camera_source)
- if camera_source=="carla_truth":print("WARNING: CARLA truth is simulation-only and validates association/fusion interfaces, not detector accuracy.")
- print("Static background calibration: keep the scene empty until calibration is READY")
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("Stage4: multi-frame velocity + position smoothing enabled");print("Stage4: Radar nearest-distance diagnostics enabled")
+ print("Camera fusion source: %s"%camera_source);print("Static background calibration: keep the scene empty until calibration is READY")
  last=0.0
  try:
   while not _STOP_REQUESTED:
-   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None)
-   camera_objects=[];pairs=[];projected=[]
+   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None);camera_objects=[];pairs=[]
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
      cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp);camera_objects=cam_list.objects
-     raw_pairs=associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0))
-     for pair in raw_pairs:
+     for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
       p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
-   fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs)
-   oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
+   fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs);oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
    if now-last>=1.0:
-    s=fusion.last_stats;cf=camera[0] if camera else "-";bg=("READY/%d cells"%s["background_cells"] if s["background_ready"] else "LEARNING %.1fs"%s["background_remaining"])
-    print("[RSU %s | %s] Camera:%s LiDAR:%d pts/%d clusters -> ROI:%d -> BG:%d Radar:%d/%d world RadarMatched:%d Tracks:%d Fused:%d CamObjects:%d CamMatched:%d BG:%s"%(sid,station.map_name,cf,s["lidar_points"],s["lidar_clusters"],s["roi_candidates"],s["background_candidates"],s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),s["tracked_objects"],len(fol.objects),len(camera_objects),len(pairs),bg))
-    for o in fol.objects[:10]:
-     size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-"
-     if o.camera is not None:cam="%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"))
-     print("  %-12s type=%-7s pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) size=(%.2f,%.2f,%.2f) radar=%s cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,o.x,o.y,o.z,o.vx,o.vy,size[0],size[1],size[2],rs,cam,o.confidence,"+".join(o.sources)))
+    s=fusion.last_stats;cf=camera[0] if camera else "-";bg=("READY/%d cells"%s["background_cells"] if s["background_ready"] else "LEARNING %.1fs"%s["background_remaining"]);rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin
+    print("[RSU %s | %s] Camera:%s LiDAR:%d pts/%d clusters -> ROI:%d -> BG:%d Radar:%d/%d world RadarMatched:%d Nearest:%s Tracks:%d Fused:%d CamObjects:%d CamMatched:%d BG:%s"%(sid,station.map_name,cf,s["lidar_points"],s["lidar_clusters"],s["roi_candidates"],s["background_candidates"],s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,s["tracked_objects"],len(fol.objects),len(camera_objects),len(pairs),bg))
+    for idx,o in enumerate(fol.objects[:10]):
+     t=fusion.last_tracked_candidates[idx];size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-" if o.camera is None else "%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"));near=t.get("radar_nearest_xy");near_txt="-" if near is None else "%.2f"%near;raw_speed=math.hypot(t.get("raw_vx",0),t.get("raw_vy",0));fused_speed=math.hypot(o.vx,o.vy)
+     print("  %-12s type=%-7s pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj);time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
