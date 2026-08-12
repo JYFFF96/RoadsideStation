@@ -75,14 +75,20 @@ class CarlaRoadsideStation(object):
         if cfg.get("deployment","manual") in ("auto_junction","auto_cross_junction"): return self._find_junction_transform()
         t=cfg["transform"]; return carla.Transform(carla.Location(x=float(t.get("x",0)),y=float(t.get("y",0)),z=float(t.get("z",8))),carla.Rotation(pitch=float(t.get("pitch",0)),yaw=float(t.get("yaw",0)),roll=float(t.get("roll",0))))
 
-    def is_driving_roi(self,x,y,z,extent=None):
-        if self.world_map is None:return True
+    def validate_driving_roi(self,x,y,z,extent=None):
+        if self.world_map is None:return True,"ok",{}
         cfg=self.config.get("fusion",{});margin=float(cfg.get("road_roi_margin",2.5));min_above=float(cfg.get("road_min_height",-.8));max_above=float(cfg.get("road_max_height",3.5))
         loc=carla.Location(x=float(x),y=float(y),z=float(z)); wp=self.world_map.get_waypoint(loc,project_to_road=True,lane_type=carla.LaneType.Driving)
-        if wp is None:return False
-        lane=wp.transform.location; lateral=math.hypot(float(x)-lane.x,float(y)-lane.y); allowed=float(wp.lane_width)*.5+margin
-        if lateral>allowed:return False
-        dz=float(z)-float(lane.z); return min_above<=dz<=max_above
+        if wp is None:return False,"no_waypoint",{}
+        lane=wp.transform.location; lateral=math.hypot(float(x)-lane.x,float(y)-lane.y); allowed=float(wp.lane_width)*.5+margin;dz=float(z)-float(lane.z)
+        details={"lateral":lateral,"allowed_lateral":allowed,"dz":dz,"lane_width":float(wp.lane_width)}
+        if lateral>allowed:return False,"lateral",details
+        if dz<min_above:return False,"below_road",details
+        if dz>max_above:return False,"above_road",details
+        return True,"ok",details
+
+    def is_driving_roi(self,x,y,z,extent=None):
+        return self.validate_driving_roi(x,y,z,extent)[0]
 
     def start(self):
         cc=self.config["carla"];self.client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));self.client.set_timeout(float(cc.get("timeout",60.0)))
