@@ -94,9 +94,7 @@ class SimpleFusion(object):
    return adaptive_voxel_cluster_lidar(clean_points,c.get("range_bands",[]),c.get("lidar_min_z",-7.5),c.get("lidar_max_z",2.),c.get("max_range",80.),c.get("vehicle_max_length",8.),c.get("vehicle_max_width",4.),c.get("vehicle_max_height",4.),c.get("max_objects",120))
   return voxel_cluster_lidar(clean_points,c.get("voxel_size",.8),c.get("cluster_min_points",6),c.get("lidar_min_z",-7.5),c.get("lidar_max_z",2.),c.get("max_range",70.),c.get("vehicle_min_length",.6),c.get("vehicle_max_length",8.),c.get("vehicle_min_width",.4),c.get("vehicle_max_width",4.),c.get("vehicle_min_height",.25),c.get("vehicle_max_height",4.),c.get("max_objects",80))
  def _candidate_score(self,item):
-  """Score ROI-approved far candidates. Near/mid candidates bypass this gate."""
-  e=[float(v) for v in item.get("extent",[0,0,0])];hl=max(e[0],e[1]);hs=min(e[0],e[1]);h=e[2];points=int(item.get("point_count",0));votes=int(item.get("scale_votes",1));details=item.get("roi_details",{}) or {}
-  score=0.0
+  e=[float(v) for v in item.get("extent",[0,0,0])];hl=max(e[0],e[1]);hs=min(e[0],e[1]);h=e[2];points=int(item.get("point_count",0));votes=int(item.get("scale_votes",1));details=item.get("roi_details",{}) or {};score=0.0
   if 1.2<=hl<=7.5:score+=0.22
   elif 0.7<=hl<=8.0:score+=0.10
   if 0.55<=hs<=3.4:score+=0.20
@@ -132,13 +130,15 @@ class SimpleFusion(object):
   clean_points,ground_removed=self._remove_ground_points(lidar_points);raw=self._cluster(clean_points,c)
   filtered=[x for x in raw if not self._looks_like_pole(x.get("extent",[0,0,0]))]
   clusters=merge_lidar_clusters(filtered,c.get("cluster_merge_gap",1.4),c.get("merged_vehicle_max_length",14.),c.get("merged_vehicle_max_width",4.2),c.get("merged_vehicle_max_height",4.2)) if c.get("cluster_merge_enabled",True) else filtered
-  world_clusters=[];accepted=[];roi_rejections=[]
+  world_clusters=[];accepted=[];roi_rejections=[];roi_rescued=0
   for i in clusters:
    wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e,"cluster_mode":i.get("cluster_mode","3d"),"scale_votes":int(i.get("scale_votes",1)),"scale_modes":list(i.get("scale_modes",[i.get("cluster_mode","3d")]))};world_clusters.append(dict(item))
    ok,reason,details=self._validate_candidate(wx,wy,wz,e)
    if not ok:
     rej=dict(item);rej["reason"]=reason;rej["details"]=details;roi_rejections.append(rej);continue
-   item["roi_reason"]="ok";item["roi_details"]=details;accepted.append(item)
+   item["roi_reason"]=reason;item["roi_details"]=details
+   if details.get("geometry_rescued",False):roi_rescued+=1
+   accepted.append(item)
   self.last_geometry_world=[dict(x) for x in world_clusters];self.last_roi_rejections=roi_rejections;self.last_roi_candidates=[dict(x) for x in accepted]
   scored,score_rejections=self._score_candidates(accepted);self.last_scored_candidates=[dict(x) for x in scored];self.last_score_rejections=[dict(x) for x in score_rejections]
   assoc,radar_world_count,radar_matched=self._associate_radar_world(scored,radar_detections);roi=[]
@@ -154,5 +154,5 @@ class SimpleFusion(object):
   nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None];reasons=defaultdict(int)
   for r in roi_rejections:reasons[r.get("reason","rejected")]+=1
   score_values=[float(x.get("candidate_score",1.0)) for x in scored if not x.get("candidate_score_bypass",False)]
-  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(accepted),"roi_rejected":len(roi_rejections),"roi_rejection_reasons":dict(reasons),"scored_candidates":len(scored),"score_rejected":len(score_rejections),"candidate_scoring_enabled":bool(c.get("candidate_scoring_enabled",False)),"candidate_score_avg":(sum(score_values)/len(score_values) if score_values else None),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
+  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(accepted),"roi_rejected":len(roi_rejections),"roi_rescued":roi_rescued,"roi_rejection_reasons":dict(reasons),"scored_candidates":len(scored),"score_rejected":len(score_rejections),"candidate_scoring_enabled":bool(c.get("candidate_scoring_enabled",False)),"candidate_score_avg":(sum(score_values)/len(score_values) if score_values else None),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
   return ObjectList(self.station_id,objs,timestamp=now)
