@@ -51,22 +51,48 @@ class FusedObjectList(object):
         }
 
 
-def build_fused_object_list(station_id, tracked_candidates, timestamp=None):
-    """Build the stable fusion boundary from LiDAR/Radar tracked candidates.
+def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
+                            camera_objects=None, associations=None):
+    """Build FusedObjectList and optionally attach CameraObject associations."""
+    camera_objects = camera_objects or []
+    associations = associations or []
+    camera_by_track = {}
+    for pair in associations:
+        li = int(pair.get("lidar_index", -1)); ci = int(pair.get("camera_index", -1))
+        if li < 0 or li >= len(tracked_candidates or []) or ci < 0 or ci >= len(camera_objects):
+            continue
+        track_id = (tracked_candidates or [])[li].get("id")
+        if track_id is not None:
+            camera_by_track[str(track_id)] = (camera_objects[ci], pair)
 
-    Camera metadata can be attached later without changing downstream RSM/event APIs.
-    """
     objects = []
     for item in tracked_candidates or []:
         extent = item.get("extent", [0.0, 0.0, 0.0])
         sources = list(item.get("sources", []))
+        object_type = item.get("object_type", "unknown")
+        confidence = float(item.get("confidence", 0.0))
+        camera_meta = None
+        matched = camera_by_track.get(str(item.get("id", "")))
+        if matched is not None:
+            cam, pair = matched
+            object_type = cam.class_name
+            if "camera" not in sources:
+                sources.append("camera")
+            confidence = max(confidence, float(cam.confidence))
+            camera_meta = {
+                "cameraId": cam.camera_id,
+                "bbox": list(cam.bbox),
+                "confidence": float(cam.confidence),
+                "className": cam.class_name,
+                "association": {
+                    "iou": float(pair.get("iou", 0.0)),
+                    "centerDistancePx": float(pair.get("center_distance", 0.0)),
+                },
+            }
         objects.append(FusedObject(
-            item.get("id", "unknown"),
-            object_type=item.get("object_type", "unknown"),
+            item.get("id", "unknown"), object_type=object_type,
             x=item.get("x", 0.0), y=item.get("y", 0.0), z=item.get("z", 0.0),
-            vx=item.get("vx", 0.0), vy=item.get("vy", 0.0),
-            size=extent,
-            confidence=item.get("confidence", 0.0),
-            sources=sources,
+            vx=item.get("vx", 0.0), vy=item.get("vy", 0.0), size=extent,
+            confidence=confidence, sources=sources, camera=camera_meta,
             radar_speed=item.get("radar_speed")))
     return FusedObjectList(station_id, objects, timestamp)
