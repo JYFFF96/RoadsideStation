@@ -38,7 +38,7 @@ class CarlaRoadsideStation(object):
                 print("WARNING: unable to unload Foliage layer: %s"%exc)
 
     def _junction_candidates(self):
-        seen={};
+        seen={}
         for wp in self.world_map.generate_waypoints(2.0):
             if not wp.is_junction: continue
             j=wp.get_junction()
@@ -89,11 +89,31 @@ class CarlaRoadsideStation(object):
         loc=carla.Location(x=float(x),y=float(y),z=float(z)); wp=self.world_map.get_waypoint(loc,project_to_road=True,lane_type=carla.LaneType.Driving)
         if wp is None:return False,"no_waypoint",{}
         lane=wp.transform.location; lateral=math.hypot(float(x)-lane.x,float(y)-lane.y); allowed=float(wp.lane_width)*.5+margin;dz=float(z)-float(lane.z)
-        details={"lateral":lateral,"allowed_lateral":allowed,"roi_margin":margin,"range_from_center":range_from_center,"dz":dz,"lane_width":float(wp.lane_width)}
-        if lateral>allowed:return False,"lateral",details
+        details={"lateral":lateral,"allowed_lateral":allowed,"roi_margin":margin,"range_from_center":range_from_center,"dz":dz,"lane_width":float(wp.lane_width),"geometry_rescued":False}
         if dz<min_above:return False,"below_road",details
         if dz>max_above:return False,"above_road",details
-        return True,"ok",details
+        if lateral<=allowed:return True,"ok",details
+
+        # V0.6.0: a distant sparse cluster can have a shifted centroid even when
+        # part of its physical bbox still overlaps the driving corridor. Rescue
+        # only small center overruns and only when the bbox short side overlaps.
+        if cfg.get("geometry_aware_roi_enabled",True) and extent is not None:
+            min_range=float(cfg.get("geometry_aware_roi_min_range",30.0))
+            if range_from_center is None or range_from_center>=min_range:
+                try:
+                    ex=float(extent[0]);ey=float(extent[1]);short_side=max(0.0,min(ex,ey))
+                except Exception:
+                    short_side=0.0
+                half_short=min(float(cfg.get("geometry_aware_roi_max_half_width",1.8)),0.5*short_side)
+                min_overlap=float(cfg.get("geometry_aware_roi_min_overlap",0.25))
+                max_excess=float(cfg.get("geometry_aware_roi_max_center_excess",1.8))
+                center_excess=lateral-allowed
+                overlap=allowed+half_short-lateral
+                details.update({"bbox_half_short":half_short,"center_excess":center_excess,"bbox_overlap":overlap})
+                if half_short>0.0 and center_excess<=max_excess and overlap>=min_overlap:
+                    details["geometry_rescued"]=True
+                    return True,"geometry_overlap",details
+        return False,"lateral",details
 
     def is_driving_roi(self,x,y,z,extent=None):
         return self.validate_driving_roi(x,y,z,extent)[0]
