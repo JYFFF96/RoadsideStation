@@ -77,11 +77,19 @@ class CarlaRoadsideStation(object):
 
     def validate_driving_roi(self,x,y,z,extent=None):
         if self.world_map is None:return True,"ok",{}
-        cfg=self.config.get("fusion",{});margin=float(cfg.get("road_roi_margin",2.5));min_above=float(cfg.get("road_min_height",-.8));max_above=float(cfg.get("road_max_height",3.5))
+        cfg=self.config.get("fusion",{})
+        margin=float(cfg.get("road_roi_margin",2.5));min_above=float(cfg.get("road_min_height",-.8));max_above=float(cfg.get("road_max_height",3.5))
+        range_from_center=None
+        if self.junction_center is not None:
+            range_from_center=math.hypot(float(x)-float(self.junction_center.x),float(y)-float(self.junction_center.y))
+            if range_from_center>=float(cfg.get("road_roi_far_range",50.0)):
+                margin=float(cfg.get("road_roi_margin_far",margin))
+            elif range_from_center>=float(cfg.get("road_roi_mid_range",30.0)):
+                margin=float(cfg.get("road_roi_margin_mid",margin))
         loc=carla.Location(x=float(x),y=float(y),z=float(z)); wp=self.world_map.get_waypoint(loc,project_to_road=True,lane_type=carla.LaneType.Driving)
         if wp is None:return False,"no_waypoint",{}
         lane=wp.transform.location; lateral=math.hypot(float(x)-lane.x,float(y)-lane.y); allowed=float(wp.lane_width)*.5+margin;dz=float(z)-float(lane.z)
-        details={"lateral":lateral,"allowed_lateral":allowed,"dz":dz,"lane_width":float(wp.lane_width)}
+        details={"lateral":lateral,"allowed_lateral":allowed,"roi_margin":margin,"range_from_center":range_from_center,"dz":dz,"lane_width":float(wp.lane_width)}
         if lateral>allowed:return False,"lateral",details
         if dz<min_above:return False,"below_road",details
         if dz>max_above:return False,"above_road",details
