@@ -66,9 +66,6 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # V0.5.9 keeps V0.5.8 multi-scale far BEV recall, then scores ROI-approved
-  # far candidates using vehicle-like geometry, point support, multiscale
-  # agreement and road-lateral quality before tracking.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
@@ -97,8 +94,6 @@ fusion:
   pole_long_max: 2.5
   pole_height_min: 1.5
 
-  # V0.5.9 candidate scoring is deliberately far-range only. Near/mid are
-  # bypassed so the already-good close-range recall is not disturbed.
   candidate_scoring_enabled: true
   candidate_scoring_min_range: 50.0
   candidate_scoring_threshold_far: 0.48
@@ -126,6 +121,16 @@ fusion:
   road_roi_far_range: 50.0
   road_min_height: -1.0
   road_max_height: 2.8
+
+  # V0.6.0 geometry-aware ROI: if a distant cluster centroid is just outside
+  # the road corridor, retain it only when its bbox short side still overlaps
+  # the corridor by a minimum amount. This targets sparse far-range centroid
+  # shifts without globally widening the road ROI.
+  geometry_aware_roi_enabled: true
+  geometry_aware_roi_min_range: 30.0
+  geometry_aware_roi_min_overlap: 0.25
+  geometry_aware_roi_max_center_excess: 1.8
+  geometry_aware_roi_max_half_width: 1.8
 
   background_filter_enabled: false
   background_calibration_seconds: 6.0
