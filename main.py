@@ -25,6 +25,7 @@ def load_config(path="config/roadside.yaml"):
 def _try_load_configured_map(config):
  cc=config.get("carla",{});target=cc.get("map")
  if not target or not cc.get("load_world_on_start",False):return
+ print("WARNING: load_world_on_start=true will reload the CARLA world and remove existing traffic.")
  client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
  current=client.get_world().get_map().name.split("/")[-1];print("Experimental CARLA map switch enabled. Target map: %s"%target);print("Current CARLA map: %s"%current)
  if current!=target:
@@ -33,12 +34,23 @@ def _try_load_configured_map(config):
 def _pct(v):return "-" if v is None else "%.1f%%"%(100.0*float(v))
 def _meters(v):return "-" if v is None else "%.2fm"%float(v)
 
+def _print_traffic_status(station,config):
+ tc=config.get("traffic",{});mode=tc.get("mode","external");source=tc.get("source","carla_generate_traffic")
+ try:
+  vehicles=len(station.world.get_actors().filter("vehicle.*"));walkers=len(station.world.get_actors().filter("walker.pedestrian.*"))
+ except Exception:
+  vehicles=0;walkers=0
+ print("Traffic mode: %s (source=%s)"%(mode,source))
+ print("Attached to existing CARLA traffic: %d vehicles, %d walkers"%(vehicles,walkers))
+ if mode=="external" and vehicles==0:
+  print("NOTE: no vehicles are present. Start CARLA PythonAPI/examples/generate_traffic.py in another terminal.")
+
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.5.1 Range Evaluation starting...")
- station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
+ print("RoadsideStation V0.5.2 External Traffic starting...")
+ station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None;width=0;height=0
  if station.camera_transform is not None:
   cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
@@ -50,8 +62,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.1 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
+ print("ARCH: external CARLA traffic -> roadside sensors -> perception/fusion -> ObjectList/RSM")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
