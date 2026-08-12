@@ -129,7 +129,7 @@ class SimpleFusion(object):
   now=time.time() if timestamp is None else float(timestamp);c=self.config
   clean_points,ground_removed=self._remove_ground_points(lidar_points);raw=self._cluster(clean_points,c)
   filtered=[x for x in raw if not self._looks_like_pole(x.get("extent",[0,0,0]))]
-  clusters=merge_lidar_clusters(filtered,c.get("cluster_merge_gap",1.4),c.get("merged_vehicle_max_length",14.),c.get("merged_vehicle_max_width",4.2),c.get("merged_vehicle_max_height",4.2)) if c.get("cluster_merge_enabled",True) else filtered
+  clusters=merge_lidar_clusters(filtered,c.get("cluster_merge_gap",1.4),c.get("merged_vehicle_max_length",14.),c.get("merged_vehicle_max_width",4.2),c.get("merged_vehicle_max_height",4.2),c.get("near_merge_range",30.0),c.get("near_merge_gap",0.65),c.get("near_merged_vehicle_max_length",7.5),c.get("near_merged_vehicle_max_width",3.2)) if c.get("cluster_merge_enabled",True) else filtered
   world_clusters=[];accepted=[];roi_rejections=[];roi_rescued=0
   for i in clusters:
    wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e,"cluster_mode":i.get("cluster_mode","3d"),"scale_votes":int(i.get("scale_votes",1)),"scale_modes":list(i.get("scale_modes",[i.get("cluster_mode","3d")]))};world_clusters.append(dict(item))
