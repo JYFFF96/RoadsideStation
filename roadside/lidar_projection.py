@@ -30,9 +30,9 @@ def _project_rect(projector, center, extent, width, height):
 
 
 def project_lidar_tracks(projector, tracked_candidates, width, height):
-    """Return only camera-visible tracks, preserving order for association."""
+    """Return camera-visible tracks with their original source index preserved."""
     result = []
-    for item in tracked_candidates or []:
+    for source_index, item in enumerate(tracked_candidates or []):
         rect = _project_rect(projector,
                              (item.get("x", 0.0), item.get("y", 0.0), item.get("z", 0.0)),
                              item.get("extent", [2.0, 1.0, 1.0]), width, height)
@@ -40,5 +40,6 @@ def project_lidar_tracks(projector, tracked_candidates, width, height):
             continue
         out = dict(item)
         out["bbox"] = rect
+        out["source_index"] = source_index
         result.append(out)
     return result
