@@ -33,6 +33,10 @@ camera_detection:
   confidence: 0.35
   nms: 0.45
 
+camera_fusion:
+  source: carla_truth
+  note: simulation-only adapter; replace with detector when RTSP camera backend is ready
+
 camera_lidar_association:
   min_iou: 0.05
   max_center_distance: 120.0
