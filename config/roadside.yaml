@@ -66,16 +66,17 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # V0.5.5: high-mounted roadside LiDAR needs range-dependent clustering.
-  # Near range keeps the strict geometry that already reached ~80% recall.
-  # Mid/far bands progressively enlarge voxels and relax sparse-return thresholds.
+  # V0.5.6 hybrid clustering: keep the proven 3D voxel pipeline at 0-50 m,
+  # and use bird's-eye-view (XY) connectivity at 50-80 m. Far roadside LiDAR
+  # returns are vertically sparse, so ignoring Z only for connectivity helps
+  # reconnect points belonging to the same distant vehicle. Z is still used
+  # afterwards to compute and validate the full 3D bounding box.
   range_adaptive_clustering: true
   range_bands:
-    - {max_range: 30.0, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
-    - {max_range: 50.0, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
-    - {max_range: 80.0, voxel_size: 0.90, min_points: 2, min_length: 0.20, min_width: 0.12, min_height: 0.08}
+    - {max_range: 30.0, mode: 3d, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
+    - {max_range: 50.0, mode: 3d, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
+    - {max_range: 80.0, mode: bev, bev_cell_size: 0.65, bev_neighbor_cells: 1, min_points: 2, min_length: 0.20, min_width: 0.12, min_height: 0.08}
 
-  # Fixed clustering values are retained as fallback when adaptive mode is disabled.
   voxel_size: 0.5
   cluster_min_points: 4
   lidar_min_z: -9.5
@@ -118,10 +119,6 @@ fusion:
   road_min_height: -1.0
   road_max_height: 2.8
 
-  # Disable the legacy startup occupancy filter while traffic is already present.
-  # In the V0.5.4 logs it removed valid ROI-matched vehicles (4 -> 2) because
-  # calibration occurred with live traffic in the scene. Ground removal + road ROI
-  # are now the primary static rejection stages during CARLA evaluation.
   background_filter_enabled: false
   background_calibration_seconds: 6.0
   background_cell_size: 1.0
