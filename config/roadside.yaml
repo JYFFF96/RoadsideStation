@@ -3,6 +3,7 @@ carla:
   port: 2000
   timeout: 60.0
   map: Town05_Opt
+  load_world_on_start: true
   synchronous_mode: false
 
 environment:
