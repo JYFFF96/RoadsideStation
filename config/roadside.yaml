@@ -84,7 +84,10 @@ fusion:
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
-  velocity_alpha: 0.35
+  velocity_alpha: 0.25
+  velocity_window: 5
+  position_alpha: 0.45
+  stationary_speed: 0.35
   extent_alpha: 0.25
   extent_shrink_alpha: 0.05
   extent_lock_hits: 5
