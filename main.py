@@ -50,14 +50,15 @@ def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.6.1 Near-range Teaching Profile starting...")
+ print("RoadsideStation V0.6.2 Near-range Vehicle Geometry Filter starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
   gz=station.junction_center.z if station.junction_center is not None else None;print("Ground removal: enabled reference_z=%s clearance=%.2fm"%(("-" if gz is None else "%.2f"%gz),float(fc.get("ground_clearance",0.30))))
- print("LiDAR clustering: %s"%("hybrid range-adaptive (near optimized, mid 3D, far multi-scale BEV)" if fc.get("range_adaptive_clustering",False) else "fixed"))
+ print("LiDAR clustering: %s"%("hybrid range-adaptive (near geometry filtered, mid 3D, far multi-scale BEV)" if fc.get("range_adaptive_clustering",False) else "fixed"))
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
- print("Teaching acceptance focus: 0-30m | near merge gap=%.2fm max_size=%.1fx%.1fm"%(float(fc.get("near_merge_gap",0.65)),float(fc.get("near_merged_vehicle_max_length",7.5)),float(fc.get("near_merged_vehicle_max_width",3.2))))
+ near_band=(fc.get("range_bands") or [{}])[0]
+ print("Teaching acceptance focus: 0-30m | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
  print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",3.6)),float(fc.get("road_roi_margin_far",4.5))))
  if fc.get("geometry_aware_roi_enabled",False):print("Geometry-aware ROI: >=%.0fm overlap>=%.2fm center_excess<=%.2fm"%(float(fc.get("geometry_aware_roi_min_range",30.0)),float(fc.get("geometry_aware_roi_min_overlap",0.25)),float(fc.get("geometry_aware_roi_max_center_excess",1.8))))
  if fc.get("candidate_scoring_enabled",False):print("Candidate scoring: enabled for >=%.0fm threshold=%.2f"%(float(fc.get("candidate_scoring_min_range",50.0)),float(fc.get("candidate_scoring_threshold_far",0.48))))
@@ -74,9 +75,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.1 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> near-optimized geometry -> road ROI -> candidate score -> tracking -> fusion")
+ print("ARCH: traffic -> ground removal -> near vehicle geometry filter -> road ROI -> candidate score -> tracking -> fusion")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
