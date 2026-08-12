@@ -43,8 +43,6 @@ def _junction_candidates(world_map):
             pairs = []
         headings = []
         for pair in pairs:
-            if not pair:
-                continue
             try:
                 headings.append(float(pair[0].transform.rotation.yaw) % 360.0)
             except Exception:
@@ -55,8 +53,7 @@ def _junction_candidates(world_map):
                 bins.append(h)
         box = j.bounding_box
         area = max(1.0, float(box.extent.x) * 2.0) * max(1.0, float(box.extent.y) * 2.0)
-        score = len(bins) * 1000.0 + min(area, 500.0)
-        seen[j.id] = (score, j, len(bins), area)
+        seen[j.id] = (len(bins) * 1000.0 + min(area, 500.0), j, len(bins), area)
     items = list(seen.values())
     items.sort(key=lambda x: x[0], reverse=True)
     return items
@@ -71,8 +68,7 @@ def _resolve_rsu_center(world_map, config):
             raise RuntimeError("No junction found for RSU local traffic")
         cross = [x for x in candidates if x[2] >= 4]
         pool = cross or candidates
-        index = int(sc.get("junction_index", 0)) % len(pool)
-        _, junction, dirs, area = pool[index]
+        _, junction, dirs, area = pool[int(sc.get("junction_index", 0)) % len(pool)]
         c = junction.bounding_box.location
         print("RSU junction id=%s directions=%d area=%.1f center=(%.2f, %.2f)" %
               (junction.id, dirs, area, c.x, c.y))
@@ -88,7 +84,6 @@ def _get_tm(client, preferred):
             return client.get_trafficmanager(port), port
         except RuntimeError as exc:
             last = exc
-            print("Traffic Manager port %d unavailable: %s" % (port, exc))
     raise RuntimeError("No Traffic Manager port available: %s" % last)
 
 
@@ -126,9 +121,13 @@ def _distance2d(a, b):
 
 
 def _destroy(client, ids):
-    if not ids:
-        return
-    client.apply_batch_sync([carla.command.DestroyActor(i) for i in ids], True)
+    if ids:
+        client.apply_batch_sync([carla.command.DestroyActor(i) for i in ids], True)
+
+
+def _heading_group(yaw):
+    # Four broad approach directions. Opposite lanes remain separate groups.
+    return int(((float(yaw) % 360.0) + 45.0) // 90.0) % 4
 
 
 def main():
@@ -136,16 +135,19 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="V0.4.6 RSU local CARLA traffic generator")
+    ap = argparse.ArgumentParser(description="V0.4.7 stable RSU intersection traffic generator")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
-    ap.add_argument("--vehicles", "-n", type=int, default=30)
-    ap.add_argument("--radius", type=float, default=180.0,
-                    help="initial spawn radius around the RSU junction in metres")
-    ap.add_argument("--recycle-radius", type=float, default=230.0,
-                    help="destroy/recycle owned vehicles after they leave this radius")
+    ap.add_argument("--vehicles", "-n", type=int, default=32,
+                    help="total locally owned vehicles")
+    ap.add_argument("--target-80m", type=int, default=14,
+                    help="desired minimum vehicle count inside 80m")
+    ap.add_argument("--inner-radius", type=float, default=80.0)
+    ap.add_argument("--entry-min", type=float, default=35.0)
+    ap.add_argument("--entry-max", type=float, default=115.0)
+    ap.add_argument("--recycle-radius", type=float, default=150.0)
     ap.add_argument("--speed-diff", type=float, default=30.0)
     ap.add_argument("--distance", type=float, default=3.0)
     ap.add_argument("--seed", type=int, default=42)
@@ -162,10 +164,10 @@ def main():
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_rsu_center(world_map, cfg)
-        print("RoadsideStation V0.4.6 RSU Local Traffic Generator")
+        print("RoadsideStation V0.4.7 Stable Intersection Traffic")
         print("CARLA map: %s" % world_map.name.split("/")[-1])
-        print("Local traffic center: (%.2f, %.2f), spawn radius=%.1fm, recycle radius=%.1fm" %
-              (center.x, center.y, args.radius, args.recycle_radius))
+        print("Target: >=%d vehicles inside %.0fm; entry band %.0f-%.0fm; recycle %.0fm" %
+              (args.target_80m, args.inner_radius, args.entry_min, args.entry_max, args.recycle_radius))
 
         if not args.keep_existing:
             existing = list(world.get_actors().filter("vehicle.*"))
@@ -183,25 +185,56 @@ def main():
         except Exception:
             pass
         print("Traffic Manager connected on port %d" % tm_port)
-        print("Routing remains 100%% CARLA Traffic Manager; this script never calls set_path().")
+        print("Routing: CARLA Traffic Manager only (no set_path / no custom steering).")
 
         bps = _blueprints(world)
         all_spawns = list(world_map.get_spawn_points())
-        local_spawns = [sp for sp in all_spawns if _distance2d(sp.location, center) <= args.radius]
-        local_spawns.sort(key=lambda sp: _distance2d(sp.location, center))
-        print("Map spawn points: %d; RSU-local spawn points: %d" % (len(all_spawns), len(local_spawns)))
-        if not bps:
-            raise RuntimeError("No safe vehicle blueprints")
-        if not local_spawns:
-            raise RuntimeError("No CARLA spawn points inside %.1fm; increase --radius" % args.radius)
+        entry_spawns = []
+        inner_spawns = []
+        groups = {0: [], 1: [], 2: [], 3: []}
+        for sp in all_spawns:
+            d = _distance2d(sp.location, center)
+            if d <= args.inner_radius:
+                inner_spawns.append(sp)
+            if args.entry_min <= d <= args.entry_max:
+                entry_spawns.append(sp)
+                groups[_heading_group(sp.rotation.yaw)].append(sp)
+        active_groups = [g for g in groups if groups[g]]
+        print("Spawn points: map=%d inner=%d entry=%d direction-groups=%d" %
+              (len(all_spawns), len(inner_spawns), len(entry_spawns), len(active_groups)))
+        for g in active_groups:
+            print("  approach group %d: %d spawn points" % (g, len(groups[g])))
+        if not bps or not entry_spawns:
+            raise RuntimeError("Insufficient vehicle blueprints or entry spawn points")
 
-        def spawn_one():
-            candidates = list(local_spawns)
-            rng.shuffle(candidates)
-            actors = world.get_actors()
-            occupied = [a.get_location() for a in actors.filter("vehicle.*")]
+        group_cursor = [0]
+
+        def spawn_one(prefer_inner=False):
+            actors_now = world.get_actors().filter("vehicle.*")
+            occupied = [a.get_location() for a in actors_now]
+            candidates = []
+            # Density recovery first tries legal spawn points already inside 80m.
+            if prefer_inner and inner_spawns:
+                candidates.extend(inner_spawns)
+            # Then rotate through approach directions to avoid feeding only one road.
+            if active_groups:
+                start = group_cursor[0] % len(active_groups)
+                for off in range(len(active_groups)):
+                    g = active_groups[(start + off) % len(active_groups)]
+                    pool = list(groups[g])
+                    rng.shuffle(pool)
+                    candidates.extend(pool)
+                group_cursor[0] += 1
+            else:
+                candidates.extend(entry_spawns)
+            seen = set()
             for sp in candidates:
-                if any(_distance2d(sp.location, p) < 8.0 for p in occupied):
+                key = (round(sp.location.x, 1), round(sp.location.y, 1), round(sp.rotation.yaw, 1))
+                if key in seen:
+                    continue
+                seen.add(key)
+                # Conservative separation prevents spawn collisions/traffic chaos.
+                if any(_distance2d(sp.location, p) < 9.0 for p in occupied):
                     continue
                 bp = _prepare(rng.choice(bps), rng)
                 try:
@@ -212,55 +245,86 @@ def main():
                     continue
                 actor.set_autopilot(True, tm_port)
                 owned.add(actor.id)
-                return True
-            return False
+                return actor.id
+            return None
 
-        # Initial fill. More vehicles than local spawn points cannot exist at once
-        # without unsafe overlap, so the actual count may be below the requested target.
+        # Fill the local population without overlapping vehicles.
         attempts = 0
-        while len(owned) < args.vehicles and attempts < max(50, args.vehicles * 8):
+        while len(owned) < args.vehicles and attempts < args.vehicles * 12:
             attempts += 1
-            if not spawn_one():
+            if spawn_one(prefer_inner=(len(owned) < args.target_80m)) is None:
                 time.sleep(0.05)
-        print("Initial local traffic: %d/%d vehicles." % (len(owned), args.vehicles))
-        print("Auto-recycle: ON. Vehicles leaving %.1fm are destroyed and replenished locally." % args.recycle_radius)
+        print("Initial traffic: %d/%d" % (len(owned), args.vehicles))
+        print("Density controller ON. Low 80m density triggers local legal-spawn replenishment.")
         print("Press Ctrl+C to stop and remove vehicles owned by this script.")
 
         last_report = 0.0
+        last_refill = 0.0
         while not _STOP:
-            actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
+            actor_list = world.get_actors().filter("vehicle.*")
+            actors = {a.id: a for a in actor_list}
             gone = []
             outside = []
+            inside = []
             for aid in list(owned):
                 actor = actors.get(aid)
                 if actor is None:
                     gone.append(aid)
-                elif _distance2d(actor.get_location(), center) > args.recycle_radius:
+                    continue
+                d = _distance2d(actor.get_location(), center)
+                if d > args.recycle_radius:
                     outside.append(aid)
+                elif d <= args.inner_radius:
+                    inside.append(aid)
             for aid in gone:
                 owned.discard(aid)
             if outside:
                 _destroy(client, outside)
                 for aid in outside:
                     owned.discard(aid)
-
-            # Refill gradually; Traffic Manager still owns all routing decisions.
-            missing = max(0, args.vehicles - len(owned))
-            for _ in range(min(missing, 5)):
-                if not spawn_one():
-                    break
+                time.sleep(0.05)
 
             now = time.time()
+            deficit = max(0, args.target_80m - len(inside))
+            total_missing = max(0, args.vehicles - len(owned))
+            spawned = 0
+            # Rate limit replenishment. This avoids suddenly dumping many cars into
+            # the junction while still recovering density within a few seconds.
+            if now - last_refill >= 0.75:
+                budget = min(3, max(deficit, total_missing))
+                for _ in range(budget):
+                    if len(owned) >= args.vehicles:
+                        break
+                    aid = spawn_one(prefer_inner=(deficit > 0))
+                    if aid is None:
+                        break
+                    spawned += 1
+                if budget:
+                    last_refill = now
+
             if now - last_report >= 2.0:
-                inside_sensor = 0
+                # Re-read after spawn/destroy for truthful reporting.
+                current = {a.id: a for a in world.get_actors().filter("vehicle.*")}
+                inside_now = 0
+                bands = [0, 0, 0]
                 for aid in owned:
-                    actor = actors.get(aid)
-                    if actor is not None and _distance2d(actor.get_location(), center) <= 80.0:
-                        inside_sensor += 1
-                print("Local traffic: %d/%d | within 80m: %d | recycled this cycle: %d" %
-                      (len(owned), args.vehicles, inside_sensor, len(outside)))
+                    a = current.get(aid)
+                    if a is None:
+                        continue
+                    d = _distance2d(a.get_location(), center)
+                    if d <= args.inner_radius:
+                        inside_now += 1
+                        bands[0] += 1
+                    elif d <= args.entry_max:
+                        bands[1] += 1
+                    else:
+                        bands[2] += 1
+                state = "OK" if inside_now >= args.target_80m else "REFILL"
+                print("Traffic %s | total:%d/%d | within %.0fm:%d target:%d | 80-%.0fm:%d | outer:%d | recycled:%d spawned:%d" %
+                      (state, len(owned), args.vehicles, args.inner_radius, inside_now,
+                       args.target_80m, args.entry_max, bands[1], bands[2], len(outside), spawned))
                 last_report = now
-            time.sleep(0.25)
+            time.sleep(0.20)
 
     except KeyboardInterrupt:
         _STOP = True
