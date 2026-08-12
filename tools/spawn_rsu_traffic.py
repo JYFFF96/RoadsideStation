@@ -112,7 +112,7 @@ def _prepare(bp, rng):
 
 def _destroy(client, ids):
     if ids:
-        client.apply_batch([carla.command.DestroyActor(x) for x in ids])
+        client.apply_batch_sync([carla.command.DestroyActor(x) for x in ids], True)
 
 
 def main():
@@ -120,18 +120,18 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="V0.4.8 strict-local RSU CARLA Traffic Manager traffic")
+    ap = argparse.ArgumentParser(description="V0.4.9 strict-local RSU traffic with recycle")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
     ap.add_argument("--vehicles", "-n", type=int, default=30)
-    ap.add_argument("--spawn-radius", type=float, default=130.0,
-                    help="use only CARLA map spawn points within this distance of the RSU junction")
+    ap.add_argument("--spawn-radius", type=float, default=130.0)
+    ap.add_argument("--recycle-radius", type=float, default=170.0,
+                    help="destroy owned vehicles after they leave this radius")
     ap.add_argument("--report-radius", type=float, default=80.0)
     ap.add_argument("--following-distance", type=float, default=5.0)
-    ap.add_argument("--speed-diff", type=float, default=30.0,
-                    help="Traffic Manager global percentage speed reduction")
+    ap.add_argument("--speed-diff", type=float, default=30.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--keep-existing", action="store_true")
     args = ap.parse_args()
@@ -140,17 +140,18 @@ def main():
     cfg = _load_config(args.config)
     client = carla.Client(args.host, args.port)
     client.set_timeout(10.0)
-    vehicles = []
+    vehicles = set()
 
     try:
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_rsu_center(world_map, cfg)
-        print("RoadsideStation V0.4.8 - STRICT LOCAL CARLA TM SPAWN")
+        print("RoadsideStation V0.4.9 - STRICT LOCAL + RECYCLE")
         print("Map: %s" % world_map.name.split("/")[-1])
-        print("Driving: official CARLA Traffic Manager autopilot only")
-        print("Strict-local: ON. No fallback to spawn points outside %.0fm." % args.spawn_radius)
-        print("No custom path, no waypoint routing, no steering override, no density recycle.")
+        print("Driving: CARLA Traffic Manager autopilot only")
+        print("Spawn radius=%.0fm, recycle radius=%.0fm, report radius=%.0fm" %
+              (args.spawn_radius, args.recycle_radius, args.report_radius))
+        print("No custom path / waypoint routing / steering override.")
 
         if not args.keep_existing:
             existing = list(world.get_actors().filter("vehicle.*"))
@@ -159,73 +160,101 @@ def main():
                 print("Removed %d existing vehicles." % len(existing))
                 time.sleep(0.5)
 
-        traffic_manager = client.get_trafficmanager(args.tm_port)
-        traffic_manager.set_global_distance_to_leading_vehicle(args.following_distance)
-        traffic_manager.global_percentage_speed_difference(args.speed_diff)
-        traffic_manager.set_hybrid_physics_mode(False)
+        tm = client.get_trafficmanager(args.tm_port)
+        tm.set_global_distance_to_leading_vehicle(args.following_distance)
+        tm.global_percentage_speed_difference(args.speed_diff)
+        tm.set_hybrid_physics_mode(False)
         try:
-            traffic_manager.set_random_device_seed(args.seed)
+            tm.set_random_device_seed(args.seed)
         except Exception:
             pass
 
         blueprints = _safe_blueprints(world)
-        if not blueprints:
-            raise RuntimeError("No safe vehicle blueprints found")
-
         all_spawns = list(world_map.get_spawn_points())
         local_spawns = [sp for sp in all_spawns if _distance2d(sp.location, center) <= args.spawn_radius]
-        rng.shuffle(local_spawns)
-        print("Map spawn points: %d | strict-local within %.0fm: %d" %
-              (len(all_spawns), args.spawn_radius, len(local_spawns)))
+        if not blueprints:
+            raise RuntimeError("No safe vehicle blueprints found")
         if not local_spawns:
-            raise RuntimeError("No CARLA spawn points within %.0fm; increase --spawn-radius" % args.spawn_radius)
+            raise RuntimeError("No CARLA spawn points within %.0fm" % args.spawn_radius)
+        print("Map spawn points:%d | strict-local spawn points:%d" % (len(all_spawns), len(local_spawns)))
 
-        requested = min(args.vehicles, len(local_spawns))
+        target = min(args.vehicles, len(local_spawns))
         if args.vehicles > len(local_spawns):
-            print("Requested %d vehicles, but strict-local region has only %d spawn points." %
-                  (args.vehicles, len(local_spawns)))
-            print("Strict-local mode will spawn at most %d vehicles; it will NOT use the rest of the map." % requested)
+            print("Requested %d, local region supports at most %d simultaneous spawn slots." %
+                  (args.vehicles, target))
 
-        SpawnActor = carla.command.SpawnActor
-        SetAutopilot = carla.command.SetAutopilot
-        FutureActor = carla.command.FutureActor
-        batch = []
-        for sp in local_spawns[:requested]:
-            bp = _prepare(rng.choice(blueprints), rng)
-            batch.append(SpawnActor(bp, sp).then(SetAutopilot(FutureActor, True, traffic_manager.get_port())))
+        def spawn_one():
+            occupied = [a.get_location() for a in world.get_actors().filter("vehicle.*")]
+            candidates = list(local_spawns)
+            rng.shuffle(candidates)
+            for sp in candidates:
+                if any(_distance2d(sp.location, p) < 9.0 for p in occupied):
+                    continue
+                bp = _prepare(rng.choice(blueprints), rng)
+                try:
+                    actor = world.try_spawn_actor(bp, sp)
+                except Exception:
+                    actor = None
+                if actor is None:
+                    continue
+                actor.set_autopilot(True, tm.get_port())
+                vehicles.add(actor.id)
+                return actor.id
+            return None
 
-        for response in client.apply_batch_sync(batch, False):
-            if response.error:
-                print("Spawn warning: %s" % response.error)
-            else:
-                vehicles.append(response.actor_id)
-
-        print("Spawned: %d/%d requested (%d strict-local spawn points available)" %
-              (len(vehicles), args.vehicles, len(local_spawns)))
-        print("TrafficManager: following-distance=%.1fm, speed-reduction=%.0f%%" %
-              (args.following_distance, args.speed_diff))
+        attempts = 0
+        while len(vehicles) < target and attempts < target * 10:
+            attempts += 1
+            if spawn_one() is None:
+                time.sleep(0.05)
+        print("Initial spawned: %d/%d" % (len(vehicles), target))
+        print("Recycle: ON. Vehicles outside %.0fm are destroyed and respawned from strict-local points." % args.recycle_radius)
         print("Press Ctrl+C to stop and remove these vehicles.")
 
-        last = 0.0
+        last_report = 0.0
+        last_spawn = 0.0
         while not _STOP:
+            actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
+            gone = []
+            outside = []
+            for aid in list(vehicles):
+                a = actors.get(aid)
+                if a is None:
+                    gone.append(aid)
+                elif _distance2d(a.get_location(), center) > args.recycle_radius:
+                    outside.append(aid)
+            for aid in gone:
+                vehicles.discard(aid)
+            if outside:
+                _destroy(client, outside)
+                for aid in outside:
+                    vehicles.discard(aid)
+
             now = time.time()
-            if now - last >= 2.0:
-                actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
-                alive = 0
+            spawned = 0
+            if len(vehicles) < target and now - last_spawn >= 0.75:
+                # Refill gently to avoid dumping many cars onto the same road at once.
+                for _ in range(min(2, target - len(vehicles))):
+                    if spawn_one() is None:
+                        break
+                    spawned += 1
+                last_spawn = now
+
+            if now - last_report >= 2.0:
+                current = {a.id: a for a in world.get_actors().filter("vehicle.*")}
                 within = 0
-                max_distance = 0.0
+                farthest = 0.0
                 for aid in vehicles:
-                    a = actors.get(aid)
+                    a = current.get(aid)
                     if a is None:
                         continue
-                    alive += 1
                     d = _distance2d(a.get_location(), center)
-                    max_distance = max(max_distance, d)
+                    farthest = max(farthest, d)
                     if d <= args.report_radius:
                         within += 1
-                print("Traffic | alive:%d/%d | within %.0fm:%d | farthest:%.1fm" %
-                      (alive, len(vehicles), args.report_radius, within, max_distance))
-                last = now
+                print("Traffic | alive:%d/%d | within %.0fm:%d | farthest:%.1fm | recycled:%d respawned:%d" %
+                      (len(vehicles), target, args.report_radius, within, farthest, len(outside), spawned))
+                last_report = now
             time.sleep(0.2)
 
     except KeyboardInterrupt:
@@ -233,7 +262,7 @@ def main():
     finally:
         print("Destroying %d traffic vehicles..." % len(vehicles))
         try:
-            _destroy(client, vehicles)
+            _destroy(client, list(vehicles))
         except Exception as exc:
             print("Cleanup warning: %s" % exc)
         print("Traffic stopped cleanly.")
