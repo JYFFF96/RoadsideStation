@@ -25,7 +25,8 @@ class SimpleFusion(object):
  def __init__(self,station_id,config):
   self.station_id=station_id;self.config=config
   self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.25),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35),config.get("velocity_window",5),config.get("position_alpha",.45),config.get("stationary_speed",.35))
-  self.background=PersistentStaticFilter(**config);self.world_transform=None;self.radar_matrix=None;self.radar_origin=None;self.ground_reference_z=None;self.candidate_validator=None;self.last_stats={};self.last_dynamic_candidates=[];self.last_tracked_candidates=[]
+  self.background=PersistentStaticFilter(**config);self.world_transform=None;self.radar_matrix=None;self.radar_origin=None;self.ground_reference_z=None;self.candidate_validator=None
+  self.last_stats={};self.last_geometry_world=[];self.last_roi_candidates=[];self.last_dynamic_candidates=[];self.last_tracked_candidates=[];self.last_roi_rejections=[]
  def set_world_transform(self,t):
   if t is None:self.world_transform=None;return
   self.world_transform={"x":float(t.location.x),"y":float(t.location.y),"z":float(t.location.z),"yaw":math.radians(float(t.rotation.yaw))}
@@ -77,26 +78,43 @@ class SimpleFusion(object):
  def _looks_like_pole(self,e):
   ex,ey,ez=[float(v) for v in e];hl=max(ex,ey);hs=min(ex,ey);c=self.config
   return hs<c.get("pole_short_max",.75) and hl<c.get("pole_long_max",2.5) and ez>c.get("pole_height_min",1.5)
+ def _validate_candidate(self,wx,wy,wz,e):
+  if not self.candidate_validator:return True,"ok",{}
+  try:
+   result=self.candidate_validator(wx,wy,wz,e)
+   if isinstance(result,tuple):
+    ok=bool(result[0]);reason=result[1] if len(result)>1 else ("ok" if ok else "rejected");details=result[2] if len(result)>2 else {};return ok,reason,details
+   return bool(result),("ok" if result else "rejected"),{}
+  except Exception as exc:return False,"validator_error",{"error":str(exc)}
  def fuse(self,lidar_points,radar_detections,timestamp=None):
   now=time.time() if timestamp is None else float(timestamp);c=self.config
   clean_points,ground_removed=self._remove_ground_points(lidar_points)
   raw=voxel_cluster_lidar(clean_points,c.get("voxel_size",.8),c.get("cluster_min_points",6),c.get("lidar_min_z",-7.5),c.get("lidar_max_z",2.),c.get("max_range",70.),c.get("vehicle_min_length",.6),c.get("vehicle_max_length",8.),c.get("vehicle_min_width",.4),c.get("vehicle_max_width",4.),c.get("vehicle_min_height",.25),c.get("vehicle_max_height",4.),c.get("max_objects",80))
   filtered=[x for x in raw if not self._looks_like_pole(x.get("extent",[0,0,0]))]
   clusters=merge_lidar_clusters(filtered,c.get("cluster_merge_gap",1.4),c.get("merged_vehicle_max_length",14.),c.get("merged_vehicle_max_width",4.2),c.get("merged_vehicle_max_height",4.2)) if c.get("cluster_merge_enabled",True) else filtered
-  world_clusters=[]
+  world_clusters=[];roi_rejections=[]
   for i in clusters:
-   wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0])
-   if self.candidate_validator:
-    try:
-     if not self.candidate_validator(wx,wy,wz,e):continue
-    except Exception:continue
-   world_clusters.append({"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e})
-  assoc,radar_world_count,radar_matched=self._associate_radar_world(world_clusters,radar_detections);roi=[]
+   wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e}
+   world_clusters.append(dict(item));ok,reason,details=self._validate_candidate(wx,wy,wz,e)
+   if not ok:
+    rej=dict(item);rej["reason"]=reason;rej["details"]=details;roi_rejections.append(rej);continue
+   item["roi_reason"]="ok";item["roi_details"]=details
+  self.last_geometry_world=[dict(x) for x in world_clusters]
+  accepted=[]
+  rejected_ids=set(id(x) for x in [])
+  for i in clusters:
+   wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);ok,reason,details=self._validate_candidate(wx,wy,wz,e)
+   if not ok:continue
+   accepted.append({"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e,"roi_details":details})
+  self.last_roi_rejections=roi_rejections
+  assoc,radar_world_count,radar_matched=self._associate_radar_world(accepted,radar_detections);roi=[]
   for item in assoc:
    if item.get("radar_radial_velocity") is not None:item["confidence"]=.90;item["sources"]=["lidar","radar"]
    roi.append(item)
+  self.last_roi_candidates=[dict(x) for x in roi]
   dyn=self.background.update_and_filter(roi,now);self.last_dynamic_candidates=[dict(x) for x in dyn];tracked=self.tracker.update(dyn,now);self.last_tracked_candidates=[dict(x) for x in tracked]
   objs=[DetectedObject(i["id"],i["x"],i["y"],i["z"],vx=i["vx"],vy=i["vy"],object_type="unknown",confidence=i["confidence"],sources=i["sources"]) for i in tracked]
-  nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None]
-  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"roi_candidates":len(roi),"background_candidates":len(dyn),"background_ready":self.background.ready,"background_remaining":self.background.remaining_seconds(now),"background_cells":len(self.background.static_cells),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
+  nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None];reasons=defaultdict(int)
+  for r in roi_rejections:reasons[r.get("reason","rejected")]+=1
+  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(roi),"roi_rejected":len(roi_rejections),"roi_rejection_reasons":dict(reasons),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":self.background.ready,"background_remaining":self.background.remaining_seconds(now),"background_cells":len(self.background.static_cells),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
   return ObjectList(self.station_id,objs,timestamp=now)
