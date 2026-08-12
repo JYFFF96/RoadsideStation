@@ -66,16 +66,15 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # V0.5.6 hybrid clustering: keep the proven 3D voxel pipeline at 0-50 m,
-  # and use bird's-eye-view (XY) connectivity at 50-80 m. Far roadside LiDAR
-  # returns are vertically sparse, so ignoring Z only for connectivity helps
-  # reconnect points belonging to the same distant vehicle. Z is still used
-  # afterwards to compute and validate the full 3D bounding box.
+  # V0.5.8: near/mid keep proven 3D voxel clustering; far range runs two
+  # BEV scales in parallel. The smaller grid preserves vehicle separation,
+  # while the larger grid reconnects sparse returns. Overlapping candidates
+  # are deduplicated before merge/ROI.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
     - {max_range: 50.0, mode: 3d, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
-    - {max_range: 80.0, mode: bev, bev_cell_size: 0.65, bev_neighbor_cells: 1, min_points: 2, min_length: 0.20, min_width: 0.12, min_height: 0.08}
+    - {max_range: 80.0, mode: bev_multiscale, bev_cell_sizes: [0.55, 0.85], bev_neighbor_cells: 1, bev_dedupe_distance: 1.40, min_points: 2, min_length: 0.18, min_width: 0.10, min_height: 0.07}
 
   voxel_size: 0.5
   cluster_min_points: 4
@@ -88,7 +87,7 @@ fusion:
   vehicle_max_width: 4.0
   vehicle_min_height: 0.15
   vehicle_max_height: 4.0
-  max_objects: 120
+  max_objects: 140
 
   cluster_merge_enabled: true
   cluster_merge_gap: 1.2
@@ -115,7 +114,13 @@ fusion:
   extent_shrink_alpha: 0.05
   extent_lock_hits: 5
 
+  # Distance-aware road ROI. Far candidate centers are noisier because sparse
+  # point clouds and partial vehicle surfaces shift the centroid sideways.
   road_roi_margin: 3.0
+  road_roi_margin_mid: 3.6
+  road_roi_margin_far: 4.5
+  road_roi_mid_range: 30.0
+  road_roi_far_range: 50.0
   road_min_height: -1.0
   road_max_height: 2.8
 
