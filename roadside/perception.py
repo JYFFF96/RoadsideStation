@@ -121,7 +121,7 @@ def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.
         upper=min(float(band.get("max_range",max_range)),float(max_range))
         if upper<=lower:continue
         mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper);bp=pts[mask];mode=str(band.get("mode","3d")).lower()
-        common=(band.get("min_points",4),band.get("min_length",0.4),max_length,band.get("min_width",0.25),max_width,band.get("min_height",0.15),max_height,max_objects)
+        common=(band.get("min_points",4),band.get("min_length",0.4),band.get("max_length",max_length),band.get("min_width",0.25),band.get("max_width",max_width),band.get("min_height",0.15),band.get("max_height",max_height),max_objects)
         if mode in ("bev_multiscale","multiscale_bev"):
             sizes=band.get("bev_cell_sizes",[0.55,0.85]);out.extend(_cluster_array_bev_multiscale(bp,sizes,*common,neighbor_cells=band.get("bev_neighbor_cells",1),dedupe_distance=band.get("bev_dedupe_distance",1.4)))
         elif mode=="bev":out.extend(_cluster_array_bev(bp,band.get("bev_cell_size",band.get("voxel_size",0.65)),*common,neighbor_cells=band.get("bev_neighbor_cells",1)))
