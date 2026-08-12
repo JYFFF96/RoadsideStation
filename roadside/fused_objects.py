@@ -28,7 +28,7 @@ class FusedObject(object):
             "sources": list(self.sources),
         }
         if self.radar_speed is not None:
-            out["radarSpeed"] = self.radar_speed
+            out["radarRadialVelocity"] = self.radar_speed
         if self.camera is not None:
             out["camera"] = dict(self.camera)
         return out
@@ -68,6 +68,9 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
     objects = []
     for item in tracked_candidates or []:
         extent = item.get("extent", [0.0, 0.0, 0.0])
+        # Normalize horizontal dimensions for the public fusion boundary.
+        ex, ey, ez = [float(v) for v in extent]
+        size = [max(ex, ey), min(ex, ey), ez]
         sources = list(item.get("sources", []))
         object_type = item.get("object_type", "unknown")
         confidence = float(item.get("confidence", 0.0))
@@ -89,10 +92,11 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
                     "centerDistancePx": float(pair.get("center_distance", 0.0)),
                 },
             }
+        radar_velocity = item.get("radar_radial_velocity")
         objects.append(FusedObject(
             item.get("id", "unknown"), object_type=object_type,
             x=item.get("x", 0.0), y=item.get("y", 0.0), z=item.get("z", 0.0),
-            vx=item.get("vx", 0.0), vy=item.get("vy", 0.0), size=extent,
+            vx=item.get("vx", 0.0), vy=item.get("vy", 0.0), size=size,
             confidence=confidence, sources=sources, camera=camera_meta,
-            radar_speed=item.get("radar_speed")))
+            radar_speed=radar_velocity))
     return FusedObjectList(station_id, objects, timestamp)
