@@ -102,6 +102,13 @@ fusion:
   static_confirm_seconds: 3.0
   static_max_speed: 0.8
 
+evaluation:
+  enabled: true
+  radius: 80.0
+  match_distance: 4.0
+  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
+  report_interval: 2.0
+
 mqtt:
   enabled: false
   host: 127.0.0.1
