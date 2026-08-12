@@ -105,6 +105,7 @@ fusion:
 evaluation:
   enabled: true
   radius: 80.0
+  range_bins: [30.0, 50.0, 80.0]
   match_distance: 4.0
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   report_interval: 2.0
