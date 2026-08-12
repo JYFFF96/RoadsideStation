@@ -66,10 +66,9 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # V0.5.8: near/mid keep proven 3D voxel clustering; far range runs two
-  # BEV scales in parallel. The smaller grid preserves vehicle separation,
-  # while the larger grid reconnects sparse returns. Overlapping candidates
-  # are deduplicated before merge/ROI.
+  # V0.5.9 keeps V0.5.8 multi-scale far BEV recall, then scores ROI-approved
+  # far candidates using vehicle-like geometry, point support, multiscale
+  # agreement and road-lateral quality before tracking.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
@@ -98,6 +97,12 @@ fusion:
   pole_long_max: 2.5
   pole_height_min: 1.5
 
+  # V0.5.9 candidate scoring is deliberately far-range only. Near/mid are
+  # bypassed so the already-good close-range recall is not disturbed.
+  candidate_scoring_enabled: true
+  candidate_scoring_min_range: 50.0
+  candidate_scoring_threshold_far: 0.48
+
   radar_match_distance: 4.0
   radar_match_z: 2.5
   radar_min_hits: 1
@@ -114,8 +119,6 @@ fusion:
   extent_shrink_alpha: 0.05
   extent_lock_hits: 5
 
-  # Distance-aware road ROI. Far candidate centers are noisier because sparse
-  # point clouds and partial vehicle surfaces shift the centroid sideways.
   road_roi_margin: 3.0
   road_roi_margin_mid: 3.6
   road_roi_margin_far: 4.5
