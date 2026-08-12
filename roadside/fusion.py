@@ -24,7 +24,7 @@ class PersistentStaticFilter(object):
 class SimpleFusion(object):
  def __init__(self,station_id,config):
   self.station_id=station_id;self.config=config
-  self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.35),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35))
+  self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.25),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35),config.get("velocity_window",5),config.get("position_alpha",.45),config.get("stationary_speed",.35))
   self.background=PersistentStaticFilter(**config);self.world_transform=None;self.radar_matrix=None;self.radar_origin=None;self.candidate_validator=None;self.last_stats={};self.last_dynamic_candidates=[];self.last_tracked_candidates=[]
  def set_world_transform(self,t):
   if t is None:self.world_transform=None;return
@@ -52,12 +52,14 @@ class SimpleFusion(object):
    if p is not None:points.append(p)
   max_d=float(self.config.get("radar_match_distance",4.0));max_z=float(self.config.get("radar_match_z",2.5));min_hits=int(self.config.get("radar_min_hits",1));out=[];matched=0
   for c in clusters:
-   near=[]
+   near=[];nearest_xy=None;nearest_3d=None
    for p in points:
+    dxy=math.hypot(p["x"]-c["x"],p["y"]-c["y"]);d3=math.sqrt(dxy*dxy+(p["z"]-c["z"])**2)
+    if nearest_xy is None or dxy<nearest_xy:nearest_xy=dxy
+    if nearest_3d is None or d3<nearest_3d:nearest_3d=d3
     if abs(p["z"]-c["z"])>max_z:continue
-    dxy=math.hypot(p["x"]-c["x"],p["y"]-c["y"])
     if dxy<=max_d:near.append((dxy,p))
-   item=dict(c)
+   item=dict(c);item["radar_nearest_xy"]=nearest_xy;item["radar_nearest_3d"]=nearest_3d;item["radar_hits"]=0
    if len(near)>=min_hits:
     near.sort(key=lambda x:x[0]);use=[p for _,p in near[:max(1,min(8,len(near)))]]
     item["radar_radial_velocity"]=float(statistics.median([p["velocity"] for p in use]));item["radar_los_x"]=sum(p["los_x"] for p in use)/len(use);item["radar_los_y"]=sum(p["los_y"] for p in use)/len(use);item["radar_hits"]=len(near);matched+=1
@@ -78,13 +80,13 @@ class SimpleFusion(object):
     try:
      if not self.candidate_validator(wx,wy,wz,e):continue
     except Exception:continue
-   item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e};world_clusters.append(item)
-  assoc,radar_world_count,radar_matched=self._associate_radar_world(world_clusters,radar_detections)
-  roi=[]
+   world_clusters.append({"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e})
+  assoc,radar_world_count,radar_matched=self._associate_radar_world(world_clusters,radar_detections);roi=[]
   for item in assoc:
    if item.get("radar_radial_velocity") is not None:item["confidence"]=.90;item["sources"]=["lidar","radar"]
    roi.append(item)
   dyn=self.background.update_and_filter(roi,now);self.last_dynamic_candidates=[dict(x) for x in dyn];tracked=self.tracker.update(dyn,now);self.last_tracked_candidates=[dict(x) for x in tracked]
   objs=[DetectedObject(i["id"],i["x"],i["y"],i["z"],vx=i["vx"],vy=i["vy"],object_type="unknown",confidence=i["confidence"],sources=i["sources"]) for i in tracked]
-  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"roi_candidates":len(roi),"background_candidates":len(dyn),"background_ready":self.background.ready,"background_remaining":self.background.remaining_seconds(now),"background_cells":len(self.background.static_cells),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"tracked_objects":len(objs)}
+  nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None]
+  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"roi_candidates":len(roi),"background_candidates":len(dyn),"background_ready":self.background.ready,"background_remaining":self.background.remaining_seconds(now),"background_cells":len(self.background.static_cells),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
   return ObjectList(self.station_id,objs,timestamp=now)
