@@ -120,16 +120,18 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="V0.4.7 RSU-local CARLA Traffic Manager traffic")
+    ap = argparse.ArgumentParser(description="V0.4.8 strict-local RSU CARLA Traffic Manager traffic")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
     ap.add_argument("--vehicles", "-n", type=int, default=30)
     ap.add_argument("--spawn-radius", type=float, default=130.0,
-                    help="prefer CARLA map spawn points within this distance of the RSU junction")
+                    help="use only CARLA map spawn points within this distance of the RSU junction")
     ap.add_argument("--report-radius", type=float, default=80.0)
-    ap.add_argument("--safe", action="store_true", default=True)
+    ap.add_argument("--following-distance", type=float, default=5.0)
+    ap.add_argument("--speed-diff", type=float, default=30.0,
+                    help="Traffic Manager global percentage speed reduction")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--keep-existing", action="store_true")
     args = ap.parse_args()
@@ -144,9 +146,10 @@ def main():
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_rsu_center(world_map, cfg)
-        print("RoadsideStation V0.4.7 - CARLA TM Local Spawn")
+        print("RoadsideStation V0.4.8 - STRICT LOCAL CARLA TM SPAWN")
         print("Map: %s" % world_map.name.split("/")[-1])
         print("Driving: official CARLA Traffic Manager autopilot only")
+        print("Strict-local: ON. No fallback to spawn points outside %.0fm." % args.spawn_radius)
         print("No custom path, no waypoint routing, no steering override, no density recycle.")
 
         if not args.keep_existing:
@@ -157,7 +160,9 @@ def main():
                 time.sleep(0.5)
 
         traffic_manager = client.get_trafficmanager(args.tm_port)
-        traffic_manager.set_global_distance_to_leading_vehicle(2.5)
+        traffic_manager.set_global_distance_to_leading_vehicle(args.following_distance)
+        traffic_manager.global_percentage_speed_difference(args.speed_diff)
+        traffic_manager.set_hybrid_physics_mode(False)
         try:
             traffic_manager.set_random_device_seed(args.seed)
         except Exception:
@@ -169,19 +174,23 @@ def main():
 
         all_spawns = list(world_map.get_spawn_points())
         local_spawns = [sp for sp in all_spawns if _distance2d(sp.location, center) <= args.spawn_radius]
-        # Important: these are untouched map-defined spawn transforms, exactly the same
-        # type used by CARLA's official generate_traffic.py. We only change their order.
         rng.shuffle(local_spawns)
-        rng.shuffle(all_spawns)
-        ordered = local_spawns + [sp for sp in all_spawns if sp not in local_spawns]
-        print("Map spawn points: %d | preferred within %.0fm: %d" %
+        print("Map spawn points: %d | strict-local within %.0fm: %d" %
               (len(all_spawns), args.spawn_radius, len(local_spawns)))
+        if not local_spawns:
+            raise RuntimeError("No CARLA spawn points within %.0fm; increase --spawn-radius" % args.spawn_radius)
+
+        requested = min(args.vehicles, len(local_spawns))
+        if args.vehicles > len(local_spawns):
+            print("Requested %d vehicles, but strict-local region has only %d spawn points." %
+                  (args.vehicles, len(local_spawns)))
+            print("Strict-local mode will spawn at most %d vehicles; it will NOT use the rest of the map." % requested)
 
         SpawnActor = carla.command.SpawnActor
         SetAutopilot = carla.command.SetAutopilot
         FutureActor = carla.command.FutureActor
         batch = []
-        for sp in ordered[:args.vehicles]:
+        for sp in local_spawns[:requested]:
             bp = _prepare(rng.choice(blueprints), rng)
             batch.append(SpawnActor(bp, sp).then(SetAutopilot(FutureActor, True, traffic_manager.get_port())))
 
@@ -191,7 +200,10 @@ def main():
             else:
                 vehicles.append(response.actor_id)
 
-        print("Spawned: %d/%d" % (len(vehicles), args.vehicles))
+        print("Spawned: %d/%d requested (%d strict-local spawn points available)" %
+              (len(vehicles), args.vehicles, len(local_spawns)))
+        print("TrafficManager: following-distance=%.1fm, speed-reduction=%.0f%%" %
+              (args.following_distance, args.speed_diff))
         print("Press Ctrl+C to stop and remove these vehicles.")
 
         last = 0.0
@@ -201,15 +213,18 @@ def main():
                 actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
                 alive = 0
                 within = 0
+                max_distance = 0.0
                 for aid in vehicles:
                     a = actors.get(aid)
                     if a is None:
                         continue
                     alive += 1
-                    if _distance2d(a.get_location(), center) <= args.report_radius:
+                    d = _distance2d(a.get_location(), center)
+                    max_distance = max(max_distance, d)
+                    if d <= args.report_radius:
                         within += 1
-                print("Traffic | alive:%d/%d | within %.0fm:%d" %
-                      (alive, len(vehicles), args.report_radius, within))
+                print("Traffic | alive:%d/%d | within %.0fm:%d | farthest:%.1fm" %
+                      (alive, len(vehicles), args.report_radius, within, max_distance))
                 last = now
             time.sleep(0.2)
 
