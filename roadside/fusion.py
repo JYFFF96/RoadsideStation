@@ -26,7 +26,7 @@ class SimpleFusion(object):
   self.station_id=station_id;self.config=config
   self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.25),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35),config.get("velocity_window",5),config.get("position_alpha",.45),config.get("stationary_speed",.35))
   self.background=PersistentStaticFilter(**config);self.world_transform=None;self.radar_matrix=None;self.radar_origin=None;self.ground_reference_z=None;self.candidate_validator=None
-  self.last_stats={};self.last_geometry_world=[];self.last_roi_candidates=[];self.last_dynamic_candidates=[];self.last_tracked_candidates=[];self.last_roi_rejections=[]
+  self.last_stats={};self.last_geometry_world=[];self.last_roi_candidates=[];self.last_scored_candidates=[];self.last_dynamic_candidates=[];self.last_tracked_candidates=[];self.last_roi_rejections=[];self.last_score_rejections=[]
  def set_world_transform(self,t):
   if t is None:self.world_transform=None;return
   self.world_transform={"x":float(t.location.x),"y":float(t.location.y),"z":float(t.location.z),"yaw":math.radians(float(t.rotation.yaw))}
@@ -40,6 +40,9 @@ class SimpleFusion(object):
  def _to_world(self,x,y,z):
   if self.world_transform is None:return x,y,z
   t=self.world_transform;c=math.cos(t["yaw"]);s=math.sin(t["yaw"]);return t["x"]+c*x-s*y,t["y"]+s*x+c*y,t["z"]+z
+ def _sensor_range(self,x,y):
+  if self.world_transform is None:return math.hypot(float(x),float(y))
+  return math.hypot(float(x)-self.world_transform["x"],float(y)-self.world_transform["y"])
  def _remove_ground_points(self,points):
   if points is None:return None,0
   total=len(points)
@@ -90,6 +93,40 @@ class SimpleFusion(object):
   if c.get("range_adaptive_clustering",False):
    return adaptive_voxel_cluster_lidar(clean_points,c.get("range_bands",[]),c.get("lidar_min_z",-7.5),c.get("lidar_max_z",2.),c.get("max_range",80.),c.get("vehicle_max_length",8.),c.get("vehicle_max_width",4.),c.get("vehicle_max_height",4.),c.get("max_objects",120))
   return voxel_cluster_lidar(clean_points,c.get("voxel_size",.8),c.get("cluster_min_points",6),c.get("lidar_min_z",-7.5),c.get("lidar_max_z",2.),c.get("max_range",70.),c.get("vehicle_min_length",.6),c.get("vehicle_max_length",8.),c.get("vehicle_min_width",.4),c.get("vehicle_max_width",4.),c.get("vehicle_min_height",.25),c.get("vehicle_max_height",4.),c.get("max_objects",80))
+ def _candidate_score(self,item):
+  """Score ROI-approved far candidates. Near/mid candidates bypass this gate."""
+  e=[float(v) for v in item.get("extent",[0,0,0])];hl=max(e[0],e[1]);hs=min(e[0],e[1]);h=e[2];points=int(item.get("point_count",0));votes=int(item.get("scale_votes",1));details=item.get("roi_details",{}) or {}
+  score=0.0
+  if 1.2<=hl<=7.5:score+=0.22
+  elif 0.7<=hl<=8.0:score+=0.10
+  if 0.55<=hs<=3.4:score+=0.20
+  elif 0.30<=hs<=3.8:score+=0.08
+  if 0.45<=h<=3.5:score+=0.20
+  elif 0.20<=h<=3.8:score+=0.08
+  if points>=8:score+=0.16
+  elif points>=4:score+=0.11
+  elif points>=2:score+=0.05
+  if votes>=2:score+=0.17
+  else:score+=0.04
+  lateral=details.get("lateral");allowed=details.get("allowed_lateral")
+  if lateral is not None and allowed not in (None,0):
+   ratio=float(lateral)/max(0.01,float(allowed))
+   if ratio<=0.65:score+=0.05
+   elif ratio<=0.85:score+=0.03
+  return min(1.0,score)
+ def _score_candidates(self,items):
+  c=self.config
+  if not c.get("candidate_scoring_enabled",False):return [dict(x) for x in items],[]
+  min_range=float(c.get("candidate_scoring_min_range",50.0));threshold=float(c.get("candidate_scoring_threshold_far",0.48));kept=[];rejected=[]
+  for src in items:
+   item=dict(src);rng=self._sensor_range(item["x"],item["y"]);item["sensor_range"]=rng
+   if rng<min_range:
+    item["candidate_score"]=1.0;item["candidate_score_bypass"]=True;kept.append(item);continue
+   score=self._candidate_score(item);item["candidate_score"]=score;item["candidate_score_bypass"]=False
+   if score>=threshold:kept.append(item)
+   else:
+    r=dict(item);r["reason"]="candidate_score";rejected.append(r)
+  return kept,rejected
  def fuse(self,lidar_points,radar_detections,timestamp=None):
   now=time.time() if timestamp is None else float(timestamp);c=self.config
   clean_points,ground_removed=self._remove_ground_points(lidar_points);raw=self._cluster(clean_points,c)
@@ -97,17 +134,17 @@ class SimpleFusion(object):
   clusters=merge_lidar_clusters(filtered,c.get("cluster_merge_gap",1.4),c.get("merged_vehicle_max_length",14.),c.get("merged_vehicle_max_width",4.2),c.get("merged_vehicle_max_height",4.2)) if c.get("cluster_merge_enabled",True) else filtered
   world_clusters=[];accepted=[];roi_rejections=[]
   for i in clusters:
-   wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e};world_clusters.append(dict(item))
+   wx,wy,wz=self._to_world(i["x"],i["y"],i["z"]);e=i.get("extent",[0,0,0]);item={"x":wx,"y":wy,"z":wz,"confidence":.72,"sources":["lidar"],"point_count":i.get("point_count",0),"extent":e,"cluster_mode":i.get("cluster_mode","3d"),"scale_votes":int(i.get("scale_votes",1)),"scale_modes":list(i.get("scale_modes",[i.get("cluster_mode","3d")]))};world_clusters.append(dict(item))
    ok,reason,details=self._validate_candidate(wx,wy,wz,e)
    if not ok:
     rej=dict(item);rej["reason"]=reason;rej["details"]=details;roi_rejections.append(rej);continue
    item["roi_reason"]="ok";item["roi_details"]=details;accepted.append(item)
-  self.last_geometry_world=[dict(x) for x in world_clusters];self.last_roi_rejections=roi_rejections
-  assoc,radar_world_count,radar_matched=self._associate_radar_world(accepted,radar_detections);roi=[]
+  self.last_geometry_world=[dict(x) for x in world_clusters];self.last_roi_rejections=roi_rejections;self.last_roi_candidates=[dict(x) for x in accepted]
+  scored,score_rejections=self._score_candidates(accepted);self.last_scored_candidates=[dict(x) for x in scored];self.last_score_rejections=[dict(x) for x in score_rejections]
+  assoc,radar_world_count,radar_matched=self._associate_radar_world(scored,radar_detections);roi=[]
   for item in assoc:
    if item.get("radar_radial_velocity") is not None:item["confidence"]=.90;item["sources"]=["lidar","radar"]
    roi.append(item)
-  self.last_roi_candidates=[dict(x) for x in roi]
   if c.get("background_filter_enabled",False):
    dyn=self.background.update_and_filter(roi,now);background_ready=self.background.ready;background_remaining=self.background.remaining_seconds(now);background_cells=len(self.background.static_cells)
   else:
@@ -116,5 +153,6 @@ class SimpleFusion(object):
   objs=[DetectedObject(i["id"],i["x"],i["y"],i["z"],vx=i["vx"],vy=i["vy"],object_type="unknown",confidence=i["confidence"],sources=i["sources"]) for i in tracked]
   nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None];reasons=defaultdict(int)
   for r in roi_rejections:reasons[r.get("reason","rejected")]+=1
-  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(roi),"roi_rejected":len(roi_rejections),"roi_rejection_reasons":dict(reasons),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
+  score_values=[float(x.get("candidate_score",1.0)) for x in scored if not x.get("candidate_score_bypass",False)]
+  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(accepted),"roi_rejected":len(roi_rejections),"roi_rejection_reasons":dict(reasons),"scored_candidates":len(scored),"score_rejected":len(score_rejections),"candidate_scoring_enabled":bool(c.get("candidate_scoring_enabled",False)),"candidate_score_avg":(sum(score_values)/len(score_values) if score_values else None),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
   return ObjectList(self.station_id,objs,timestamp=now)
