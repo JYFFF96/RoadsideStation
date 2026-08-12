@@ -30,17 +30,14 @@ def _try_load_configured_map(config):
  if current!=target:
   print("Calling client.load_world('%s')..."%target);world=client.load_world(target);print("CARLA map switch completed: %s"%world.get_map().name.split("/")[-1]);time.sleep(2.0)
 
-def _pct(v):
- return "-" if v is None else "%.1f%%"%(100.0*float(v))
-
-def _meters(v):
- return "-" if v is None else "%.2fm"%float(v)
+def _pct(v):return "-" if v is None else "%.1f%%"%(100.0*float(v))
+def _meters(v):return "-" if v is None else "%.2fm"%float(v)
 
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.5.0 Ground Truth Evaluation starting...")
+ print("RoadsideStation V0.5.1 Range Evaluation starting...")
  station.start();fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_candidate_validator(station.is_driving_roi);pub.connect()
  projector=None;width=0;height=0
  if station.camera_transform is not None:
@@ -53,8 +50,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.0 evaluator: %s"%("enabled" if evaluator else "disabled"))
- if evaluator:print("Evaluation radius: %.1fm, truth-track match gate: %.1fm"%(evaluator.radius,evaluator.match_distance))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.5.1 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
+ print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
  print("Static background calibration: keep the scene empty until calibration is READY")
@@ -79,6 +77,8 @@ def main():
    if evaluator is not None and now-last_eval>=eval_interval:
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0))
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr(avg/max):%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
+    for b in ev.get("range_bins",[]):
+     print("  [RANGE %02.0f-%02.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s"%(b["min_range"],b["max_range"],b["truth"],b["detected"],b["matched"],b["missed"],b["false_positive"],_pct(b["recall"]),_pct(b["precision"]),_meters(b["mean_position_error"])))
     last_eval=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj);time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
