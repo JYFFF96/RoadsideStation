@@ -3,15 +3,10 @@ carla:
   port: 2000
   timeout: 60.0
   map: Town05_Opt
-  # Keep this false when traffic is created by CARLA's official
-  # PythonAPI/examples/generate_traffic.py. Calling load_world() here would
-  # destroy every vehicle/walker that was already spawned in the current world.
   load_world_on_start: false
   synchronous_mode: false
 
 traffic:
-  # RoadsideStation is a roadside perception process. Normal background
-  # traffic should be owned by CARLA's official generate_traffic.py process.
   mode: external
   source: carla_generate_traffic
 
@@ -68,10 +63,19 @@ radar:
   transform: {x: 0.0, y: 0.0, z: 0.2, pitch: -5.0, yaw: 0.0, roll: 0.0}
 
 fusion:
-  # V0.5.3 ground removal: use the selected junction center as the local road
-  # elevation and drop LiDAR points within 0.30 m of that surface before clustering.
   ground_removal_enabled: true
   ground_clearance: 0.30
+
+  # V0.5.5: high-mounted roadside LiDAR needs range-dependent clustering.
+  # Near range keeps the strict geometry that already reached ~80% recall.
+  # Mid/far bands progressively enlarge voxels and relax sparse-return thresholds.
+  range_adaptive_clustering: true
+  range_bands:
+    - {max_range: 30.0, voxel_size: 0.50, min_points: 4, min_length: 0.40, min_width: 0.25, min_height: 0.15}
+    - {max_range: 50.0, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
+    - {max_range: 80.0, voxel_size: 0.90, min_points: 2, min_length: 0.20, min_width: 0.12, min_height: 0.08}
+
+  # Fixed clustering values are retained as fallback when adaptive mode is disabled.
   voxel_size: 0.5
   cluster_min_points: 4
   lidar_min_z: -9.5
@@ -83,7 +87,8 @@ fusion:
   vehicle_max_width: 4.0
   vehicle_min_height: 0.15
   vehicle_max_height: 4.0
-  max_objects: 100
+  max_objects: 120
+
   cluster_merge_enabled: true
   cluster_merge_gap: 1.2
   merged_vehicle_max_length: 14.0
@@ -92,10 +97,12 @@ fusion:
   pole_short_max: 0.75
   pole_long_max: 2.5
   pole_height_min: 1.5
+
   radar_match_distance: 4.0
   radar_match_z: 2.5
   radar_min_hits: 1
   radar_velocity_alpha: 0.35
+
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
@@ -106,9 +113,16 @@ fusion:
   extent_alpha: 0.25
   extent_shrink_alpha: 0.05
   extent_lock_hits: 5
+
   road_roi_margin: 3.0
   road_min_height: -1.0
   road_max_height: 2.8
+
+  # Disable the legacy startup occupancy filter while traffic is already present.
+  # In the V0.5.4 logs it removed valid ROI-matched vehicles (4 -> 2) because
+  # calibration occurred with live traffic in the scene. Ground removal + road ROI
+  # are now the primary static rejection stages during CARLA evaluation.
+  background_filter_enabled: false
   background_calibration_seconds: 6.0
   background_cell_size: 1.0
   background_occupancy_ratio: 0.45
