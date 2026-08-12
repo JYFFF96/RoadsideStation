@@ -14,17 +14,25 @@ def _gap(a,b):
     return math.sqrt(gx*gx+gy*gy+gz*gz)
 
 
-def merge_lidar_clusters(clusters,max_gap=1.8,max_merged_length=14.0,max_merged_width=4.5,max_merged_height=4.5):
-    """Merge nearby fragments while preventing adjacent lane vehicles from becoming one object."""
+def _range_xy(c):
+    return math.hypot(float(c.get("x",0.0)),float(c.get("y",0.0)))
+
+
+def merge_lidar_clusters(clusters,max_gap=1.8,max_merged_length=14.0,max_merged_width=4.5,max_merged_height=4.5,near_range=30.0,near_gap=0.65,near_max_length=7.5,near_max_width=3.2):
+    """Merge nearby fragments while protecting dense 0-30m traffic from over-merge."""
     items=[dict(c) for c in clusters]; changed=True
     while changed:
         changed=False
         for i in range(len(items)):
             for j in range(i+1,len(items)):
-                if _gap(items[i],items[j])>float(max_gap): continue
+                ri=_range_xy(items[i]);rj=_range_xy(items[j]);near=min(ri,rj)<float(near_range)
+                gap_limit=float(near_gap) if near else float(max_gap)
+                if _gap(items[i],items[j])>gap_limit: continue
                 A=_bounds(items[i]);B=_bounds(items[j]); xmin=min(A[0],B[0]);xmax=max(A[1],B[1]);ymin=min(A[2],B[2]);ymax=max(A[3],B[3]);zmin=min(A[4],B[4]);zmax=max(A[5],B[5])
                 ex=xmax-xmin;ey=ymax-ymin;ez=zmax-zmin
-                if max(ex,ey)>float(max_merged_length) or min(ex,ey)>float(max_merged_width) or ez>float(max_merged_height): continue
+                length_limit=float(near_max_length) if near else float(max_merged_length)
+                width_limit=float(near_max_width) if near else float(max_merged_width)
+                if max(ex,ey)>length_limit or min(ex,ey)>width_limit or ez>float(max_merged_height): continue
                 na=max(1,items[i].get("point_count",1));nb=max(1,items[j].get("point_count",1));n=na+nb
                 modes=set(items[i].get("scale_modes",[items[i].get("cluster_mode","3d")]))|set(items[j].get("scale_modes",[items[j].get("cluster_mode","3d")]))
                 items[i]={"x":(items[i]["x"]*na+items[j]["x"]*nb)/n,"y":(items[i]["y"]*na+items[j]["y"]*nb)/n,"z":(items[i]["z"]*na+items[j]["z"]*nb)/n,"point_count":n,"extent":[ex,ey,ez],"cluster_mode":items[i].get("cluster_mode",items[j].get("cluster_mode","3d")),"scale_votes":max(int(items[i].get("scale_votes",1)),int(items[j].get("scale_votes",1))),"scale_modes":sorted(modes)}
@@ -59,7 +67,6 @@ def _cluster_array(pts,voxel_size,min_points,min_length,max_length,min_width,max
 
 
 def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=1,mode_name="bev"):
-    """Cluster sparse points in bird's-eye view, then recover 3D extents."""
     if pts is None or len(pts)==0:return []
     size=float(cell_size);keys=np.floor(pts[:,:2]/size).astype(np.int32);buckets=defaultdict(list)
     for i,k in enumerate(keys):buckets[(int(k[0]),int(k[1]))].append(i)
@@ -78,14 +85,12 @@ def _cluster_array_bev(pts,cell_size,min_points,min_length,max_length,min_width,
 
 
 def _dedupe_multiscale(clusters,center_gate=1.4):
-    """Keep the strongest candidate and record how many BEV scales agree on it."""
     ordered=sorted(clusters,key=lambda x:x.get("point_count",0),reverse=True);out=[];gate2=float(center_gate)*float(center_gate)
     for c in ordered:
         matched=None
         for k in out:
             d2=(float(c["x"])-float(k["x"]))**2+(float(c["y"])-float(k["y"]))**2
-            if d2<=gate2:
-                matched=k;break
+            if d2<=gate2:matched=k;break
         if matched is None:
             item=dict(c);item["scale_modes"]=[c.get("cluster_mode","bev")];item["scale_votes"]=1;out.append(item)
         else:
@@ -98,9 +103,7 @@ def _cluster_array_bev_multiscale(pts,cell_sizes,min_points,min_length,max_lengt
     for size in cell_sizes:
         mode="bev@%.2f"%float(size)
         candidates.extend(_cluster_array_bev(pts,size,min_points,min_length,max_length,min_width,max_width,min_height,max_height,max_objects,neighbor_cells=neighbor_cells,mode_name=mode))
-    out=_dedupe_multiscale(candidates,dedupe_distance)
-    out.sort(key=lambda x:x.get("point_count",0),reverse=True)
-    return out[:int(max_objects)]
+    out=_dedupe_multiscale(candidates,dedupe_distance);out.sort(key=lambda x:x.get("point_count",0),reverse=True);return out[:int(max_objects)]
 
 
 def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,max_range=70.0,min_length=.6,max_length=8.0,min_width=.4,max_width=4.0,min_height=.25,max_height=4.0,max_objects=80):
@@ -110,31 +113,22 @@ def voxel_cluster_lidar(points,voxel_size=0.8,min_points=6,min_z=-7.5,max_z=2.0,
 
 
 def adaptive_voxel_cluster_lidar(points,bands,min_z=-7.5,max_z=2.0,max_range=80.0,max_length=8.0,max_width=4.0,max_height=4.0,max_objects=120):
-    """Range-adaptive roadside clustering with optional single/multi-scale BEV modes."""
     if points is None or len(points)==0:return []
-    pts=np.asarray(points,dtype=np.float32)
-    r=np.sqrt(pts[:,0]*pts[:,0]+pts[:,1]*pts[:,1])
-    base=(pts[:,2]>=float(min_z))&(pts[:,2]<=float(max_z))&(r<=float(max_range))
-    pts=pts[base];r=r[base]
+    pts=np.asarray(points,dtype=np.float32);r=np.sqrt(pts[:,0]*pts[:,0]+pts[:,1]*pts[:,1]);base=(pts[:,2]>=float(min_z))&(pts[:,2]<=float(max_z))&(r<=float(max_range));pts=pts[base];r=r[base]
     if len(pts)==0:return []
     out=[];lower=0.0
     for band in bands or []:
         upper=min(float(band.get("max_range",max_range)),float(max_range))
         if upper<=lower:continue
-        mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper);bp=pts[mask]
-        mode=str(band.get("mode","3d")).lower()
+        mask=(r>=lower)&(r<upper if upper<float(max_range) else r<=upper);bp=pts[mask];mode=str(band.get("mode","3d")).lower()
         common=(band.get("min_points",4),band.get("min_length",0.4),max_length,band.get("min_width",0.25),max_width,band.get("min_height",0.15),max_height,max_objects)
         if mode in ("bev_multiscale","multiscale_bev"):
-            sizes=band.get("bev_cell_sizes",[0.55,0.85])
-            out.extend(_cluster_array_bev_multiscale(bp,sizes,*common,neighbor_cells=band.get("bev_neighbor_cells",1),dedupe_distance=band.get("bev_dedupe_distance",1.4)))
-        elif mode=="bev":
-            out.extend(_cluster_array_bev(bp,band.get("bev_cell_size",band.get("voxel_size",0.65)),*common,neighbor_cells=band.get("bev_neighbor_cells",1)))
-        else:
-            out.extend(_cluster_array(bp,band.get("voxel_size",0.5),*common))
+            sizes=band.get("bev_cell_sizes",[0.55,0.85]);out.extend(_cluster_array_bev_multiscale(bp,sizes,*common,neighbor_cells=band.get("bev_neighbor_cells",1),dedupe_distance=band.get("bev_dedupe_distance",1.4)))
+        elif mode=="bev":out.extend(_cluster_array_bev(bp,band.get("bev_cell_size",band.get("voxel_size",0.65)),*common,neighbor_cells=band.get("bev_neighbor_cells",1)))
+        else:out.extend(_cluster_array(bp,band.get("voxel_size",0.5),*common))
         lower=upper
         if lower>=float(max_range):break
-    out.sort(key=lambda x:x.get("point_count",0),reverse=True)
-    return out[:int(max_objects)]
+    out.sort(key=lambda x:x.get("point_count",0),reverse=True);return out[:int(max_objects)]
 
 
 def associate_radar(clusters,radar_detections,max_distance=3.0):
