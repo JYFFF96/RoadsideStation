@@ -66,15 +66,17 @@ def _print_discovery_diagnostics(d):
  print("  [DISCOVERY TRACK] New:%d Confirmed:%d OneFrameDrop:%d Active:%d"%(d.get("discovery_track_new",0),d.get("discovery_track_confirmed",0),d.get("discovery_track_one_frame_drop",0),d.get("discovery_track_active",0)))
 
 def _print_rescue_gate():
- g=getattr(track_guided_sparse_rescue,"last_stats",{}) or {}
+ g=getattr(track_guided_sparse_rescue,"last_stats",{}) or {};mid=g.get("mid",{}) or {};far=g.get("far",{}) or {}
  print("  [RESCUE GATE] Eligible:%d QualityBlock:%d StreakBlock:%d SupportBlock:%d GeometryBlock:%d Built:%d"%(g.get("eligible",0),g.get("quality_block",0),g.get("streak_block",0),g.get("support_block",0),g.get("geometry_block",0),g.get("built",0)))
+ print("    [30-50m] Eligible:%d QualityBlock:%d StreakBlock:%d SupportBlock:%d GeometryBlock:%d Built:%d"%(mid.get("eligible",0),mid.get("quality_block",0),mid.get("streak_block",0),mid.get("support_block",0),mid.get("geometry_block",0),mid.get("built",0)))
+ print("    [50-80m] Eligible:%d QualityBlock:%d StreakBlock:%d SupportBlock:%d GeometryBlock:%d Built:%d"%(far.get("eligible",0),far.get("quality_block",0),far.get("streak_block",0),far.get("support_block",0),far.get("geometry_block",0),far.get("built",0)))
 
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.11 Track Rescue Quality Gate starting...")
+ print("RoadsideStation V0.6.11.1 Range-aware Rescue Gate starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -83,7 +85,7 @@ def main():
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  near_band=(fc.get("range_bands") or [{}])[0]
  print("Teaching acceptance focus: 0-30m UNCHANGED | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
- print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | quality>=%.2f max_streak=%d | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_max_streak",2)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
+ print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far New Object Discovery: %s | range=%.0f..%.0fm | cell mid/far=%.2f/%.2fm | points mid/far>=%d/%d | max=%d"%("enabled" if fc.get("far_sparse_discovery_enabled",False) else "disabled",float(fc.get("far_sparse_discovery_min_range",30.0)),float(fc.get("far_sparse_discovery_max_range",80.0)),float(fc.get("far_sparse_discovery_mid_cell",0.90)),float(fc.get("far_sparse_discovery_far_cell",1.20)),int(fc.get("far_sparse_discovery_mid_min_points",4)),int(fc.get("far_sparse_discovery_far_min_points",3)),int(fc.get("far_sparse_discovery_max_candidates",40))))
  print("Discovery Diagnostics: observer-only | split TrackRescue/NewDiscovery stages + discovery-born track lifecycle")
  print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",4.2)),float(fc.get("road_roi_margin_far",4.5))))
@@ -110,9 +112,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.11 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.11.1 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> clustering -> V0.6.11 quality-gated track rescue + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
+ print("ARCH: traffic -> ground removal -> clustering -> V0.6.11.1 range-aware track rescue + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
  print("ARCH: Discovery Diagnostics observes source stages and discovery-born track lifecycle only.")
  print("ARCH: Detection Stability/Drop diagnostics remain observer/evaluation-only.")
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
