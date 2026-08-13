@@ -97,8 +97,6 @@ fusion:
   near_merged_vehicle_max_width: 3.2
 
   # V0.6.9: track-guided sparse geometry rescue. 0-30m stays untouched.
-  # Only stable prior tracks can seed a local sparse candidate, preventing a
-  # global relaxation from flooding the pipeline with extra false positives.
   sparse_geometry_rescue_enabled: true
   sparse_geometry_rescue_min_range: 30.0
   sparse_geometry_rescue_max_range: 80.0
@@ -117,6 +115,27 @@ fusion:
   sparse_geometry_rescue_max_width: 3.5
   sparse_geometry_rescue_max_height: 3.0
   sparse_geometry_rescue_score_bonus: 0.08
+
+  # V0.6.10: track-independent sparse discovery for first-seen 30-80m targets.
+  # This path uses only current-frame LiDAR points; no tracker or CARLA truth.
+  # 0-30m is deliberately excluded. ROI and the existing far score remain
+  # downstream safety gates before any discovered candidate reaches tracking.
+  far_sparse_discovery_enabled: true
+  far_sparse_discovery_min_range: 30.0
+  far_sparse_discovery_max_range: 80.0
+  far_sparse_discovery_far_range: 50.0
+  far_sparse_discovery_mid_cell: 0.90
+  far_sparse_discovery_far_cell: 1.20
+  far_sparse_discovery_mid_min_points: 4
+  far_sparse_discovery_far_min_points: 3
+  far_sparse_discovery_dedupe_distance: 2.0
+  far_sparse_discovery_max_candidates: 40
+  far_sparse_discovery_min_length: 0.35
+  far_sparse_discovery_max_length: 7.5
+  far_sparse_discovery_min_width: 0.12
+  far_sparse_discovery_max_width: 3.5
+  far_sparse_discovery_min_height: 0.06
+  far_sparse_discovery_max_height: 3.2
 
   pole_short_max: 0.75
   pole_long_max: 2.5
