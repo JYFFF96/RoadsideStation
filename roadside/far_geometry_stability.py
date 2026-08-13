@@ -42,12 +42,7 @@ def _fmt(value):
 
 
 def install_far_geometry_stability_patch():
-    """Attach observer-only Far Geometry / ROI diagnostics to SimpleFusion.fuse.
-
-    V0.6.12.2 changes diagnostics only. It does not modify candidate generation,
-    ROI validation, score thresholds, dynamic filtering, tracker decisions,
-    sensor fusion, or CARLA ground-truth evaluation.
-    """
+    """Attach observer-only Far Geometry / ROI / temporal diagnostics."""
     from .fusion import SimpleFusion
     if getattr(SimpleFusion, "_v06122_far_roi_diag_patch", False):
         return
@@ -88,6 +83,12 @@ def install_far_geometry_stability_patch():
                    stats.get("template_pass", 0), stats.get("dedupe", 0),
                    stats.get("built", 0), stats.get("roi_pass", 0),
                    stats.get("score_pass", 0), stats.get("dynamic_pass", 0)))
+
+            print("  [FAR TEMPORAL] HistoryFrames:%d CurrentPts:%d AddedPts:%d Components:%d" %
+                  (stats.get("temporal_history_frames", 0),
+                   stats.get("temporal_current_points", 0),
+                   stats.get("temporal_added_points", 0),
+                   stats.get("temporal_components", 0)))
 
             print("  [FAR ROI DIAG] Built:%d ROIPass:%d ROIReject:%d "
                   "ScorePass:%d ScoreReject:%d Dynamic:%d" %
