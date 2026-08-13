@@ -2,7 +2,8 @@ from __future__ import print_function
 
 # Stable CARLA traffic benchmark for RoadsideStation perception evaluation.
 # Traffic Manager/autopilot only: no custom steering or path override.
-# V0.5.8 adds deterministic sync ticking, safer spawning and traffic health stats.
+# V0.5.9 adds --no-recycle so tracker tests can separate perception flicker
+# from CARLA vehicle destroy/respawn lifecycle effects.
 
 import argparse
 import math
@@ -153,7 +154,6 @@ def _is_safe_spawn(world_map, sp, center, safe_radius, spawn_radius):
 
 
 def _configure_vehicle_tm(tm, actor, following_distance, speed_diff):
-    # Keep all rules scalar/explicit so the same policy is easy to port to Qt/C++ later.
     try:
         tm.distance_to_leading_vehicle(actor, float(following_distance))
     except Exception:
@@ -194,7 +194,6 @@ def _attach_collision_sensor(world, actor, collision_sensors, health, pair_last_
             a = int(actor.id)
             key = (min(a, other_id), max(a, other_id))
             now = time.time()
-            # CARLA may emit repeated contacts for the same physical collision.
             if now - pair_last_time.get(key, 0.0) >= 2.0:
                 pair_last_time[key] = now
                 health["collisions"] += 1
@@ -209,14 +208,13 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="Stable RoadsideStation junction traffic benchmark V0.5.8")
+    ap = argparse.ArgumentParser(description="Stable RoadsideStation junction traffic benchmark V0.5.9")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
     ap.add_argument("--mode", choices=("benchmark", "demo", "stress"), default="benchmark")
-    ap.add_argument("--vehicles", "-n", type=int, default=None,
-                    help="override mode vehicle count")
+    ap.add_argument("--vehicles", "-n", type=int, default=None, help="override mode vehicle count")
     ap.add_argument("--spawn-radius", type=float, default=None)
     ap.add_argument("--junction-safe-radius", type=float, default=25.0)
     ap.add_argument("--recycle-radius", type=float, default=None)
@@ -227,9 +225,10 @@ def main():
     ap.add_argument("--fixed-delta", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--keep-existing", action="store_true")
-    ap.add_argument("--async-mode", action="store_true",
-                    help="do not enable synchronous CARLA/TM ticking")
+    ap.add_argument("--async-mode", action="store_true", help="do not enable synchronous CARLA/TM ticking")
     ap.add_argument("--no-collision-monitor", action="store_true")
+    ap.add_argument("--no-recycle", action="store_true",
+                    help="diagnostic mode: never destroy/refill vehicles after initial spawn")
     args = ap.parse_args()
 
     mode_defaults = {
@@ -262,14 +261,16 @@ def main():
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_center(world_map, cfg)
-        print("RoadsideStation Junction Traffic Benchmark V0.5.8")
+        print("RoadsideStation Junction Traffic Benchmark V0.5.9")
         print("Map:%s | mode:%s | seed:%d" % (world_map.name.split("/")[-1], args.mode, args.seed))
-        print("Target vehicles:%d | spawn %.0f..%.0fm | recycle>%.0fm | report<=%.0fm" %
-              (args.vehicles, args.junction_safe_radius, args.spawn_radius,
-               args.recycle_radius, args.report_radius))
+        recycle_txt = "OFF" if args.no_recycle else ">%.0fm" % args.recycle_radius
+        print("Target vehicles:%d | spawn %.0f..%.0fm | recycle:%s | report<=%.0fm" %
+              (args.vehicles, args.junction_safe_radius, args.spawn_radius, recycle_txt, args.report_radius))
         print("Safety profile: follow=%.1fm speed_diff=%.0f%% spawn_clearance=%.1fm" %
               (args.following_distance, args.speed_diff, args.spawn_clearance))
         print("Traffic Manager autopilot only; no custom steering/path override.")
+        if args.no_recycle:
+            print("Diagnostic lifecycle: NO RECYCLE / NO REFILL after initial spawn.")
 
         if not args.keep_existing:
             existing = list(world.get_actors().filter("vehicle.*"))
@@ -303,8 +304,7 @@ def main():
         local_spawns = [sp for sp in world_map.get_spawn_points()
                         if _is_safe_spawn(world_map, sp, center,
                                           args.junction_safe_radius, args.spawn_radius)]
-        local_spawns.sort(key=lambda sp: (_distance2d(sp.location, center),
-                                          sp.location.x, sp.location.y))
+        local_spawns.sort(key=lambda sp: (_distance2d(sp.location, center), sp.location.x, sp.location.y))
         if not blueprints:
             raise RuntimeError("No safe vehicle blueprints found")
         if not local_spawns:
@@ -320,14 +320,10 @@ def main():
         def destroy_vehicle(aid):
             sensor = collision_sensors.pop(aid, None)
             if sensor is not None:
-                try:
-                    sensor.stop()
-                except Exception:
-                    pass
-                try:
-                    sensor.destroy()
-                except Exception:
-                    pass
+                try: sensor.stop()
+                except Exception: pass
+                try: sensor.destroy()
+                except Exception: pass
             _destroy(client, [aid], False)
             owned.discard(aid)
             stop_since.pop(aid, None)
@@ -353,10 +349,8 @@ def main():
         while len(owned) < target and attempts < target * 12:
             attempts += 1
             if not spawn_one():
-                if sync_enabled:
-                    world.tick()
-                else:
-                    time.sleep(0.05)
+                if sync_enabled: world.tick()
+                else: time.sleep(0.05)
         if sync_enabled:
             world.tick()
         print("Initial spawned: %d/%d" % (len(owned), target))
@@ -366,10 +360,8 @@ def main():
         last_refill = 0.0
         recycled_total = 0
         while not _STOP:
-            if sync_enabled:
-                world.tick()
-            else:
-                time.sleep(0.05)
+            if sync_enabled: world.tick()
+            else: time.sleep(0.05)
 
             actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
             outside = []
@@ -382,12 +374,11 @@ def main():
                     sensor = collision_sensors.pop(aid, None)
                     if sensor is not None:
                         try:
-                            sensor.stop()
-                            sensor.destroy()
+                            sensor.stop(); sensor.destroy()
                         except Exception:
                             pass
                     continue
-                if _distance2d(actor.get_location(), center) > args.recycle_radius:
+                if (not args.no_recycle) and _distance2d(actor.get_location(), center) > args.recycle_radius:
                     outside.append(aid)
                     continue
                 if _speed(actor) < 0.2:
@@ -395,15 +386,16 @@ def main():
                 else:
                     stop_since.pop(aid, None)
 
-            for aid in outside:
-                destroy_vehicle(aid)
-            recycled_total += len(outside)
+            if not args.no_recycle:
+                for aid in outside:
+                    destroy_vehicle(aid)
+                recycled_total += len(outside)
 
-            if len(owned) < target and now - last_refill >= 0.5:
-                for _ in range(min(3, target - len(owned))):
-                    if not spawn_one():
-                        break
-                last_refill = now
+                if len(owned) < target and now - last_refill >= 0.5:
+                    for _ in range(min(3, target - len(owned))):
+                        if not spawn_one():
+                            break
+                    last_refill = now
 
             if now - last_report >= 2.0:
                 current = {a.id: a for a in world.get_actors().filter("vehicle.*")}
@@ -421,9 +413,10 @@ def main():
                             offroad += 1
                     except Exception:
                         pass
-                print("BENCH TrafficHealth | alive:%d/%d <=80m:%d | 00-30:%d 30-50:%d 50-80:%d | stopped:%d stuck15s:%d offroad:%d collisions:%d recycled:%d" %
+                print("BENCH TrafficHealth | alive:%d/%d <=80m:%d | 00-30:%d 30-50:%d 50-80:%d | stopped:%d stuck15s:%d offroad:%d collisions:%d recycled:%d lifecycle:%s" %
                       (len(alive), target, within, counts[0], counts[1], counts[2],
-                       stopped_now, stuck_15s, offroad, health["collisions"], recycled_total))
+                       stopped_now, stuck_15s, offroad, health["collisions"], recycled_total,
+                       "no-recycle" if args.no_recycle else "recycle"))
                 last_report = now
 
     except KeyboardInterrupt:
@@ -432,24 +425,18 @@ def main():
         print("Destroying %d benchmark vehicles and %d collision sensors..." %
               (len(owned), len(collision_sensors)))
         for sensor in list(collision_sensors.values()):
-            try:
-                sensor.stop()
-            except Exception:
-                pass
-            try:
-                sensor.destroy()
-            except Exception:
-                pass
+            try: sensor.stop()
+            except Exception: pass
+            try: sensor.destroy()
+            except Exception: pass
         collision_sensors.clear()
         try:
             _destroy(client, list(owned), False)
         except Exception as exc:
             print("Cleanup warning: %s" % exc)
         if sync_enabled:
-            try:
-                tm.set_synchronous_mode(False)
-            except Exception:
-                pass
+            try: tm.set_synchronous_mode(False)
+            except Exception: pass
             if original_settings is not None:
                 try:
                     world.apply_settings(original_settings)
