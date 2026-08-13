@@ -33,6 +33,7 @@ def _try_load_configured_map(config):
 
 def _pct(v):return "-" if v is None else "%.1f%%"%(100.0*float(v))
 def _meters(v):return "-" if v is None else "%.2fm"%float(v)
+def _num(v):return "-" if v is None else "%.2f"%float(v)
 
 def _print_traffic_status(station,config):
  tc=config.get("traffic",{});mode=tc.get("mode","external");source=tc.get("source","carla_generate_traffic")
@@ -50,7 +51,7 @@ def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.6.2 Near-range Vehicle Geometry Filter starting...")
+ print("RoadsideStation V0.6.3 Mid-range ROI Rescue Diagnostics starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -58,9 +59,11 @@ def main():
  print("LiDAR clustering: %s"%("hybrid range-adaptive (near geometry filtered, mid 3D, far multi-scale BEV)" if fc.get("range_adaptive_clustering",False) else "fixed"))
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  near_band=(fc.get("range_bands") or [{}])[0]
- print("Teaching acceptance focus: 0-30m | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
- print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",3.6)),float(fc.get("road_roi_margin_far",4.5))))
- if fc.get("geometry_aware_roi_enabled",False):print("Geometry-aware ROI: >=%.0fm overlap>=%.2fm center_excess<=%.2fm"%(float(fc.get("geometry_aware_roi_min_range",30.0)),float(fc.get("geometry_aware_roi_min_overlap",0.25)),float(fc.get("geometry_aware_roi_max_center_excess",1.8))))
+ print("Teaching acceptance focus: 0-30m UNCHANGED | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
+ print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",4.2)),float(fc.get("road_roi_margin_far",4.5))))
+ if fc.get("geometry_aware_roi_enabled",False):
+  print("Geometry-aware ROI default/far: overlap>=%.2fm center_excess<=%.2fm"%(float(fc.get("geometry_aware_roi_min_overlap",0.25)),float(fc.get("geometry_aware_roi_max_center_excess",1.8))))
+  print("Mid-range ROI rescue 30-50m: overlap>=%.2fm center_excess<=%.2fm half_width<=%.2fm"%(float(fc.get("geometry_aware_roi_mid_min_overlap",0.10)),float(fc.get("geometry_aware_roi_mid_max_center_excess",2.6)),float(fc.get("geometry_aware_roi_mid_max_half_width",2.0))))
  if fc.get("candidate_scoring_enabled",False):print("Candidate scoring: enabled for >=%.0fm threshold=%.2f"%(float(fc.get("candidate_scoring_min_range",50.0)),float(fc.get("candidate_scoring_threshold_far",0.48))))
  else:print("Candidate scoring: disabled")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
@@ -75,9 +78,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.3 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> near vehicle geometry filter -> road ROI -> candidate score -> tracking -> fusion")
+ print("ARCH: traffic -> ground removal -> near vehicle geometry filter -> distance-aware road ROI -> candidate score -> tracking -> fusion")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
@@ -109,6 +112,12 @@ def main():
     if s.get("roi_rejection_reasons"):print("  [ROI REJECT] %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  [ROI RESCUED] %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  [SCORE REJECT] %d"%s.get("score_rejected",0))
+    if eval_cfg.get("roi_false_reject_diagnostics",False):
+     lo=float(eval_cfg.get("roi_false_reject_min_range",30.0));hi=float(eval_cfg.get("roi_false_reject_max_range",50.0));limit=int(eval_cfg.get("roi_false_reject_max_print",6))
+     false_rejects=evaluator.analyze_roi_false_rejections(fusion.last_roi_candidates,fusion.last_roi_rejections,lo,hi)
+     print("  [ROI FALSE REJECT %02.0f-%02.0fm] %d"%(lo,hi,len(false_rejects)))
+     for item in false_rejects[:max(0,limit)]:
+      print("    truth=%s range=%.1fm reason=%s gate=%.2fm lateral=%s allowed=%s excess=%s overlap=%s margin=%s"%(item.get("actor_id"),float(item.get("truth_range",0.0)),item.get("reason"),float(item.get("candidate_distance",0.0)),_num(item.get("lateral")),_num(item.get("allowed_lateral")),_num(item.get("center_excess")),_num(item.get("bbox_overlap")),_num(item.get("roi_margin"))))
     last_eval=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj);time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
