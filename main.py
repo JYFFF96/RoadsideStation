@@ -51,7 +51,7 @@ def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.6.5 Adaptive Track Persistence starting...")
+ print("RoadsideStation V0.6.6 Track Quality starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -68,7 +68,8 @@ def main():
   print("Far candidate scoring: >=%.0fm threshold=%.2f | >=%.0fm relaxed=%.2f"%(float(fc.get("candidate_scoring_min_range",50.0)),float(fc.get("candidate_scoring_threshold_far",0.46)),float(fc.get("candidate_scoring_far_relaxed_range",65.0)),float(fc.get("candidate_scoring_threshold_far_long",0.42))))
  else:print("Candidate scoring: disabled")
  print("Adaptive track persistence: %s | young=%d stable=%d far=%d frames | stable_hits=%d far>=%.0fm | low_score<%.2f edge>=%.2f | decay=%.2f"%("enabled" if fc.get("track_adaptive_coast_enabled",False) else "disabled",int(fc.get("track_coast_young_frames",1)),int(fc.get("track_coast_stable_frames",3)),int(fc.get("track_coast_far_frames",4)),int(fc.get("track_coast_stable_hits",3)),float(fc.get("track_coast_far_range",50.0)),float(fc.get("track_coast_low_score",0.55)),float(fc.get("track_coast_edge_ratio",0.90)),float(fc.get("track_coast_confidence_decay",.84))))
- print("Qt/C++ portability: tracker policy uses scalar fields only (hits/score/range/ROI), no CARLA-specific logic.")
+ print("Track Quality: %s | high>=%.2f medium>=%.2f | medium_coast<=%d low_coast<=%d | camera=+%.2f radar=+%.2f memory=%.1fs penalty=%.2f/miss"%("enabled" if fc.get("track_quality_enabled",True) else "disabled",float(fc.get("track_quality_high",.72)),float(fc.get("track_quality_medium",.50)),int(fc.get("track_quality_medium_coast_frames",2)),int(fc.get("track_quality_low_coast_frames",0)),float(fc.get("track_quality_camera_bonus",.12)),float(fc.get("track_quality_radar_bonus",.08)),float(fc.get("track_quality_sensor_memory",1.5)),float(fc.get("track_quality_coast_penalty",.10))))
+ print("Qt/C++ portability: quality policy uses scalar detection/temporal/sensor/stability/range evidence only; no CARLA-specific logic.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
  if station.camera_transform is not None:
@@ -81,12 +82,13 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.5 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.6 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> road ROI -> fixed far score -> adaptive track persistence -> fusion")
+ print("ARCH: traffic -> ground removal -> road ROI -> fixed far score -> tracker -> Track Quality -> fusion")
+ print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
- if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall.")
+ if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
  last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
  try:
   while not _STOP_REQUESTED:
@@ -97,22 +99,25 @@ def main():
      cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp);camera_objects=cam_list.objects
      for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
       p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
+   fusion.apply_camera_confirmations(pairs,timestamp=ol.timestamp)
    fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs);oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
+    print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  Geometry-aware ROI rescued: %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  Candidate score rejected: %d"%s.get("score_rejected",0))
     for idx,o in enumerate(fol.objects[:10]):
-     t=fusion.last_tracked_candidates[idx];size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-" if o.camera is None else "%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"));near=t.get("radar_nearest_xy");near_txt="-" if near is None else "%.2f"%near;raw_speed=math.hypot(t.get("raw_vx",0),t.get("raw_vy",0));fused_speed=math.hypot(o.vx,o.vy);state=t.get("track_state","update");allowed=int(t.get("coast_allowed",0))
-     print("  %-12s type=%-7s state=%-6s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
+     t=fusion.last_tracked_candidates[idx];size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-" if o.camera is None else "%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"));near=t.get("radar_nearest_xy");near_txt="-" if near is None else "%.2f"%near;raw_speed=math.hypot(t.get("raw_vx",0),t.get("raw_vy",0));fused_speed=math.hypot(o.vx,o.vy);state=t.get("track_state","confirmed");allowed=int(t.get("coast_allowed",0));q=float(t.get("track_quality",0.0));sensors=t.get("track_sensors","L")
+     print("  %-12s type=%-7s state=%-9s q=%.2f sensors=%-3s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,q,sensors,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
    if evaluator is not None and now-last_eval>=eval_interval:
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
+    print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     if s.get("roi_rejection_reasons"):print("  [ROI REJECT] %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  [ROI RESCUED] %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  [SCORE REJECT] %d"%s.get("score_rejected",0))
