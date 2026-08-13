@@ -96,12 +96,16 @@ fusion:
   near_merged_vehicle_max_length: 7.5
   near_merged_vehicle_max_width: 3.2
 
-  # V0.6.9: track-guided sparse geometry rescue. 0-30m stays untouched.
+  # V0.6.11: track-guided sparse geometry rescue with quality/streak gate.
+  # 0-30m stays untouched. A normal LiDAR hit resets the consecutive rescue
+  # streak because only sparse-rescue candidates carry rescue_streak metadata.
   sparse_geometry_rescue_enabled: true
   sparse_geometry_rescue_min_range: 30.0
   sparse_geometry_rescue_max_range: 80.0
   sparse_geometry_rescue_far_range: 50.0
   sparse_geometry_rescue_min_track_hits: 3
+  sparse_geometry_rescue_min_quality: 0.55
+  sparse_geometry_rescue_max_streak: 2
   sparse_geometry_rescue_mid_radius: 2.2
   sparse_geometry_rescue_far_radius: 3.0
   sparse_geometry_rescue_z_window: 2.0
