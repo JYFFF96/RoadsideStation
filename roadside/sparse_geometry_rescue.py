@@ -39,12 +39,6 @@ def _extent(points):
 
 
 def _previous_rescue_streak(track):
-    """Recover consecutive rescue count from portable candidate metadata.
-
-    Fusion/tracker already preserve scale_modes on the last associated LiDAR
-    candidate, so no tracker-internal or CARLA-specific state is required.
-    A normal LiDAR detection has no rescue_streak_* marker and resets to zero.
-    """
     for mode in track.get("scale_modes", []) or []:
         text = str(mode)
         if text.startswith("rescue_streak_"):
@@ -55,23 +49,8 @@ def _previous_rescue_streak(track):
     return 0
 
 
-def track_guided_sparse_rescue(points, previous_tracks, world_transform,
-                               existing_clusters, config=None):
-    """Recover sparse candidates using history plus current-frame discovery.
-
-    V0.6.9 provides track-guided recovery around stable prior tracks.
-    V0.6.10 adds track-independent 30-80m current-frame discovery.
-    V0.6.11 gates only the track-guided branch by prior track quality and by a
-    maximum consecutive rescue streak, preventing weak tracks from surviving
-    indefinitely on sparse local point support. NewDiscovery is unchanged.
-
-    Neither path consumes CARLA truth. All candidates still pass normal ROI and
-    score gates in fusion before tracking/fusion output.
-    """
-    c = config or {}
-    out = []
-    occupied = list(existing_clusters or [])
-    diag = {
+def _empty_band_stats():
+    return {
         "eligible": 0,
         "quality_block": 0,
         "streak_block": 0,
@@ -80,13 +59,41 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
         "built": 0,
     }
 
+
+def _add_total(diag, key):
+    diag[key] = int(diag.get(key, 0)) + 1
+
+
+def track_guided_sparse_rescue(points, previous_tracks, world_transform,
+                               existing_clusters, config=None):
+    """Recover sparse candidates using history plus current-frame discovery.
+
+    V0.6.11.1 makes only the track-guided rescue gate range-aware:
+      * 30-50m keeps the stricter V0.6.11 quality/streak policy.
+      * 50-80m uses a lower quality threshold and a longer rescue streak budget.
+
+    Current-frame NewDiscovery is unchanged. No CARLA truth is consumed.
+    """
+    c = config or {}
+    out = []
+    occupied = list(existing_clusters or [])
+    diag = _empty_band_stats()
+    diag["mid"] = _empty_band_stats()
+    diag["far"] = _empty_band_stats()
+
     if c.get("sparse_geometry_rescue_enabled", False) and points is not None and previous_tracks:
         min_range = float(c.get("sparse_geometry_rescue_min_range", 30.0))
         max_range = float(c.get("sparse_geometry_rescue_max_range", 80.0))
         far_range = float(c.get("sparse_geometry_rescue_far_range", 50.0))
         min_hits = max(2, int(c.get("sparse_geometry_rescue_min_track_hits", 3)))
-        min_quality = float(c.get("sparse_geometry_rescue_min_quality", 0.55))
-        max_streak = max(0, int(c.get("sparse_geometry_rescue_max_streak", 2)))
+
+        mid_min_quality = float(c.get("sparse_geometry_rescue_mid_min_quality",
+                                      c.get("sparse_geometry_rescue_min_quality", 0.55)))
+        far_min_quality = float(c.get("sparse_geometry_rescue_far_min_quality", 0.47))
+        mid_max_streak = max(0, int(c.get("sparse_geometry_rescue_mid_max_streak",
+                                          c.get("sparse_geometry_rescue_max_streak", 2))))
+        far_max_streak = max(0, int(c.get("sparse_geometry_rescue_far_max_streak", 3)))
+
         mid_radius = float(c.get("sparse_geometry_rescue_mid_radius", 2.2))
         far_radius = float(c.get("sparse_geometry_rescue_far_radius", 3.0))
         z_window = float(c.get("sparse_geometry_rescue_z_window", 2.0))
@@ -115,18 +122,29 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
             if _near_existing(lx, ly, occupied, dedupe):
                 continue
 
-            diag["eligible"] += 1
+            is_far = rng >= far_range
+            band_name = "far" if is_far else "mid"
+            band = diag[band_name]
+            min_quality = far_min_quality if is_far else mid_min_quality
+            max_streak = far_max_streak if is_far else mid_max_streak
+
+            _add_total(diag, "eligible")
+            band["eligible"] += 1
+
             quality = float(track.get("track_quality", 0.0))
             if quality < min_quality:
-                diag["quality_block"] += 1
-                continue
-            previous_streak = _previous_rescue_streak(track)
-            if previous_streak >= max_streak:
-                diag["streak_block"] += 1
+                _add_total(diag, "quality_block")
+                band["quality_block"] += 1
                 continue
 
-            radius = far_radius if rng >= far_range else mid_radius
-            need = far_points if rng >= far_range else mid_points
+            previous_streak = _previous_rescue_streak(track)
+            if previous_streak >= max_streak:
+                _add_total(diag, "streak_block")
+                band["streak_block"] += 1
+                continue
+
+            radius = far_radius if is_far else mid_radius
+            need = far_points if is_far else mid_points
             r2 = radius * radius
             support = []
             for p in pts:
@@ -138,7 +156,8 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
                     continue
                 support.append(p)
             if len(support) < need:
-                diag["support_block"] += 1
+                _add_total(diag, "support_block")
+                band["support_block"] += 1
                 continue
 
             e = _extent(support)
@@ -148,7 +167,8 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
             if hl < min_length or hl > max_length or \
                     hs < min_width or hs > max_width or \
                     h < min_height or h > max_height:
-                diag["geometry_block"] += 1
+                _add_total(diag, "geometry_block")
+                band["geometry_block"] += 1
                 continue
 
             streak = previous_streak + 1
@@ -167,13 +187,17 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
                 "rescue_track_id": track.get("id"),
                 "rescue_track_hits": int(track.get("track_hits", 0)),
                 "rescue_range": rng,
+                "rescue_gate_band": band_name,
+                "rescue_gate_quality": quality,
+                "rescue_gate_min_quality": min_quality,
+                "rescue_gate_max_streak": max_streak,
             }
             out.append(item)
             occupied.append(item)
-            diag["built"] += 1
+            _add_total(diag, "built")
+            band["built"] += 1
 
-    # V0.6.10: independent current-frame discovery remains intentionally
-    # unchanged by the V0.6.11 Track Rescue Quality Gate.
+    # V0.6.10 current-frame NewDiscovery remains intentionally unchanged.
     for item in discover_far_sparse_candidates(points, occupied, c):
         x = dict(item)
         x["sparse_rescued"] = True
@@ -187,7 +211,6 @@ def track_guided_sparse_rescue(points, previous_tracks, world_transform,
     return out
 
 
-track_guided_sparse_rescue.last_stats = {
-    "eligible": 0, "quality_block": 0, "streak_block": 0,
-    "support_block": 0, "geometry_block": 0, "built": 0,
-}
+track_guided_sparse_rescue.last_stats = _empty_band_stats()
+track_guided_sparse_rescue.last_stats["mid"] = _empty_band_stats()
+track_guided_sparse_rescue.last_stats["far"] = _empty_band_stats()
