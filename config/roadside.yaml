@@ -160,6 +160,17 @@ fusion:
   far_recovery_quality_track_min_hits: 3
   far_recovery_quality_track_min_quality: 0.47
 
+  # V0.6.12.7: delay weak new 50-80m pure-LiDAR tracks for one real LiDAR frame.
+  far_track_admission_enabled: true
+  far_track_admission_min_range: 50.0
+  far_track_admission_required_frames: 2
+  far_track_admission_match_gate: 2.5
+  far_track_admission_ttl: 0.5
+  far_track_admission_track_gate: 3.5
+  far_track_admission_track_min_hits: 2
+  far_track_admission_strong_min_points: 10
+  far_track_admission_strong_min_score: 0.72
+
   far_sparse_discovery_enabled: true
   far_sparse_discovery_min_range: 30.0
   far_sparse_discovery_max_range: 80.0

@@ -95,6 +95,11 @@ class SimpleFusion(object):
         self.last_score_rejections = []
         self.last_recovery_quality_candidates = []
         self.last_recovery_quality_rejections = []
+        self.last_far_admission_candidates = []
+        self.last_far_admission_rejections = []
+        self._far_admission_pending = []
+        self._far_admission_last_frame = None
+        self._far_admission_sequence = 0
 
     def set_world_transform(self, t):
         if t is None:
@@ -375,6 +380,129 @@ class SimpleFusion(object):
                 rejected.append(item)
         return kept, rejected
 
+    def _far_admission_track_support(self, item, previous_tracks):
+        gate = float(self.config.get("far_track_admission_track_gate", 3.5))
+        min_hits = int(self.config.get("far_track_admission_track_min_hits", 2))
+        best = None
+        for track in previous_tracks or []:
+            admitted = bool(track.get("far_track_admission_confirmed", False))
+            if not admitted and int(track.get("track_hits", 0)) < min_hits:
+                continue
+            d = math.hypot(float(track.get("x", 0.0)) - float(item["x"]),
+                           float(track.get("y", 0.0)) - float(item["y"]))
+            if d <= gate and (best is None or d < best):
+                best = d
+        return best
+
+    def _gate_far_new_tracks(self, items, previous_tracks, now, frame_id=None):
+        """Require repeat evidence before a far pure-LiDAR candidate reaches Tracker."""
+        if not self.config.get("far_track_admission_enabled", True):
+            return [dict(x) for x in items], [], {
+                "pending": 0, "held": 0, "confirmed": 0, "expired": 0,
+                "sensor_bypass": 0, "strong_bypass": 0, "track_bypass": 0}
+        min_range = float(self.config.get("far_track_admission_min_range", 50.0))
+        required = max(2, int(self.config.get("far_track_admission_required_frames", 2)))
+        match_gate = float(self.config.get("far_track_admission_match_gate", 2.5))
+        ttl = float(self.config.get("far_track_admission_ttl", 0.5))
+        strong_points = int(self.config.get("far_track_admission_strong_min_points", 10))
+        strong_score = float(self.config.get("far_track_admission_strong_min_score", .72))
+
+        if frame_id is None:
+            self._far_admission_sequence += 1
+            token = self._far_admission_sequence
+        else:
+            token = frame_id
+        new_frame = token != self._far_admission_last_frame
+        if new_frame:
+            self._far_admission_last_frame = token
+
+        expired = 0
+        pending = []
+        for p in self._far_admission_pending:
+            if now - float(p.get("last_time", now)) <= ttl:
+                pending.append(p)
+            elif new_frame:
+                expired += 1
+        self._far_admission_pending = pending
+
+        kept, rejected, used = [], [], set()
+        stats = {"pending": 0, "held": 0, "confirmed": 0,
+                 "expired": expired, "sensor_bypass": 0,
+                 "strong_bypass": 0, "track_bypass": 0}
+        for src in items or []:
+            item = dict(src)
+            if self._sensor_range(item["x"], item["y"]) < min_range:
+                kept.append(item)
+                continue
+            if item.get("radar_radial_velocity") is not None:
+                item["far_track_admission_confirmed"] = True
+                item["far_track_admission_reason"] = "sensor"
+                stats["sensor_bypass"] += 1
+                kept.append(item)
+                continue
+            track_distance = self._far_admission_track_support(item, previous_tracks)
+            if track_distance is not None:
+                item["far_track_admission_confirmed"] = True
+                item["far_track_admission_reason"] = "existing_track"
+                item["far_track_admission_track_distance"] = track_distance
+                stats["track_bypass"] += 1
+                kept.append(item)
+                continue
+            points = int(item.get("current_point_count", item.get("point_count", 0)) or 0)
+            score = float(item.get("candidate_score", 0.0) or 0.0)
+            if points >= strong_points and score >= strong_score:
+                item["far_track_admission_confirmed"] = True
+                item["far_track_admission_reason"] = "strong"
+                stats["strong_bypass"] += 1
+                kept.append(item)
+                continue
+
+            best = None
+            for index, old in enumerate(self._far_admission_pending):
+                if index in used:
+                    continue
+                d = math.hypot(float(old["x"]) - float(item["x"]),
+                               float(old["y"]) - float(item["y"]))
+                if d <= match_gate and (best is None or d < best[0]):
+                    best = (d, index, old)
+            if best is None:
+                entry = {"x": float(item["x"]), "y": float(item["y"]),
+                         "z": float(item.get("z", 0.0)), "hits": 1,
+                         "last_time": now, "last_frame": token}
+                self._far_admission_pending.append(entry)
+                used.add(len(self._far_admission_pending) - 1)
+                hits = 1
+            else:
+                _, index, entry = best
+                used.add(index)
+                if new_frame and entry.get("last_frame") != token:
+                    entry["hits"] = int(entry.get("hits", 1)) + 1
+                    entry["x"] = float(item["x"])
+                    entry["y"] = float(item["y"])
+                    entry["z"] = float(item.get("z", 0.0))
+                    entry["last_time"] = now
+                    entry["last_frame"] = token
+                hits = int(entry.get("hits", 1))
+            if hits >= required:
+                item["far_track_admission_confirmed"] = True
+                item["far_track_admission_reason"] = "repeat"
+                item["far_track_admission_hits"] = hits
+                stats["confirmed"] += 1
+                kept.append(item)
+                if best is not None:
+                    self._far_admission_pending[best[1]]["confirmed"] = True
+            else:
+                item["far_track_admission_confirmed"] = False
+                item["far_track_admission_reason"] = "pending"
+                item["far_track_admission_hits"] = hits
+                item["reason"] = "far_track_admission"
+                stats["held"] += 1
+                rejected.append(item)
+        self._far_admission_pending = [p for p in self._far_admission_pending
+                                       if not p.get("confirmed", False)]
+        stats["pending"] = len(self._far_admission_pending)
+        return kept, rejected, stats
+
     def _refresh_quality_stats(self):
         qs = self.tracker.quality_stats()
         self.last_stats["track_quality_active"] = qs["active"]
@@ -398,7 +526,7 @@ class SimpleFusion(object):
             self.last_tracked_candidates, timestamp=timestamp)
         self._refresh_quality_stats()
 
-    def fuse(self, lidar_points, radar_detections, timestamp=None):
+    def fuse(self, lidar_points, radar_detections, timestamp=None, frame_id=None):
         now = time.time() if timestamp is None else float(timestamp)
         c = self.config
         previous_tracks = [dict(x) for x in self.last_tracked_candidates]
@@ -485,8 +613,12 @@ class SimpleFusion(object):
             background_remaining = 0.0
             background_cells = 0
 
-        self.last_dynamic_candidates = [dict(x) for x in dyn]
-        tracked = self.tracker.update(dyn, now)
+        admitted, admission_rejections, admission_stats = self._gate_far_new_tracks(
+            dyn, previous_tracks, now, frame_id=frame_id)
+        self.last_far_admission_candidates = [dict(x) for x in admitted]
+        self.last_far_admission_rejections = [dict(x) for x in admission_rejections]
+        self.last_dynamic_candidates = [dict(x) for x in admitted]
+        tracked = self.tracker.update(admitted, now)
         self.last_tracked_candidates = [dict(x) for x in tracked]
         objs = [DetectedObject(i["id"], i["x"], i["y"], i["z"], vx=i["vx"], vy=i["vy"],
                                object_type="unknown", confidence=i["confidence"],
@@ -499,7 +631,7 @@ class SimpleFusion(object):
                         if not x.get("candidate_score_bypass", False)]
         sparse_roi = sum(1 for x in accepted if x.get("sparse_rescued", False))
         sparse_score = sum(1 for x in scored if x.get("sparse_rescued", False))
-        sparse_dynamic = sum(1 for x in dyn if x.get("sparse_rescued", False))
+        sparse_dynamic = sum(1 for x in admitted if x.get("sparse_rescued", False))
         ts = dict(getattr(self.tracker, "last_stats", {}) or {})
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
@@ -517,10 +649,19 @@ class SimpleFusion(object):
             "candidate_score_avg": (sum(score_values) / len(score_values) if score_values else None),
             "recovery_quality_pass": len(self.last_recovery_quality_candidates),
             "recovery_quality_rejected": len(self.last_recovery_quality_rejections),
-            "background_candidates": len(dyn), "background_rejected": max(0, len(roi) - len(dyn)),
+            "background_candidates": len(admitted),
+            "background_pre_admission_candidates": len(dyn),
+            "background_rejected": max(0, len(roi) - len(dyn)),
             "background_ready": background_ready, "background_remaining": background_remaining,
             "background_cells": background_cells,
             "background_filter_enabled": bool(c.get("background_filter_enabled", False)),
+            "far_admission_pending": int(admission_stats.get("pending", 0)),
+            "far_admission_held": int(admission_stats.get("held", 0)),
+            "far_admission_confirmed": int(admission_stats.get("confirmed", 0)),
+            "far_admission_expired": int(admission_stats.get("expired", 0)),
+            "far_admission_sensor_bypass": int(admission_stats.get("sensor_bypass", 0)),
+            "far_admission_strong_bypass": int(admission_stats.get("strong_bypass", 0)),
+            "far_admission_track_bypass": int(admission_stats.get("track_bypass", 0)),
             "range_adaptive_clustering": bool(c.get("range_adaptive_clustering", False)),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "radar_world_points": radar_world_count, "radar_matched_objects": radar_matched,

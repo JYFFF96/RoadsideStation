@@ -39,7 +39,8 @@ def main():
             camera, lidar, radar = station.cache.snapshot()
             if camera is None or lidar is None:
                 time.sleep(.02); continue
-            ol = fusion.fuse(lidar[1], radar[1] if radar else None)
+            ol = fusion.fuse(lidar[1], radar[1] if radar else None,
+                             frame_id=lidar[0])
 
             # SensorCache already stores the camera image as a BGRA numpy array
             # via roadside.sensors.image_to_bgra(). Do not try to read raw_data

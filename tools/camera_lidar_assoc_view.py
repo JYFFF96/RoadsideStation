@@ -107,7 +107,8 @@ def main():
             if camera is None or lidar is None:
                 time.sleep(.02); continue
             frame_id, bgra = camera
-            ol = fusion.fuse(lidar[1], radar[1] if radar else None)
+            ol = fusion.fuse(lidar[1], radar[1] if radar else None,
+                             frame_id=lidar[0])
             view = bgra[:, :, :3].copy()
 
             cam_list = make_truth_camera_objects(station.world, projector, camera_id, width, height, frame_id)

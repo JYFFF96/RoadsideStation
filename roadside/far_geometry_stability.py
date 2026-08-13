@@ -53,8 +53,9 @@ def install_far_geometry_stability_patch():
 
     original_fuse = SimpleFusion.fuse
 
-    def fuse(self, lidar_points, radar_detections, timestamp=None):
-        result = original_fuse(self, lidar_points, radar_detections, timestamp)
+    def fuse(self, lidar_points, radar_detections, timestamp=None, frame_id=None):
+        result = original_fuse(self, lidar_points, radar_detections, timestamp,
+                               frame_id=frame_id)
 
         stats = dict(getattr(build_far_geometry_candidates, "last_stats", {}) or {})
         roi_pass_items = _far_items(getattr(self, "last_roi_candidates", []))

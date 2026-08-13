@@ -81,7 +81,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.6.1 Recovery Quality Gate starting...")
+ print("RoadsideStation V0.6.12.7 Far New-Track Admission Gate starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -94,6 +94,7 @@ def main():
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
  print("Recovery Quality Gate: %s | unsupported current points>=%d | stable track hits>=%d q>=%.2f"%("enabled" if fc.get("far_recovery_quality_gate_enabled",False) else "disabled",int(fc.get("far_recovery_quality_min_current_points_without_support",4)),int(fc.get("far_recovery_quality_track_min_hits",3)),float(fc.get("far_recovery_quality_track_min_quality",0.47))))
+ print("Far New-Track Admission: %s | range>=%.0fm frames=%d match<=%.1fm | strong points>=%d score>=%.2f"%("enabled" if fc.get("far_track_admission_enabled",False) else "disabled",float(fc.get("far_track_admission_min_range",50.0)),int(fc.get("far_track_admission_required_frames",2)),float(fc.get("far_track_admission_match_gate",2.5)),int(fc.get("far_track_admission_strong_min_points",10)),float(fc.get("far_track_admission_strong_min_score",0.72))))
  print("Far New Object Discovery: %s | range=%.0f..%.0fm | cell mid/far=%.2f/%.2fm | points mid/far>=%d/%d | max=%d"%("enabled" if fc.get("far_sparse_discovery_enabled",False) else "disabled",float(fc.get("far_sparse_discovery_min_range",30.0)),float(fc.get("far_sparse_discovery_max_range",80.0)),float(fc.get("far_sparse_discovery_mid_cell",0.90)),float(fc.get("far_sparse_discovery_far_cell",1.20)),int(fc.get("far_sparse_discovery_mid_min_points",4)),int(fc.get("far_sparse_discovery_far_min_points",3)),int(fc.get("far_sparse_discovery_max_candidates",40))))
  print("Discovery Diagnostics: observer-only | split TrackRescue/NewDiscovery stages + discovery-born track lifecycle")
  print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",4.2)),float(fc.get("road_roi_margin_far",4.5))))
@@ -126,6 +127,7 @@ def main():
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
  print("ARCH: traffic -> ground removal -> clustering -> V0.6.11.1 range-aware rescue + V0.6.11.2 far geometry builder + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
  print("ARCH: Discovery Diagnostics observes source stages and discovery-born track lifecycle only.")
+ print("ARCH: Far admission uses LiDAR frame IDs; repeated reads of one frame cannot confirm a pending target.")
  print("ARCH: Detection Stability/Drop diagnostics remain observer/evaluation-only.")
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
@@ -134,7 +136,7 @@ def main():
  last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
  try:
   while not _STOP_REQUESTED:
-   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
+   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
@@ -149,6 +151,7 @@ def main():
     _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
+    print("  [FAR TRACK ADMISSION] Pending:%d Held:%d Confirmed:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d"%(s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0)))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  Geometry-aware ROI rescued: %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  Candidate score rejected: %d"%s.get("score_rejected",0))
@@ -164,6 +167,7 @@ def main():
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
+    print("  [FAR TRACK ADMISSION] Pending:%d Held:%d Confirmed:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d"%(s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0)))
     if s.get("roi_rejection_reasons"):print("  [ROI REJECT] %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  [ROI RESCUED] %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  [SCORE REJECT] %d"%s.get("score_rejected",0))

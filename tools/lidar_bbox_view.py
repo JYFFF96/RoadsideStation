@@ -29,7 +29,7 @@ def main():
         while True:
             camera,lidar,radar=station.cache.snapshot()
             if camera is None or lidar is None:time.sleep(.02);continue
-            ol=fusion.fuse(lidar[1],radar[1] if radar else None);view=camera[1][:,:,:3].copy();drawn=0
+            ol=fusion.fuse(lidar[1],radar[1] if radar else None,frame_id=lidar[0]);view=camera[1][:,:,:3].copy();drawn=0
             by_id={c.get("id"):c for c in fusion.last_tracked_candidates}
             for obj in ol.objects:
                 cand=by_id.get(obj.object_id)
