@@ -66,8 +66,8 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # V0.6.3: keep the proven 0-30m teaching profile unchanged. Only the
-  # 30-50m road ROI/rescue profile is relaxed and diagnosed.
+  # V0.6.4 freezes the proven near/mid perception profile. Far-range stability
+  # is improved with distance-aware scoring and short track coast persistence.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.75, max_length: 6.5, min_width: 0.55, max_width: 3.4, min_height: 0.45, max_height: 2.6}
@@ -104,7 +104,9 @@ fusion:
 
   candidate_scoring_enabled: true
   candidate_scoring_min_range: 50.0
-  candidate_scoring_threshold_far: 0.48
+  candidate_scoring_threshold_far: 0.46
+  candidate_scoring_far_relaxed_range: 65.0
+  candidate_scoring_threshold_far_long: 0.42
 
   radar_match_distance: 4.0
   radar_match_z: 2.5
@@ -114,6 +116,8 @@ fusion:
   track_match_distance: 3.5
   track_max_age: 1.5
   track_max_speed: 20.0
+  track_coast_frames: 4
+  track_coast_confidence_decay: 0.88
   velocity_alpha: 0.25
   velocity_window: 5
   position_alpha: 0.45
@@ -132,13 +136,9 @@ fusion:
 
   geometry_aware_roi_enabled: true
   geometry_aware_roi_min_range: 30.0
-
-  # Default/far rescue remains conservative.
   geometry_aware_roi_min_overlap: 0.25
   geometry_aware_roi_max_center_excess: 1.8
   geometry_aware_roi_max_half_width: 1.8
-
-  # V0.6.3 mid-range-only rescue. 0-30m is untouched.
   geometry_aware_roi_mid_min_overlap: 0.10
   geometry_aware_roi_mid_max_center_excess: 2.6
   geometry_aware_roi_mid_max_half_width: 2.0
