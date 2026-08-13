@@ -35,7 +35,7 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     c = config or {}
     stats = {"input_points": 0, "components": 0, "template_pass": 0,
              "dedupe": 0, "built": 0}
-    if not c.get("far_geometry_builder_enabled", False) or points is None:
+    if not c.get("far_geometry_builder_enabled", True) or points is None:
         build_far_geometry_candidates.last_stats = stats
         return []
 
