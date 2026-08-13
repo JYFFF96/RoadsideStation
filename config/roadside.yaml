@@ -135,6 +135,14 @@ fusion:
   far_geometry_builder_max_candidates: 30
   far_geometry_builder_oriented_extent_enabled: true
 
+  # V0.6.12.4: current-frame seeded, short-term LiDAR-only far support.
+  far_geometry_temporal_enabled: true
+  far_geometry_temporal_ttl: 0.25
+  far_geometry_temporal_frames: 2
+  far_geometry_temporal_gate: 0.90
+  far_geometry_temporal_z_gate: 1.20
+  far_geometry_temporal_max_added: 12
+
   far_sparse_discovery_enabled: true
   far_sparse_discovery_min_range: 30.0
   far_sparse_discovery_max_range: 80.0
