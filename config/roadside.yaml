@@ -222,6 +222,21 @@ fusion:
   road_min_height: -1.0
   road_max_height: 2.8
 
+  # V0.6.12.5: bounded 50-80m distance/evidence adaptive road corridor.
+  far_roi_adaptive_corridor_enabled: true
+  far_roi_adaptive_min_range: 50.0
+  far_roi_adaptive_max_range: 80.0
+  far_roi_adaptive_base_margin: 4.5
+  far_roi_adaptive_max_margin: 5.5
+  far_roi_adaptive_distance_extra: 1.0
+  far_roi_adaptive_temporal_extra: 0.20
+  far_roi_adaptive_sparse_points: 2
+  far_roi_adaptive_sparse_penalty: 0.30
+  far_roi_adaptive_half_width_extra: 0.30
+  far_roi_adaptive_overlap_relax: 0.17
+  far_roi_adaptive_min_overlap_floor: 0.08
+  far_roi_adaptive_center_excess_extra: 0.80
+
   geometry_aware_roi_enabled: true
   geometry_aware_roi_min_range: 30.0
   geometry_aware_roi_min_overlap: 0.25

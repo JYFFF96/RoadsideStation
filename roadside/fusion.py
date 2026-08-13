@@ -212,11 +212,16 @@ class SimpleFusion(object):
         return hs < c.get("pole_short_max", .75) and \
             hl < c.get("pole_long_max", 2.5) and ez > c.get("pole_height_min", 1.5)
 
-    def _validate_candidate(self, wx, wy, wz, e):
+    def _validate_candidate(self, wx, wy, wz, e, candidate=None):
         if not self.candidate_validator:
             return True, "ok", {}
         try:
-            result = self.candidate_validator(wx, wy, wz, e)
+            try:
+                result = self.candidate_validator(wx, wy, wz, e, candidate)
+            except TypeError:
+                # Keep compatibility with real-device/map adapters that still
+                # implement the original four-argument validator contract.
+                result = self.candidate_validator(wx, wy, wz, e)
             if isinstance(result, tuple):
                 ok = bool(result[0])
                 reason = result[1] if len(result) > 1 else ("ok" if ok else "rejected")
@@ -366,8 +371,17 @@ class SimpleFusion(object):
                     "sparse_rescued": bool(i.get("sparse_rescued", False)),
                     "rescue_track_id": i.get("rescue_track_id"),
                     "rescue_track_hits": int(i.get("rescue_track_hits", 0))}
+            # V0.6.12.5: keep far-geometry evidence through the ROI boundary.
+            # The adaptive corridor consumes perception metadata only; CARLA
+            # actors and evaluation truth are never exposed to it.
+            for key in ("far_geometry_built", "far_geometry_quality_v2",
+                        "far_geometry_temporal_supported", "current_point_count",
+                        "temporal_point_count", "oriented_yaw",
+                        "oriented_extent", "axis_aligned_extent"):
+                if key in i:
+                    item[key] = i.get(key)
             world_clusters.append(dict(item))
-            ok, reason, details = self._validate_candidate(wx, wy, wz, e)
+            ok, reason, details = self._validate_candidate(wx, wy, wz, e, item)
             if not ok:
                 rej = dict(item)
                 rej["reason"] = reason

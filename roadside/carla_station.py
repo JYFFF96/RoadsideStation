@@ -75,11 +75,11 @@ class CarlaRoadsideStation(object):
         if cfg.get("deployment","manual") in ("auto_junction","auto_cross_junction"): return self._find_junction_transform()
         t=cfg["transform"]; return carla.Transform(carla.Location(x=float(t.get("x",0)),y=float(t.get("y",0)),z=float(t.get("z",8))),carla.Rotation(pitch=float(t.get("pitch",0)),yaw=float(t.get("yaw",0)),roll=float(t.get("roll",0))))
 
-    def validate_driving_roi(self,x,y,z,extent=None):
+    def validate_driving_roi(self,x,y,z,extent=None,candidate=None):
         if self.world_map is None:return True,"ok",{}
         cfg=self.config.get("fusion",{})
         margin=float(cfg.get("road_roi_margin",2.5));min_above=float(cfg.get("road_min_height",-.8));max_above=float(cfg.get("road_max_height",3.5))
-        range_from_center=None;roi_band="near"
+        range_from_center=None;range_from_sensor=None;roi_band="near"
         mid_range=float(cfg.get("road_roi_mid_range",30.0));far_range=float(cfg.get("road_roi_far_range",50.0))
         if self.junction_center is not None:
             range_from_center=math.hypot(float(x)-float(self.junction_center.x),float(y)-float(self.junction_center.y))
@@ -87,10 +87,37 @@ class CarlaRoadsideStation(object):
                 roi_band="far";margin=float(cfg.get("road_roi_margin_far",margin))
             elif range_from_center>=mid_range:
                 roi_band="mid";margin=float(cfg.get("road_roi_margin_mid",margin))
+        sensor_t=self.lidar_transform or self.base_transform
+        if sensor_t is not None:
+            range_from_sensor=math.hypot(float(x)-float(sensor_t.location.x),float(y)-float(sensor_t.location.y))
+
+        # V0.6.12.5: widen only the far road corridor, continuously and with
+        # hard bounds. Sparse two-point candidates are penalised; current-frame
+        # seeded temporal support earns a small, bounded allowance.
+        corridor={"enabled":False,"ratio":0.0,"base_margin":margin,
+                  "distance_extra":0.0,"temporal_extra":0.0,
+                  "sparse_penalty":0.0,"final_margin":margin}
+        far_adaptive=bool(cfg.get("far_roi_adaptive_corridor_enabled",True))
+        adapt_min=float(cfg.get("far_roi_adaptive_min_range",50.0))
+        adapt_max=max(adapt_min+1.0,float(cfg.get("far_roi_adaptive_max_range",80.0)))
+        if far_adaptive and range_from_sensor is not None and range_from_sensor>=adapt_min:
+            ratio=max(0.0,min(1.0,(range_from_sensor-adapt_min)/(adapt_max-adapt_min)))
+            base=float(cfg.get("far_roi_adaptive_base_margin",margin))
+            max_margin=max(base,float(cfg.get("far_roi_adaptive_max_margin",5.4)))
+            distance_extra=ratio*float(cfg.get("far_roi_adaptive_distance_extra",1.0))
+            meta=candidate or {};current_points=int(meta.get("current_point_count",meta.get("point_count",0)) or 0)
+            temporal_extra=(float(cfg.get("far_roi_adaptive_temporal_extra",0.20))
+                            if meta.get("far_geometry_temporal_supported",False) else 0.0)
+            sparse_penalty=(float(cfg.get("far_roi_adaptive_sparse_penalty",0.30))
+                            if current_points<=int(cfg.get("far_roi_adaptive_sparse_points",2)) else 0.0)
+            margin=max(base,min(max_margin,base+distance_extra+temporal_extra-sparse_penalty))
+            corridor.update({"enabled":True,"ratio":ratio,"base_margin":base,
+                             "distance_extra":distance_extra,"temporal_extra":temporal_extra,
+                             "sparse_penalty":sparse_penalty,"final_margin":margin})
         loc=carla.Location(x=float(x),y=float(y),z=float(z)); wp=self.world_map.get_waypoint(loc,project_to_road=True,lane_type=carla.LaneType.Driving)
         if wp is None:return False,"no_waypoint",{}
         lane=wp.transform.location; lateral=math.hypot(float(x)-lane.x,float(y)-lane.y); allowed=float(wp.lane_width)*.5+margin;dz=float(z)-float(lane.z)
-        details={"lateral":lateral,"allowed_lateral":allowed,"roi_margin":margin,"roi_band":roi_band,"range_from_center":range_from_center,"dz":dz,"lane_width":float(wp.lane_width),"geometry_rescued":False}
+        details={"lateral":lateral,"allowed_lateral":allowed,"roi_margin":margin,"roi_band":roi_band,"range_from_center":range_from_center,"range_from_sensor":range_from_sensor,"dz":dz,"lane_width":float(wp.lane_width),"geometry_rescued":False,"adaptive_corridor":corridor}
         if dz<min_above:return False,"below_road",details
         if dz>max_above:return False,"above_road",details
         if lateral<=allowed:return True,"ok",details
@@ -110,6 +137,12 @@ class CarlaRoadsideStation(object):
                     half_limit=float(cfg.get("geometry_aware_roi_max_half_width",1.8))
                     min_overlap=float(cfg.get("geometry_aware_roi_min_overlap",0.25))
                     max_excess=float(cfg.get("geometry_aware_roi_max_center_excess",1.8))
+                    if corridor["enabled"]:
+                        ratio=corridor["ratio"]
+                        half_limit+=ratio*float(cfg.get("far_roi_adaptive_half_width_extra",0.30))
+                        min_overlap=max(float(cfg.get("far_roi_adaptive_min_overlap_floor",0.08)),
+                                        min_overlap-ratio*float(cfg.get("far_roi_adaptive_overlap_relax",0.17)))
+                        max_excess+=ratio*float(cfg.get("far_roi_adaptive_center_excess_extra",0.80))
                 half_short=min(half_limit,0.5*short_side)
                 center_excess=lateral-allowed
                 overlap=allowed+half_short-lateral
@@ -119,8 +152,8 @@ class CarlaRoadsideStation(object):
                     return True,"geometry_overlap",details
         return False,"lateral",details
 
-    def is_driving_roi(self,x,y,z,extent=None):
-        return self.validate_driving_roi(x,y,z,extent)[0]
+    def is_driving_roi(self,x,y,z,extent=None,candidate=None):
+        return self.validate_driving_roi(x,y,z,extent,candidate)[0]
 
     def start(self):
         cc=self.config["carla"];self.client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));self.client.set_timeout(float(cc.get("timeout",60.0)))

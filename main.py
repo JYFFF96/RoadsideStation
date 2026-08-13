@@ -95,6 +95,8 @@ def main():
  print("Far New Object Discovery: %s | range=%.0f..%.0fm | cell mid/far=%.2f/%.2fm | points mid/far>=%d/%d | max=%d"%("enabled" if fc.get("far_sparse_discovery_enabled",False) else "disabled",float(fc.get("far_sparse_discovery_min_range",30.0)),float(fc.get("far_sparse_discovery_max_range",80.0)),float(fc.get("far_sparse_discovery_mid_cell",0.90)),float(fc.get("far_sparse_discovery_far_cell",1.20)),int(fc.get("far_sparse_discovery_mid_min_points",4)),int(fc.get("far_sparse_discovery_far_min_points",3)),int(fc.get("far_sparse_discovery_max_candidates",40))))
  print("Discovery Diagnostics: observer-only | split TrackRescue/NewDiscovery stages + discovery-born track lifecycle")
  print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",4.2)),float(fc.get("road_roi_margin_far",4.5))))
+ if fc.get("far_roi_adaptive_corridor_enabled",False):
+  print("Far ROI Adaptive Corridor: %.0f..%.0fm margin %.1f..%.1fm"%(float(fc.get("far_roi_adaptive_min_range",50.0)),float(fc.get("far_roi_adaptive_max_range",80.0)),float(fc.get("far_roi_adaptive_base_margin",4.5)),float(fc.get("far_roi_adaptive_max_margin",5.5))))
  if fc.get("geometry_aware_roi_enabled",False):
   print("Geometry-aware ROI default/far: overlap>=%.2fm center_excess<=%.2fm"%(float(fc.get("geometry_aware_roi_min_overlap",0.25)),float(fc.get("geometry_aware_roi_max_center_excess",1.8))))
   print("Mid-range ROI rescue 30-50m: overlap>=%.2fm center_excess<=%.2fm half_width<=%.2fm"%(float(fc.get("geometry_aware_roi_mid_min_overlap",0.10)),float(fc.get("geometry_aware_roi_mid_max_center_excess",2.6)),float(fc.get("geometry_aware_roi_mid_max_half_width",2.0))))

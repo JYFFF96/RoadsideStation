@@ -61,6 +61,13 @@ def install_far_geometry_stability_patch():
 
         roi_reasons = _reason_counts(roi_reject_items)
         score_reasons = _reason_counts(score_reject_items)
+        corridor_items = roi_pass_items + roi_reject_items
+        adaptive_items = [x for x in corridor_items
+                          if ((x.get("roi_details", {}) or x.get("details", {}) or {})
+                              .get("adaptive_corridor", {}).get("enabled", False))]
+        adaptive_rescued = sum(1 for x in roi_pass_items
+                               if (x.get("roi_details", {}) or {}).get("geometry_rescued", False)
+                               and (x.get("roi_details", {}) or {}).get("adaptive_corridor", {}).get("enabled", False))
 
         stats["roi_pass"] = len(roi_pass_items)
         stats["roi_reject"] = len(roi_reject_items)
@@ -69,6 +76,8 @@ def install_far_geometry_stability_patch():
         stats["score_reject"] = len(score_reject_items)
         stats["score_reject_reasons"] = score_reasons
         stats["dynamic_pass"] = len(dynamic_items)
+        stats["adaptive_corridor_candidates"] = len(adaptive_items)
+        stats["adaptive_corridor_rescued"] = adaptive_rescued
         build_far_geometry_candidates.last_stats = stats
 
         now = time.time() if timestamp is None else float(timestamp)
@@ -100,6 +109,16 @@ def install_far_geometry_stability_patch():
                   (roi_reasons.get("lateral", 0), roi_reasons.get("above_road", 0),
                    sum(v for k, v in roi_reasons.items()
                        if k not in ("lateral", "above_road"))))
+
+            margins=[]
+            for item in adaptive_items:
+                d=item.get("roi_details", {}) or item.get("details", {}) or {}
+                a=d.get("adaptive_corridor", {}) or {}
+                if a.get("final_margin") is not None:margins.append(float(a["final_margin"]))
+            print("  [FAR ADAPTIVE CORRIDOR] Candidates:%d Rescued:%d Margin(avg/max):%s/%s" %
+                  (len(adaptive_items),adaptive_rescued,
+                   _fmt(sum(margins)/len(margins) if margins else None),
+                   _fmt(max(margins) if margins else None)))
 
             for item in roi_reject_items[:3]:
                 details = item.get("details", {}) or {}
