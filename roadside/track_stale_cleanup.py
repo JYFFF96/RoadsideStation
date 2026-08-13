@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+import time
+
 
 def _recent_sensor(track, now, memory):
     for key in ("last_camera_time", "last_radar_time"):
@@ -10,17 +12,6 @@ def _recent_sensor(track, now, memory):
 
 
 def cleanup_stale_tracks(tracker, output_items, now, config=None):
-    """Remove weak stale internal tracks after normal tracker update.
-
-    V0.6.12 policy:
-      * only tracks that are currently unmatched/coasting are considered;
-      * require misses >= configured threshold;
-      * require quality below configured threshold;
-      * recent camera/radar confirmation protects the track;
-      * remove from tracker internal state so it cannot resurrect next frame.
-
-    Uses only generic tracker state. No CARLA actor/ground-truth data.
-    """
     c = config or {}
     stats = {"checked": 0, "protected": 0, "quality_keep": 0,
              "miss_keep": 0, "cleaned": 0}
@@ -32,7 +23,6 @@ def cleanup_stale_tracks(tracker, output_items, now, config=None):
     max_quality = float(c.get("track_stale_cleanup_max_quality", 0.55))
     sensor_memory = max(.1, float(c.get("track_stale_cleanup_sensor_memory",
                                        c.get("track_quality_sensor_memory", 1.5))))
-
     internal = getattr(tracker, "_tracks", {})
     remove_ids = set()
     for tid, track in list(internal.items()):
@@ -63,6 +53,37 @@ def cleanup_stale_tracks(tracker, output_items, now, config=None):
     out = [dict(x) for x in (output_items or []) if x.get("id") not in remove_ids]
     cleanup_stale_tracks.last_stats = stats
     return out
+
+
+def install_stale_cleanup_patch():
+    """Install a conservative post-update cleanup hook on NearestTracker."""
+    from .tracking import NearestTracker
+    if getattr(NearestTracker, "_v0612_stale_patch", False):
+        return
+    original_configure = NearestTracker.configure_quality
+    original_update = NearestTracker.update
+
+    def configure_quality(self, config):
+        original_configure(self, config)
+        self._stale_cleanup_config = dict(config or {})
+
+    def update(self, detections, timestamp=None):
+        now = time.time() if timestamp is None else float(timestamp)
+        out = original_update(self, detections, timestamp)
+        out = cleanup_stale_tracks(self, out, now, getattr(self, "_stale_cleanup_config", {}))
+        s = dict(getattr(self, "last_stats", {}) or {})
+        d = dict(cleanup_stale_tracks.last_stats)
+        s["stale_checked"] = int(d.get("checked", 0))
+        s["stale_protected"] = int(d.get("protected", 0))
+        s["stale_quality_keep"] = int(d.get("quality_keep", 0))
+        s["stale_miss_keep"] = int(d.get("miss_keep", 0))
+        s["stale_cleaned"] = int(d.get("cleaned", 0))
+        self.last_stats = s
+        return out
+
+    NearestTracker.configure_quality = configure_quality
+    NearestTracker.update = update
+    NearestTracker._v0612_stale_patch = True
 
 
 cleanup_stale_tracks.last_stats = {
