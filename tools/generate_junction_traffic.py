@@ -1,9 +1,9 @@
 from __future__ import print_function
 
 # Stable CARLA traffic benchmark for RoadsideStation perception evaluation.
-# Traffic Manager/autopilot only: no custom steering or path override.
-# V0.5.9 adds --no-recycle so tracker tests can separate perception flicker
-# from CARLA vehicle destroy/respawn lifecycle effects.
+# V0.6.13 adds a fixed reusable vehicle pool for repeatable benchmark traffic.
+# Vehicles are spawned once and, after leaving the evaluation area, the same
+# CARLA actor is relocated to a safe upstream spawn instead of destroy/respawn.
 
 import argparse
 import math
@@ -41,7 +41,9 @@ def _distance2d(a, b):
 def _speed(actor):
     try:
         v = actor.get_velocity()
-        return math.sqrt(float(v.x) * float(v.x) + float(v.y) * float(v.y) + float(v.z) * float(v.z))
+        return math.sqrt(float(v.x) * float(v.x) +
+                         float(v.y) * float(v.y) +
+                         float(v.z) * float(v.z))
     except Exception:
         return 0.0
 
@@ -69,8 +71,10 @@ def _junction_candidates(world_map):
             if all(_angle_diff(h, b) > 35.0 for b in bins):
                 bins.append(h)
         box = j.bounding_box
-        area = max(1.0, float(box.extent.x) * 2.0) * max(1.0, float(box.extent.y) * 2.0)
-        seen[j.id] = (len(bins) * 1000.0 + min(area, 500.0), j, len(bins), area)
+        area = max(1.0, float(box.extent.x) * 2.0) * \
+               max(1.0, float(box.extent.y) * 2.0)
+        seen[j.id] = (len(bins) * 1000.0 + min(area, 500.0),
+                      j, len(bins), area)
     items = list(seen.values())
     items.sort(key=lambda x: x[0], reverse=True)
     return items
@@ -78,29 +82,38 @@ def _junction_candidates(world_map):
 
 def _resolve_center(world_map, config):
     sc = config.get("station", {})
-    if sc.get("deployment", "manual") in ("auto_junction", "auto_cross_junction"):
+    if sc.get("deployment", "manual") in ("auto_junction",
+                                            "auto_cross_junction"):
         candidates = _junction_candidates(world_map)
         if not candidates:
             raise RuntimeError("No junction found")
         cross = [x for x in candidates if x[2] >= 4]
         pool = cross or candidates
-        _, junction, dirs, area = pool[int(sc.get("junction_index", 0)) % len(pool)]
+        _, junction, dirs, area = \
+            pool[int(sc.get("junction_index", 0)) % len(pool)]
         c = junction.bounding_box.location
-        print("Benchmark junction id=%s directions=%d area=%.1f center=(%.2f, %.2f)" %
+        print("Benchmark junction id=%s directions=%d area=%.1f "
+              "center=(%.2f, %.2f)" %
               (junction.id, dirs, area, c.x, c.y))
         return carla.Location(x=c.x, y=c.y, z=c.z)
+
     t = sc.get("transform", {})
-    return carla.Location(x=float(t.get("x", 0)), y=float(t.get("y", 0)), z=float(t.get("z", 0)))
+    return carla.Location(x=float(t.get("x", 0)),
+                          y=float(t.get("y", 0)),
+                          z=float(t.get("z", 0)))
 
 
 def _safe_blueprints(world):
     result = []
     for bp in world.get_blueprint_library().filter("vehicle.*"):
         try:
-            if bp.has_attribute("number_of_wheels") and int(bp.get_attribute("number_of_wheels")) != 4:
+            if bp.has_attribute("number_of_wheels") and \
+                    int(bp.get_attribute("number_of_wheels")) != 4:
                 continue
             name = bp.id.lower()
-            if any(x in name for x in ("microlino", "carlacola", "cybertruck", "t2", "sprinter", "firetruck", "ambulance")):
+            if any(x in name for x in (
+                    "microlino", "carlacola", "cybertruck", "t2",
+                    "sprinter", "firetruck", "ambulance")):
                 continue
             result.append(bp)
         except Exception:
@@ -124,7 +137,8 @@ def _prepare(bp, rng):
 
 def _destroy(client, ids, do_tick=False):
     if ids:
-        client.apply_batch_sync([carla.command.DestroyActor(x) for x in ids], do_tick)
+        client.apply_batch_sync(
+            [carla.command.DestroyActor(x) for x in ids], do_tick)
 
 
 def _bin_counts(actors, center, bins):
@@ -145,7 +159,9 @@ def _is_safe_spawn(world_map, sp, center, safe_radius, spawn_radius):
     if d < safe_radius or d > spawn_radius:
         return False
     try:
-        wp = world_map.get_waypoint(sp.location, project_to_road=False, lane_type=carla.LaneType.Driving)
+        wp = world_map.get_waypoint(
+            sp.location, project_to_road=False,
+            lane_type=carla.LaneType.Driving)
         if wp is None or wp.is_junction:
             return False
     except Exception:
@@ -181,14 +197,16 @@ def _configure_vehicle_tm(tm, actor, following_distance, speed_diff):
         pass
 
 
-def _attach_collision_sensor(world, actor, collision_sensors, health, pair_last_time):
+def _attach_collision_sensor(world, actor, collision_sensors,
+                             health, pair_last_time):
     try:
         bp = world.get_blueprint_library().find("sensor.other.collision")
         sensor = world.spawn_actor(bp, carla.Transform(), attach_to=actor)
 
         def _on_collision(event):
             try:
-                other_id = int(event.other_actor.id) if event.other_actor is not None else -1
+                other_id = int(event.other_actor.id) \
+                    if event.other_actor is not None else -1
             except Exception:
                 other_id = -1
             a = int(actor.id)
@@ -197,10 +215,175 @@ def _attach_collision_sensor(world, actor, collision_sensors, health, pair_last_
             if now - pair_last_time.get(key, 0.0) >= 2.0:
                 pair_last_time[key] = now
                 health["collisions"] += 1
+
         sensor.listen(_on_collision)
         collision_sensors[actor.id] = sensor
     except Exception as exc:
-        print("Collision sensor warning for vehicle %s: %s" % (actor.id, exc))
+        print("Collision sensor warning for vehicle %s: %s" %
+              (actor.id, exc))
+
+
+class FixedVehiclePool(object):
+    """Spawn once, reuse the same CARLA actors after they leave the junction."""
+
+    def __init__(self, world, world_map, tm, client, local_spawns,
+                 blueprints, rng, args, collision_sensors, health,
+                 pair_last_time):
+        self.world = world
+        self.world_map = world_map
+        self.tm = tm
+        self.client = client
+        self.local_spawns = list(local_spawns)
+        self.blueprints = list(blueprints)
+        self.rng = rng
+        self.args = args
+        self.collision_sensors = collision_sensors
+        self.health = health
+        self.pair_last_time = pair_last_time
+
+        self.ids = set()
+        self.reuse_count = 0
+        self.reuse_failed = 0
+        self.actor_reuse = {}
+        self.next_spawn_index = 0
+
+    def _current_actors(self):
+        return {a.id: a for a in
+                self.world.get_actors().filter("vehicle.*")}
+
+    def _spawn_clear(self, sp, ignore_actor_id=None):
+        for actor in self.world.get_actors().filter("vehicle.*"):
+            if ignore_actor_id is not None and actor.id == ignore_actor_id:
+                continue
+            try:
+                if _distance2d(sp.location, actor.get_location()) < \
+                        self.args.spawn_clearance:
+                    return False
+            except Exception:
+                pass
+        return True
+
+    def _ordered_spawn_candidates(self, ignore_actor_id=None):
+        total = len(self.local_spawns)
+        if total <= 0:
+            return []
+        out = []
+        for step in range(total):
+            idx = (self.next_spawn_index + step) % total
+            sp = self.local_spawns[idx]
+            if self._spawn_clear(sp, ignore_actor_id):
+                out.append((idx, sp))
+        return out
+
+    def spawn_one(self):
+        candidates = self._ordered_spawn_candidates()
+        for idx, sp in candidates:
+            bp = _prepare(self.rng.choice(self.blueprints), self.rng)
+            actor = self.world.try_spawn_actor(bp, sp)
+            if actor is None:
+                continue
+            actor.set_autopilot(True, self.tm.get_port())
+            _configure_vehicle_tm(
+                self.tm, actor,
+                self.args.following_distance,
+                self.args.speed_diff)
+            self.ids.add(actor.id)
+            self.actor_reuse[actor.id] = 0
+            self.next_spawn_index = (idx + 1) % len(self.local_spawns)
+            if not self.args.no_collision_monitor and \
+                    self.args.mode != "stress":
+                _attach_collision_sensor(
+                    self.world, actor, self.collision_sensors,
+                    self.health, self.pair_last_time)
+            return actor
+        return None
+
+    def spawn_initial(self, target, sync_enabled):
+        attempts = 0
+        while len(self.ids) < target and attempts < max(12, target * 20):
+            attempts += 1
+            if self.spawn_one() is None:
+                if sync_enabled:
+                    self.world.tick()
+                else:
+                    time.sleep(0.05)
+        return len(self.ids)
+
+    def remove_dead(self):
+        current = self._current_actors()
+        dead = [aid for aid in self.ids if aid not in current]
+        for aid in dead:
+            self.ids.discard(aid)
+            self.actor_reuse.pop(aid, None)
+            sensor = self.collision_sensors.pop(aid, None)
+            if sensor is not None:
+                try:
+                    sensor.stop()
+                    sensor.destroy()
+                except Exception:
+                    pass
+        return len(dead)
+
+    def recycle(self, actor):
+        candidates = self._ordered_spawn_candidates(actor.id)
+        if not candidates:
+            self.reuse_failed += 1
+            return False
+
+        idx, sp = candidates[0]
+        try:
+            # Disable TM briefly so it cannot issue control during teleport.
+            actor.set_autopilot(False, self.tm.get_port())
+        except Exception:
+            pass
+
+        try:
+            actor.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+            actor.set_target_angular_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+        except Exception:
+            pass
+
+        try:
+            actor.set_transform(sp)
+        except Exception:
+            try:
+                actor.set_autopilot(True, self.tm.get_port())
+            except Exception:
+                pass
+            self.reuse_failed += 1
+            return False
+
+        try:
+            actor.set_autopilot(True, self.tm.get_port())
+        except Exception:
+            pass
+        _configure_vehicle_tm(
+            self.tm, actor,
+            self.args.following_distance,
+            self.args.speed_diff)
+
+        self.next_spawn_index = (idx + 1) % len(self.local_spawns)
+        self.reuse_count += 1
+        self.actor_reuse[actor.id] = \
+            int(self.actor_reuse.get(actor.id, 0)) + 1
+        return True
+
+    def alive(self):
+        current = self._current_actors()
+        return [current[aid] for aid in self.ids if aid in current]
+
+    def refill_dead_only(self, target, sync_enabled):
+        # Fixed pool does not replace healthy vehicles. This path only restores
+        # actors that CARLA itself destroyed unexpectedly.
+        made = 0
+        while len(self.ids) < target:
+            actor = self.spawn_one()
+            if actor is None:
+                break
+            made += 1
+            if sync_enabled:
+                self.world.tick()
+        return made
 
 
 def main():
@@ -208,13 +391,16 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="Stable RoadsideStation junction traffic benchmark V0.5.9")
+    ap = argparse.ArgumentParser(
+        description="RoadsideStation junction traffic benchmark V0.6.13")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
-    ap.add_argument("--mode", choices=("benchmark", "demo", "stress"), default="benchmark")
-    ap.add_argument("--vehicles", "-n", type=int, default=None, help="override mode vehicle count")
+    ap.add_argument("--mode", choices=("benchmark", "demo", "stress"),
+                    default="benchmark")
+    ap.add_argument("--vehicles", "-n", type=int, default=None,
+                    help="override mode vehicle count")
     ap.add_argument("--spawn-radius", type=float, default=None)
     ap.add_argument("--junction-safe-radius", type=float, default=25.0)
     ap.add_argument("--recycle-radius", type=float, default=None)
@@ -225,10 +411,15 @@ def main():
     ap.add_argument("--fixed-delta", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--keep-existing", action="store_true")
-    ap.add_argument("--async-mode", action="store_true", help="do not enable synchronous CARLA/TM ticking")
+    ap.add_argument("--async-mode", action="store_true",
+                    help="do not enable synchronous CARLA/TM ticking")
     ap.add_argument("--no-collision-monitor", action="store_true")
     ap.add_argument("--no-recycle", action="store_true",
-                    help="diagnostic mode: never destroy/refill vehicles after initial spawn")
+                    help="diagnostic mode: never recycle vehicles")
+    ap.add_argument("--pool-mode", choices=("fixed", "legacy"),
+                    default="fixed",
+                    help="fixed reuses actors; legacy destroy/refill is "
+                         "deprecated and aliases to fixed")
     args = ap.parse_args()
 
     mode_defaults = {
@@ -242,13 +433,17 @@ def main():
     if args.spawn_radius is None:
         args.spawn_radius = md["spawn_radius"]
     if args.recycle_radius is None:
-        args.recycle_radius = args.spawn_radius + 25.0
+        args.recycle_radius = max(args.spawn_radius + 25.0, 120.0)
+
+    if args.pool_mode == "legacy":
+        print("NOTE: --pool-mode legacy is deprecated; V0.6.13 uses fixed "
+              "actor reuse for benchmark stability.")
 
     rng = random.Random(args.seed)
     cfg = _load_config(args.config)
     client = carla.Client(args.host, args.port)
     client.set_timeout(10.0)
-    owned = set()
+
     collision_sensors = {}
     health = {"collisions": 0}
     pair_last_time = {}
@@ -256,21 +451,29 @@ def main():
     original_settings = None
     sync_enabled = False
     tm = None
+    pool = None
 
     try:
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_center(world_map, cfg)
-        print("RoadsideStation Junction Traffic Benchmark V0.5.9")
-        print("Map:%s | mode:%s | seed:%d" % (world_map.name.split("/")[-1], args.mode, args.seed))
-        recycle_txt = "OFF" if args.no_recycle else ">%.0fm" % args.recycle_radius
-        print("Target vehicles:%d | spawn %.0f..%.0fm | recycle:%s | report<=%.0fm" %
-              (args.vehicles, args.junction_safe_radius, args.spawn_radius, recycle_txt, args.report_radius))
-        print("Safety profile: follow=%.1fm speed_diff=%.0f%% spawn_clearance=%.1fm" %
-              (args.following_distance, args.speed_diff, args.spawn_clearance))
-        print("Traffic Manager autopilot only; no custom steering/path override.")
-        if args.no_recycle:
-            print("Diagnostic lifecycle: NO RECYCLE / NO REFILL after initial spawn.")
+
+        print("RoadsideStation Junction Traffic Benchmark V0.6.13")
+        print("Map:%s | mode:%s | seed:%d | pool:fixed" %
+              (world_map.name.split("/")[-1], args.mode, args.seed))
+        recycle_txt = "OFF" if args.no_recycle else \
+            ">%.0fm actor-reuse" % args.recycle_radius
+        print("Target vehicles:%d | spawn %.0f..%.0fm | recycle:%s | "
+              "report<=%.0fm" %
+              (args.vehicles, args.junction_safe_radius, args.spawn_radius,
+               recycle_txt, args.report_radius))
+        print("Safety profile: follow=%.1fm speed_diff=%.0f%% "
+              "spawn_clearance=%.1fm" %
+              (args.following_distance, args.speed_diff,
+               args.spawn_clearance))
+        print("Traffic Manager autopilot only; no custom steering/path "
+              "override.")
+        print("Fixed pool: healthy actors are never destroy/refilled.")
 
         if not args.keep_existing:
             existing = list(world.get_actors().filter("vehicle.*"))
@@ -296,15 +499,21 @@ def main():
             world.apply_settings(settings)
             tm.set_synchronous_mode(True)
             sync_enabled = True
-            print("CARLA sync: ENABLED | fixed_delta=%.3fs | TrafficManager sync: ENABLED" % args.fixed_delta)
+            print("CARLA sync: ENABLED | fixed_delta=%.3fs | "
+                  "TrafficManager sync: ENABLED" % args.fixed_delta)
         else:
             print("CARLA sync: disabled by --async-mode")
 
         blueprints = _safe_blueprints(world)
-        local_spawns = [sp for sp in world_map.get_spawn_points()
-                        if _is_safe_spawn(world_map, sp, center,
-                                          args.junction_safe_radius, args.spawn_radius)]
-        local_spawns.sort(key=lambda sp: (_distance2d(sp.location, center), sp.location.x, sp.location.y))
+        local_spawns = [
+            sp for sp in world_map.get_spawn_points()
+            if _is_safe_spawn(world_map, sp, center,
+                              args.junction_safe_radius,
+                              args.spawn_radius)
+        ]
+        local_spawns.sort(
+            key=lambda sp: (_distance2d(sp.location, center),
+                            sp.location.x, sp.location.y))
         if not blueprints:
             raise RuntimeError("No safe vehicle blueprints found")
         if not local_spawns:
@@ -313,137 +522,132 @@ def main():
         rng.shuffle(local_spawns)
         target = min(args.vehicles, len(local_spawns))
         if target < args.vehicles:
-            print("NOTE: requested %d vehicles but only %d safe local spawn slots are available." %
-                  (args.vehicles, target))
-        print("Safe CARLA spawn slots:%d | benchmark target:%d" % (len(local_spawns), target))
+            print("NOTE: requested %d vehicles but only %d safe local spawn "
+                  "slots are available." % (args.vehicles, target))
+        print("Safe CARLA spawn slots:%d | fixed pool target:%d" %
+              (len(local_spawns), target))
 
-        def destroy_vehicle(aid):
-            sensor = collision_sensors.pop(aid, None)
-            if sensor is not None:
-                try: sensor.stop()
-                except Exception: pass
-                try: sensor.destroy()
-                except Exception: pass
-            _destroy(client, [aid], False)
-            owned.discard(aid)
-            stop_since.pop(aid, None)
+        pool = FixedVehiclePool(
+            world, world_map, tm, client, local_spawns, blueprints, rng,
+            args, collision_sensors, health, pair_last_time)
 
-        def spawn_one():
-            occupied = [a.get_location() for a in world.get_actors().filter("vehicle.*")]
-            for sp in local_spawns:
-                if any(_distance2d(sp.location, p) < args.spawn_clearance for p in occupied):
-                    continue
-                bp = _prepare(rng.choice(blueprints), rng)
-                actor = world.try_spawn_actor(bp, sp)
-                if actor is None:
-                    continue
-                actor.set_autopilot(True, tm.get_port())
-                _configure_vehicle_tm(tm, actor, args.following_distance, args.speed_diff)
-                owned.add(actor.id)
-                if not args.no_collision_monitor and args.mode != "stress":
-                    _attach_collision_sensor(world, actor, collision_sensors, health, pair_last_time)
-                return True
-            return False
-
-        attempts = 0
-        while len(owned) < target and attempts < target * 12:
-            attempts += 1
-            if not spawn_one():
-                if sync_enabled: world.tick()
-                else: time.sleep(0.05)
+        spawned = pool.spawn_initial(target, sync_enabled)
         if sync_enabled:
             world.tick()
-        print("Initial spawned: %d/%d" % (len(owned), target))
-        print("Press Ctrl+C to stop; benchmark-owned vehicles will be removed and sync mode restored.")
+        print("BENCH TrafficPool | initial:%d/%d | actor-reuse:enabled" %
+              (spawned, target))
+        print("Press Ctrl+C to stop; benchmark-owned vehicles will be "
+              "removed and sync mode restored.")
 
         last_report = 0.0
         last_refill = 0.0
-        recycled_total = 0
-        while not _STOP:
-            if sync_enabled: world.tick()
-            else: time.sleep(0.05)
 
-            actors = {a.id: a for a in world.get_actors().filter("vehicle.*")}
-            outside = []
+        while not _STOP:
+            if sync_enabled:
+                world.tick()
+            else:
+                time.sleep(0.05)
+
             now = time.time()
-            for aid in list(owned):
+            pool.remove_dead()
+            actors = {a.id: a for a in
+                      world.get_actors().filter("vehicle.*")}
+
+            for aid in list(pool.ids):
                 actor = actors.get(aid)
                 if actor is None:
-                    owned.discard(aid)
-                    stop_since.pop(aid, None)
-                    sensor = collision_sensors.pop(aid, None)
-                    if sensor is not None:
-                        try:
-                            sensor.stop(); sensor.destroy()
-                        except Exception:
-                            pass
                     continue
-                if (not args.no_recycle) and _distance2d(actor.get_location(), center) > args.recycle_radius:
-                    outside.append(aid)
+
+                if not args.no_recycle and \
+                        _distance2d(actor.get_location(), center) > \
+                        args.recycle_radius:
+                    if pool.recycle(actor):
+                        stop_since.pop(aid, None)
                     continue
+
                 if _speed(actor) < 0.2:
                     stop_since.setdefault(aid, now)
                 else:
                     stop_since.pop(aid, None)
 
-            if not args.no_recycle:
-                for aid in outside:
-                    destroy_vehicle(aid)
-                recycled_total += len(outside)
-
-                if len(owned) < target and now - last_refill >= 0.5:
-                    for _ in range(min(3, target - len(owned))):
-                        if not spawn_one():
-                            break
-                    last_refill = now
+            # Only refill actors that disappeared unexpectedly. Normal recycle
+            # never changes actor count or actor id.
+            if len(pool.ids) < target and now - last_refill >= 1.0:
+                restored = pool.refill_dead_only(target, sync_enabled)
+                if restored:
+                    print("BENCH TrafficPool | restored_dead:%d" % restored)
+                last_refill = now
 
             if now - last_report >= 2.0:
-                current = {a.id: a for a in world.get_actors().filter("vehicle.*")}
-                alive = [current[aid] for aid in owned if aid in current]
+                alive = pool.alive()
                 counts = _bin_counts(alive, center, [30.0, 50.0, 80.0])
                 within = sum(counts)
                 stopped_now = sum(1 for a in alive if _speed(a) < 0.2)
-                stuck_15s = sum(1 for aid in owned if aid in stop_since and now - stop_since[aid] >= 15.0)
+                stuck_15s = sum(
+                    1 for aid in pool.ids
+                    if aid in stop_since and now - stop_since[aid] >= 15.0)
+
                 offroad = 0
                 for actor in alive:
                     try:
-                        wp = world_map.get_waypoint(actor.get_location(), project_to_road=False,
-                                                    lane_type=carla.LaneType.Driving)
+                        wp = world_map.get_waypoint(
+                            actor.get_location(),
+                            project_to_road=False,
+                            lane_type=carla.LaneType.Driving)
                         if wp is None:
                             offroad += 1
                     except Exception:
                         pass
-                print("BENCH TrafficHealth | alive:%d/%d <=80m:%d | 00-30:%d 30-50:%d 50-80:%d | stopped:%d stuck15s:%d offroad:%d collisions:%d recycled:%d lifecycle:%s" %
-                      (len(alive), target, within, counts[0], counts[1], counts[2],
-                       stopped_now, stuck_15s, offroad, health["collisions"], recycled_total,
-                       "no-recycle" if args.no_recycle else "recycle"))
+
+                print("BENCH TrafficPool | pool:%d alive:%d/%d reuse:%d "
+                      "reuse_fail:%d | <=80m:%d | 00-30:%d 30-50:%d "
+                      "50-80:%d | stopped:%d stuck15s:%d offroad:%d "
+                      "collisions:%d lifecycle:%s" %
+                      (len(pool.ids), len(alive), target,
+                       pool.reuse_count, pool.reuse_failed,
+                       within, counts[0], counts[1], counts[2],
+                       stopped_now, stuck_15s, offroad,
+                       health["collisions"],
+                       "no-recycle" if args.no_recycle
+                       else "fixed-reuse"))
                 last_report = now
 
     except KeyboardInterrupt:
         _STOP = True
     finally:
+        owned_ids = list(pool.ids) if pool is not None else []
         print("Destroying %d benchmark vehicles and %d collision sensors..." %
-              (len(owned), len(collision_sensors)))
+              (len(owned_ids), len(collision_sensors)))
         for sensor in list(collision_sensors.values()):
-            try: sensor.stop()
-            except Exception: pass
-            try: sensor.destroy()
-            except Exception: pass
+            try:
+                sensor.stop()
+            except Exception:
+                pass
+            try:
+                sensor.destroy()
+            except Exception:
+                pass
         collision_sensors.clear()
+
         try:
-            _destroy(client, list(owned), False)
+            _destroy(client, owned_ids, False)
         except Exception as exc:
             print("Cleanup warning: %s" % exc)
+
         if sync_enabled:
-            try: tm.set_synchronous_mode(False)
-            except Exception: pass
+            try:
+                tm.set_synchronous_mode(False)
+            except Exception:
+                pass
             if original_settings is not None:
                 try:
                     world.apply_settings(original_settings)
                     print("CARLA world settings restored.")
                 except Exception as exc:
                     print("World settings restore warning: %s" % exc)
+
         print("Junction benchmark stopped cleanly.")
+
     return 0
 
 
