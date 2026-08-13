@@ -393,7 +393,9 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
                 "extent": e, "axis_aligned_extent": axis_e,
                 "oriented_yaw": yaw, "oriented_extent": e,
                 "cluster_mode": "far_geometry_builder",
-                "scale_votes": len(indices),
+                # Fragment count is not multi-scale agreement. Treating it as
+                # scale_votes gave recovered noise an artificial score bonus.
+                "scale_votes": 1,
                 "scale_modes": ["far_geometry_recovery"],
                 "far_geometry_built": True,
                 "far_geometry_quality_v2": True,

@@ -153,6 +153,13 @@ fusion:
   far_geometry_recovery_fragment_max_height: 2.0
   far_geometry_recovery_max_candidates: 8
 
+  # V0.6.12.6.1: weak three-point recovery needs independent evidence.
+  far_recovery_quality_gate_enabled: true
+  far_recovery_quality_min_current_points_without_support: 4
+  far_recovery_quality_track_gate: 3.5
+  far_recovery_quality_track_min_hits: 3
+  far_recovery_quality_track_min_quality: 0.47
+
   far_sparse_discovery_enabled: true
   far_sparse_discovery_min_range: 30.0
   far_sparse_discovery_max_range: 80.0

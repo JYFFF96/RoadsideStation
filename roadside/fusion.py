@@ -93,6 +93,8 @@ class SimpleFusion(object):
         self.last_tracked_candidates = []
         self.last_roi_rejections = []
         self.last_score_rejections = []
+        self.last_recovery_quality_candidates = []
+        self.last_recovery_quality_rejections = []
 
     def set_world_transform(self, t):
         if t is None:
@@ -316,6 +318,63 @@ class SimpleFusion(object):
                 rejected.append(r)
         return kept, rejected
 
+    def _mark_recovery_track_support(self, item, previous_tracks):
+        """Annotate recovery evidence from stable perception tracks only."""
+        out = dict(item)
+        out["recovery_track_supported"] = False
+        if not out.get("far_geometry_recovered", False):
+            return out
+        gate = float(self.config.get("far_recovery_quality_track_gate", 3.5))
+        min_hits = int(self.config.get("far_recovery_quality_track_min_hits", 3))
+        min_quality = float(self.config.get("far_recovery_quality_track_min_quality", .47))
+        best = None
+        for track in previous_tracks or []:
+            if int(track.get("track_hits", 0)) < min_hits:
+                continue
+            if float(track.get("track_quality", 0.0)) < min_quality:
+                continue
+            d = math.hypot(float(track.get("x", 0.0)) - float(out["x"]),
+                           float(track.get("y", 0.0)) - float(out["y"]))
+            if d <= gate and (best is None or d < best[0]):
+                best = (d, track.get("id"))
+        if best is not None:
+            out["recovery_track_supported"] = True
+            out["recovery_support_track_distance"] = best[0]
+            out["recovery_support_track_id"] = best[1]
+        return out
+
+    def _gate_recovery_candidates(self, items):
+        """Block weak recovery candidates before they can create tracks."""
+        if not self.config.get("far_recovery_quality_gate_enabled", True):
+            return [dict(x) for x in items], []
+        min_current = int(self.config.get(
+            "far_recovery_quality_min_current_points_without_support", 4))
+        kept, rejected = [], []
+        for src in items or []:
+            item = dict(src)
+            if not item.get("far_geometry_recovered", False):
+                kept.append(item)
+                continue
+            evidence = []
+            if item.get("far_geometry_temporal_supported", False):
+                evidence.append("temporal")
+            if item.get("radar_radial_velocity") is not None:
+                evidence.append("radar")
+            if item.get("recovery_track_supported", False):
+                evidence.append("stable_track")
+            current_points = int(item.get("current_point_count", 0))
+            if current_points >= min_current:
+                evidence.append("current_points")
+            item["recovery_quality_evidence"] = evidence
+            if evidence:
+                item["recovery_quality_gate"] = "pass"
+                kept.append(item)
+            else:
+                item["recovery_quality_gate"] = "reject"
+                item["reason"] = "recovery_quality"
+                rejected.append(item)
+        return kept, rejected
+
     def _refresh_quality_stats(self):
         qs = self.tracker.quality_stats()
         self.last_stats["track_quality_active"] = qs["active"]
@@ -381,6 +440,7 @@ class SimpleFusion(object):
                         "far_geometry_recovered", "recovery_fragment_count"):
                 if key in i:
                     item[key] = i.get(key)
+            item = self._mark_recovery_track_support(item, previous_tracks)
             world_clusters.append(dict(item))
             ok, reason, details = self._validate_candidate(wx, wy, wz, e, item)
             if not ok:
@@ -403,8 +463,12 @@ class SimpleFusion(object):
         self.last_score_rejections = [dict(x) for x in score_rejections]
 
         assoc, radar_world_count, radar_matched = self._associate_radar_world(scored, radar_detections)
+        quality_pass, quality_rejections = self._gate_recovery_candidates(assoc)
+        self.last_recovery_quality_candidates = [dict(x) for x in quality_pass
+                                                 if x.get("far_geometry_recovered", False)]
+        self.last_recovery_quality_rejections = [dict(x) for x in quality_rejections]
         roi = []
-        for item in assoc:
+        for item in quality_pass:
             if item.get("radar_radial_velocity") is not None:
                 item["confidence"] = .90
                 item["sources"] = ["lidar", "radar"]
@@ -451,6 +515,8 @@ class SimpleFusion(object):
             "scored_candidates": len(scored), "score_rejected": len(score_rejections),
             "candidate_scoring_enabled": bool(c.get("candidate_scoring_enabled", False)),
             "candidate_score_avg": (sum(score_values) / len(score_values) if score_values else None),
+            "recovery_quality_pass": len(self.last_recovery_quality_candidates),
+            "recovery_quality_rejected": len(self.last_recovery_quality_rejections),
             "background_candidates": len(dyn), "background_rejected": max(0, len(roi) - len(dyn)),
             "background_ready": background_ready, "background_remaining": background_remaining,
             "background_cells": background_cells,

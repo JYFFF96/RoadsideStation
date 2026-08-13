@@ -18,6 +18,10 @@ def _far_items(items):
     return [x for x in (items or []) if _is_far_builder(x)]
 
 
+def _recovery_items(items):
+    return [x for x in (items or []) if x.get("far_geometry_recovered", False)]
+
+
 def _reason_counts(items):
     out = defaultdict(int)
     for item in items or []:
@@ -58,6 +62,14 @@ def install_far_geometry_stability_patch():
         score_pass_items = _far_items(getattr(self, "last_scored_candidates", []))
         score_reject_items = _far_items(getattr(self, "last_score_rejections", []))
         dynamic_items = _far_items(getattr(self, "last_dynamic_candidates", []))
+        recovery_roi = _recovery_items(getattr(self, "last_roi_candidates", []))
+        recovery_score = _recovery_items(getattr(self, "last_scored_candidates", []))
+        recovery_quality = _recovery_items(
+            getattr(self, "last_recovery_quality_candidates", []))
+        recovery_quality_reject = _recovery_items(
+            getattr(self, "last_recovery_quality_rejections", []))
+        recovery_dynamic = _recovery_items(getattr(self, "last_dynamic_candidates", []))
+        recovery_track = _recovery_items(getattr(self, "last_tracked_candidates", []))
 
         roi_reasons = _reason_counts(roi_reject_items)
         score_reasons = _reason_counts(score_reject_items)
@@ -86,6 +98,12 @@ def install_far_geometry_stability_patch():
         stats["dynamic_pass"] = len(dynamic_items)
         stats["adaptive_corridor_candidates"] = len(adaptive_items)
         stats["adaptive_corridor_rescued"] = adaptive_rescued
+        stats["recovery_roi_pass"] = len(recovery_roi)
+        stats["recovery_score_pass"] = len(recovery_score)
+        stats["recovery_quality_pass"] = len(recovery_quality)
+        stats["recovery_quality_reject"] = len(recovery_quality_reject)
+        stats["recovery_dynamic_pass"] = len(recovery_dynamic)
+        stats["recovery_track_pass"] = len(recovery_track)
         build_far_geometry_candidates.last_stats = stats
 
         now = time.time() if timestamp is None else float(timestamp)
@@ -114,6 +132,16 @@ def install_far_geometry_stability_patch():
                    stats.get("recovery_template_pass", 0),
                    stats.get("recovery_dedupe", 0),
                    stats.get("recovery_built", 0)))
+
+            print("  [FAR RECOVERY FLOW] Built:%d ROI:%d Score:%d QualityPass:%d "
+                  "QualityReject:%d Dynamic:%d Track:%d" %
+                  (stats.get("recovery_built", 0),
+                   stats.get("recovery_roi_pass", 0),
+                   stats.get("recovery_score_pass", 0),
+                   stats.get("recovery_quality_pass", 0),
+                   stats.get("recovery_quality_reject", 0),
+                   stats.get("recovery_dynamic_pass", 0),
+                   stats.get("recovery_track_pass", 0)))
 
             print("  [FAR ROI DIAG] Built:%d ROIPass:%d ROIReject:%d "
                   "ScorePass:%d ScoreReject:%d Dynamic:%d" %
