@@ -66,8 +66,6 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # Perception parameters remain frozen in V0.6.6.2. This release only
-  # refines track lifecycle decisions with scalar hit-history evidence.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.75, max_length: 6.5, min_width: 0.55, max_width: 3.4, min_height: 0.45, max_height: 2.6}
@@ -97,6 +95,28 @@ fusion:
   near_merge_gap: 0.65
   near_merged_vehicle_max_length: 7.5
   near_merged_vehicle_max_width: 3.2
+
+  # V0.6.9: track-guided sparse geometry rescue. 0-30m stays untouched.
+  # Only stable prior tracks can seed a local sparse candidate, preventing a
+  # global relaxation from flooding the pipeline with extra false positives.
+  sparse_geometry_rescue_enabled: true
+  sparse_geometry_rescue_min_range: 30.0
+  sparse_geometry_rescue_max_range: 80.0
+  sparse_geometry_rescue_far_range: 50.0
+  sparse_geometry_rescue_min_track_hits: 3
+  sparse_geometry_rescue_mid_radius: 2.2
+  sparse_geometry_rescue_far_radius: 3.0
+  sparse_geometry_rescue_z_window: 2.0
+  sparse_geometry_rescue_dedupe_distance: 2.0
+  sparse_geometry_rescue_mid_min_points: 3
+  sparse_geometry_rescue_far_min_points: 2
+  sparse_geometry_rescue_min_length: 0.18
+  sparse_geometry_rescue_min_width: 0.08
+  sparse_geometry_rescue_min_height: 0.05
+  sparse_geometry_rescue_max_length: 7.5
+  sparse_geometry_rescue_max_width: 3.5
+  sparse_geometry_rescue_max_height: 3.0
+  sparse_geometry_rescue_score_bonus: 0.08
 
   pole_short_max: 0.75
   pole_long_max: 2.5
@@ -128,8 +148,6 @@ fusion:
   track_coast_edge_ratio: 0.90
 
   # V0.6.6.2 Track Quality Hit History Gate.
-  # High and medium behavior is unchanged from V0.6.6.1. Low-quality tracks
-  # receive the one-frame grace coast only after at least 3 successful hits.
   track_quality_enabled: true
   track_quality_high: 0.72
   track_quality_medium: 0.47
