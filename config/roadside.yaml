@@ -66,9 +66,8 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
-  # Perception parameters are frozen in V0.6.6.1. Track Quality Balance only
-  # adjusts lifecycle thresholds. All policy inputs remain scalar/config driven
-  # for a direct later port to Qt/C++.
+  # Perception parameters remain frozen in V0.6.6.2. This release only
+  # refines track lifecycle decisions with scalar hit-history evidence.
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.75, max_length: 6.5, min_width: 0.55, max_width: 3.4, min_height: 0.45, max_height: 2.6}
@@ -128,14 +127,15 @@ fusion:
   track_coast_low_score: 0.55
   track_coast_edge_ratio: 0.90
 
-  # V0.6.6.1 Track Quality Balance. High-quality tracks retain the V0.6.5
-  # adaptive coast allowance. Medium tracks keep the existing 2-frame limit.
-  # Low tracks get one grace coast frame instead of immediate suppression.
+  # V0.6.6.2 Track Quality Hit History Gate.
+  # High and medium behavior is unchanged from V0.6.6.1. Low-quality tracks
+  # receive the one-frame grace coast only after at least 3 successful hits.
   track_quality_enabled: true
   track_quality_high: 0.72
   track_quality_medium: 0.47
   track_quality_medium_coast_frames: 2
   track_quality_low_coast_frames: 1
+  track_quality_low_min_hits_for_coast: 3
   track_quality_camera_bonus: 0.12
   track_quality_radar_bonus: 0.08
   track_quality_sensor_memory: 1.5
