@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from .models import DetectedObject, ObjectList
 from .perception import voxel_cluster_lidar, adaptive_voxel_cluster_lidar, merge_lidar_clusters
+from .sparse_geometry_rescue import track_guided_sparse_rescue
 from .tracking import NearestTracker
 
 
@@ -266,6 +267,8 @@ class SimpleFusion(object):
         elif points >= 2:
             score += .05
         score += .17 if votes >= 2 else .04
+        if item.get("sparse_rescued", False):
+            score += float(self.config.get("sparse_geometry_rescue_score_bonus", 0.08))
         lateral = details.get("lateral")
         allowed = details.get("allowed_lateral")
         if lateral is not None and allowed not in (None, 0):
@@ -334,6 +337,7 @@ class SimpleFusion(object):
     def fuse(self, lidar_points, radar_detections, timestamp=None):
         now = time.time() if timestamp is None else float(timestamp)
         c = self.config
+        previous_tracks = [dict(x) for x in self.last_tracked_candidates]
         clean_points, ground_removed = self._remove_ground_points(lidar_points)
         raw = self._cluster(clean_points, c)
         filtered = [x for x in raw if not self._looks_like_pole(x.get("extent", [0, 0, 0]))]
@@ -344,6 +348,10 @@ class SimpleFusion(object):
             c.get("near_merge_gap", .65), c.get("near_merged_vehicle_max_length", 7.5),
             c.get("near_merged_vehicle_max_width", 3.2)) \
             if c.get("cluster_merge_enabled", True) else filtered
+        sparse_rescues = track_guided_sparse_rescue(
+            clean_points, previous_tracks, self.world_transform, clusters, c)
+        if sparse_rescues:
+            clusters = list(clusters) + list(sparse_rescues)
 
         world_clusters, accepted, roi_rejections = [], [], []
         roi_rescued = 0
@@ -354,7 +362,10 @@ class SimpleFusion(object):
                     "sources": ["lidar"], "point_count": i.get("point_count", 0),
                     "extent": e, "cluster_mode": i.get("cluster_mode", "3d"),
                     "scale_votes": int(i.get("scale_votes", 1)),
-                    "scale_modes": list(i.get("scale_modes", [i.get("cluster_mode", "3d")]))}
+                    "scale_modes": list(i.get("scale_modes", [i.get("cluster_mode", "3d")])),
+                    "sparse_rescued": bool(i.get("sparse_rescued", False)),
+                    "rescue_track_id": i.get("rescue_track_id"),
+                    "rescue_track_hits": int(i.get("rescue_track_hits", 0))}
             world_clusters.append(dict(item))
             ok, reason, details = self._validate_candidate(wx, wy, wz, e)
             if not ok:
@@ -407,6 +418,9 @@ class SimpleFusion(object):
             reasons[r.get("reason", "rejected")] += 1
         score_values = [float(x.get("candidate_score", 1.0)) for x in scored
                         if not x.get("candidate_score_bypass", False)]
+        sparse_roi = sum(1 for x in accepted if x.get("sparse_rescued", False))
+        sparse_score = sum(1 for x in scored if x.get("sparse_rescued", False))
+        sparse_dynamic = sum(1 for x in dyn if x.get("sparse_rescued", False))
         ts = dict(getattr(self.tracker, "last_stats", {}) or {})
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
@@ -414,6 +428,9 @@ class SimpleFusion(object):
             "lidar_points_after_ground": 0 if clean_points is None else len(clean_points),
             "raw_lidar_clusters": len(raw), "geometry_clusters": len(filtered),
             "lidar_clusters": len(clusters), "world_geometry_candidates": len(world_clusters),
+            "sparse_rescue_candidates": len(sparse_rescues),
+            "sparse_rescue_roi": sparse_roi, "sparse_rescue_score": sparse_score,
+            "sparse_rescue_dynamic": sparse_dynamic,
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),
             "scored_candidates": len(scored), "score_rejected": len(score_rejections),
