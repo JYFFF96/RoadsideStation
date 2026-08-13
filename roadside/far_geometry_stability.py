@@ -1,33 +1,79 @@
 from __future__ import print_function
 
 import time
+from collections import defaultdict
 
 from .far_geometry_builder import build_far_geometry_candidates
 
 
+def _is_far_builder(item):
+    return str((item or {}).get("cluster_mode", "")) == "far_geometry_builder"
+
+
 def _count_far(items):
-    return sum(1 for x in (items or [])
-               if str(x.get("cluster_mode", "")) == "far_geometry_builder")
+    return sum(1 for x in (items or []) if _is_far_builder(x))
+
+
+def _far_items(items):
+    return [x for x in (items or []) if _is_far_builder(x)]
+
+
+def _reason_counts(items):
+    out = defaultdict(int)
+    for item in items or []:
+        out[str(item.get("reason", "other"))] += 1
+    return dict(out)
+
+
+def _detail_value(details, *names):
+    for name in names:
+        if name in details and details.get(name) is not None:
+            return details.get(name)
+    return None
+
+
+def _fmt(value):
+    if value is None:
+        return "-"
+    try:
+        return "%.2f" % float(value)
+    except Exception:
+        return str(value)
 
 
 def install_far_geometry_stability_patch():
-    """Attach observer-only downstream counters to SimpleFusion.fuse.
+    """Attach observer-only Far Geometry / ROI diagnostics to SimpleFusion.fuse.
 
-    V0.6.12.1 changes diagnostics only. No candidate, ROI, score, dynamic,
-    tracker, CARLA truth, or sensor-fusion decision is modified.
+    V0.6.12.2 changes diagnostics only. It does not modify candidate generation,
+    ROI validation, score thresholds, dynamic filtering, tracker decisions,
+    sensor fusion, or CARLA ground-truth evaluation.
     """
     from .fusion import SimpleFusion
-    if getattr(SimpleFusion, "_v06121_far_diag_patch", False):
+    if getattr(SimpleFusion, "_v06122_far_roi_diag_patch", False):
         return
 
     original_fuse = SimpleFusion.fuse
 
     def fuse(self, lidar_points, radar_detections, timestamp=None):
         result = original_fuse(self, lidar_points, radar_detections, timestamp)
+
         stats = dict(getattr(build_far_geometry_candidates, "last_stats", {}) or {})
-        stats["roi_pass"] = _count_far(getattr(self, "last_roi_candidates", []))
-        stats["score_pass"] = _count_far(getattr(self, "last_scored_candidates", []))
-        stats["dynamic_pass"] = _count_far(getattr(self, "last_dynamic_candidates", []))
+        roi_pass_items = _far_items(getattr(self, "last_roi_candidates", []))
+        roi_reject_items = _far_items(getattr(self, "last_roi_rejections", []))
+        score_pass_items = _far_items(getattr(self, "last_scored_candidates", []))
+        score_reject_items = _far_items(getattr(self, "last_score_rejections", []))
+        dynamic_items = _far_items(getattr(self, "last_dynamic_candidates", []))
+
+        roi_reasons = _reason_counts(roi_reject_items)
+        score_reasons = _reason_counts(score_reject_items)
+
+        stats["roi_pass"] = len(roi_pass_items)
+        stats["roi_reject"] = len(roi_reject_items)
+        stats["roi_reject_reasons"] = roi_reasons
+        stats["score_pass"] = len(score_pass_items)
+        stats["score_reject"] = len(score_reject_items)
+        stats["score_reject_reasons"] = score_reasons
+        stats["dynamic_pass"] = len(dynamic_items)
         build_far_geometry_candidates.last_stats = stats
 
         now = time.time() if timestamp is None else float(timestamp)
@@ -42,8 +88,43 @@ def install_far_geometry_stability_patch():
                    stats.get("template_pass", 0), stats.get("dedupe", 0),
                    stats.get("built", 0), stats.get("roi_pass", 0),
                    stats.get("score_pass", 0), stats.get("dynamic_pass", 0)))
+
+            print("  [FAR ROI DIAG] Built:%d ROIPass:%d ROIReject:%d "
+                  "ScorePass:%d ScoreReject:%d Dynamic:%d" %
+                  (stats.get("built", 0), stats.get("roi_pass", 0),
+                   stats.get("roi_reject", 0), stats.get("score_pass", 0),
+                   stats.get("score_reject", 0), stats.get("dynamic_pass", 0)))
+
+            print("  [FAR ROI REJECT] lateral:%d above_road:%d other:%d" %
+                  (roi_reasons.get("lateral", 0), roi_reasons.get("above_road", 0),
+                   sum(v for k, v in roi_reasons.items()
+                       if k not in ("lateral", "above_road"))))
+
+            for item in roi_reject_items[:3]:
+                details = item.get("details", {}) or {}
+                try:
+                    rng = self._sensor_range(item.get("x", 0.0), item.get("y", 0.0))
+                except Exception:
+                    rng = None
+                extent = item.get("extent", [0.0, 0.0, 0.0]) or [0.0, 0.0, 0.0]
+                lateral = _detail_value(details, "lateral")
+                allowed = _detail_value(details, "allowed_lateral", "limit")
+                excess = _detail_value(details, "center_excess")
+                overlap = _detail_value(details, "bbox_overlap", "overlap")
+                print("    [FAR ROI SAMPLE] range:%sm reason:%s pts:%d "
+                      "extent:(%.2f,%.2f,%.2f) lateral:%s allowed:%s "
+                      "excess:%s overlap:%s" %
+                      (_fmt(rng), item.get("reason", "other"),
+                       int(item.get("point_count", 0)), float(extent[0]),
+                       float(extent[1]), float(extent[2]), _fmt(lateral),
+                       _fmt(allowed), _fmt(excess), _fmt(overlap)))
+
+            if score_reject_items:
+                print("  [FAR SCORE REJECT] count:%d reasons:%s" %
+                      (len(score_reject_items), score_reasons))
+
             self._far_geometry_diag_last_print = now
         return result
 
     SimpleFusion.fuse = fuse
-    SimpleFusion._v06121_far_diag_patch = True
+    SimpleFusion._v06122_far_roi_diag_patch = True
