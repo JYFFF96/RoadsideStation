@@ -317,7 +317,6 @@ class SimpleFusion(object):
         self.last_stats["track_quality_avg"] = qs["avg"]
 
     def apply_camera_confirmations(self, pairs, timestamp=None):
-        """Write generic camera association evidence back to tracker state."""
         ids = []
         for p in pairs or []:
             try:
@@ -431,6 +430,8 @@ class SimpleFusion(object):
             "tracked_objects": len(objs), "track_new": int(ts.get("new", 0)),
             "track_update": int(ts.get("update", 0)), "track_coast": int(ts.get("coast", 0)),
             "track_drop": int(ts.get("drop", 0)), "track_suppress": int(ts.get("suppress", 0)),
+            "track_low_hit_keep": int(ts.get("low_hit_keep", 0)),
+            "track_low_new_drop": int(ts.get("low_new_drop", 0)),
             "track_quality_active": int(ts.get("quality_active", 0)),
             "track_quality_high": int(ts.get("quality_high", 0)),
             "track_quality_medium": int(ts.get("quality_medium", 0)),
