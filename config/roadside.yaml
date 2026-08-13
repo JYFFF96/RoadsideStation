@@ -96,10 +96,6 @@ fusion:
   near_merged_vehicle_max_length: 7.5
   near_merged_vehicle_max_width: 3.2
 
-  # V0.6.11.1: range-aware track-guided sparse geometry rescue.
-  # 30-50m keeps the strict V0.6.11 gate; 50-80m is relaxed because sparse
-  # point support and track quality naturally degrade with range.
-  # 0-30m remains untouched. NewDiscovery is unchanged.
   sparse_geometry_rescue_enabled: true
   sparse_geometry_rescue_min_range: 30.0
   sparse_geometry_rescue_max_range: 80.0
@@ -123,9 +119,6 @@ fusion:
   sparse_geometry_rescue_max_height: 3.0
   sparse_geometry_rescue_score_bonus: 0.08
 
-  # V0.6.11.2: independent 50-80m sparse Far Geometry Builder.
-  # Uses only current-frame non-ground LiDAR points; no tracker and no GT.
-  # Output is deduplicated against normal geometry and still passes ROI/Score/Track.
   far_geometry_builder_enabled: true
   far_geometry_builder_min_range: 50.0
   far_geometry_builder_max_range: 80.0
@@ -141,10 +134,6 @@ fusion:
   far_geometry_builder_dedupe_distance: 1.8
   far_geometry_builder_max_candidates: 30
 
-  # V0.6.10: track-independent sparse discovery for first-seen 30-80m targets.
-  # This path uses only current-frame LiDAR points; no tracker or CARLA truth.
-  # 0-30m is deliberately excluded. ROI and the existing far score remain
-  # downstream safety gates before any discovered candidate reaches tracking.
   far_sparse_discovery_enabled: true
   far_sparse_discovery_min_range: 30.0
   far_sparse_discovery_max_range: 80.0
@@ -191,7 +180,6 @@ fusion:
   track_coast_low_score: 0.55
   track_coast_edge_ratio: 0.90
 
-  # V0.6.6.2 Track Quality Hit History Gate.
   track_quality_enabled: true
   track_quality_high: 0.72
   track_quality_medium: 0.47
@@ -202,6 +190,12 @@ fusion:
   track_quality_radar_bonus: 0.08
   track_quality_sensor_memory: 1.5
   track_quality_coast_penalty: 0.10
+
+  # V0.6.12: remove weak stale internal tracks so suppressed/coasting FP cannot resurrect.
+  track_stale_cleanup_enabled: true
+  track_stale_cleanup_min_misses: 2
+  track_stale_cleanup_max_quality: 0.55
+  track_stale_cleanup_sensor_memory: 1.5
 
   velocity_alpha: 0.25
   velocity_window: 5
