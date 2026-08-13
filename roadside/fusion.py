@@ -377,7 +377,8 @@ class SimpleFusion(object):
             for key in ("far_geometry_built", "far_geometry_quality_v2",
                         "far_geometry_temporal_supported", "current_point_count",
                         "temporal_point_count", "oriented_yaw",
-                        "oriented_extent", "axis_aligned_extent"):
+                        "oriented_extent", "axis_aligned_extent",
+                        "far_geometry_recovered", "recovery_fragment_count"):
                 if key in i:
                     item[key] = i.get(key)
             world_clusters.append(dict(item))

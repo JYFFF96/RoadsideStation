@@ -63,6 +63,24 @@ def _point_key(p):
     return (round(float(p[0]), 3), round(float(p[1]), 3), round(float(p[2]), 3))
 
 
+def _unique_points(points):
+    out = []
+    seen = set()
+    for p in points or []:
+        key = _point_key(p)
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def _center(points):
+    n = float(len(points))
+    return (sum(float(p[0]) for p in points) / n,
+            sum(float(p[1]) for p in points) / n,
+            sum(float(p[2]) for p in points) / n)
+
+
 def _build_history_grid(history_frames, grid_size):
     cells = defaultdict(list)
     inv = 1.0 / max(0.2, float(grid_size))
@@ -128,6 +146,11 @@ def _empty_stats():
         "temporal_current_points": 0,
         "temporal_added_points": 0,
         "temporal_components": 0,
+        "recovery_fragments": 0,
+        "recovery_attempts": 0,
+        "recovery_template_pass": 0,
+        "recovery_dedupe": 0,
+        "recovery_built": 0,
         "roi_pass": 0,
         "score_pass": 0,
         "dynamic_pass": 0,
@@ -142,7 +165,9 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     limited by TTL/frame count and can only add nearby support to that seed;
     it can never create a candidate on its own. Candidate center remains based
     on current-frame points to avoid temporal lag. No tracker, camera, CARLA
-    actor or ground-truth information is consumed.
+    actor or ground-truth information is consumed. V0.6.12.6 adds a bounded
+    second pass that bridges only nearby, undersized current-frame fragments;
+    oversized and tall rejected structures remain ineligible.
     """
     c = config or {}
     stats = _empty_stats()
@@ -171,6 +196,15 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     temporal_gate = max(0.2, float(c.get("far_geometry_temporal_gate", 0.90)))
     temporal_z_gate = max(0.1, float(c.get("far_geometry_temporal_z_gate", 1.20)))
     temporal_max_added = max(0, int(c.get("far_geometry_temporal_max_added", 12)))
+
+    recovery_enabled = bool(c.get("far_geometry_recovery_enabled", True))
+    recovery_bridge = max(0.5, float(c.get("far_geometry_recovery_bridge_distance", 3.0)))
+    recovery_z_gate = max(0.1, float(c.get("far_geometry_recovery_z_gate", 1.0)))
+    recovery_max_fragments = max(2, int(c.get("far_geometry_recovery_max_fragments", 3)))
+    recovery_min_current = max(2, int(c.get("far_geometry_recovery_min_current_points", 3)))
+    recovery_max_fragment_points = max(1, int(c.get("far_geometry_recovery_max_fragment_points", 12)))
+    recovery_fragment_max_height = max(min_height, float(c.get("far_geometry_recovery_fragment_max_height", 2.0)))
+    recovery_max_added = max(0, int(c.get("far_geometry_recovery_max_candidates", 8)))
 
     now = time.time()
     history = getattr(build_far_geometry_candidates, "_history", deque())
@@ -201,6 +235,7 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     remaining = set(cells)
     occupied = list(existing_geometry or [])
     out = []
+    fragments = []
     while remaining:
         seed = remaining.pop()
         q = deque([seed])
@@ -228,10 +263,6 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
             stats["temporal_added_points"] += len(temporal_added)
         support = list(current_support) + list(temporal_added)
 
-        if len(support) < min_points:
-            stats["too_few_points"] += 1
-            continue
-
         axis_e = _extent(support)
         if oriented_enabled:
             e, yaw = _oriented_extent(support)
@@ -245,6 +276,11 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
         h = float(e[2])
 
         rejected = False
+        if len(support) < min_points:
+            stats["too_few_points"] += 1
+            rejected = True
+        under = hl < min_length or hs < min_width or h < min_height
+        over = hl > max_length or hs > max_width or h > max_height
         if hl < min_length or hl > max_length:
             stats["length_reject"] += 1
             rejected = True
@@ -255,6 +291,15 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
             stats["height_reject"] += 1
             rejected = True
         if rejected:
+            # Only undersized, bounded fragments are eligible. Oversized/tall
+            # structures remain rejected and can never be recovered.
+            if (recovery_enabled and under and not over and
+                    len(current_support) <= recovery_max_fragment_points and
+                    h <= recovery_fragment_max_height):
+                cx, cy, cz = _center(current_support)
+                fragments.append({"current": list(current_support),
+                                  "temporal": list(temporal_added),
+                                  "x": cx, "y": cy, "z": cz})
             continue
 
         stats["template_pass"] += 1
@@ -284,6 +329,82 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
                 "sparse_rescued": False, "sparse_discovered": False}
         out.append(item)
         occupied.append(item)
+        stats["built"] += 1
+        if max_candidates and len(out) >= max_candidates:
+            break
+
+    # V0.6.12.6: conservatively bridge nearby current-frame fragments. This
+    # pass has no tracker, map, camera, CARLA actor or ground-truth input.
+    stats["recovery_fragments"] = len(fragments)
+    used = set()
+    for seed_index, seed in enumerate(fragments):
+        if seed_index in used or (recovery_max_added and
+                                  stats["recovery_built"] >= recovery_max_added):
+            continue
+        group = [seed_index]
+        candidates = []
+        for other_index, other in enumerate(fragments):
+            if other_index == seed_index or other_index in used:
+                continue
+            dz = abs(float(other["z"]) - float(seed["z"]))
+            dxy = math.hypot(float(other["x"]) - float(seed["x"]),
+                             float(other["y"]) - float(seed["y"]))
+            if dz <= recovery_z_gate and dxy <= recovery_bridge:
+                candidates.append((dxy, other_index))
+        candidates.sort(key=lambda value: value[0])
+        built_group = None
+        for _, other_index in candidates[:max(0, recovery_max_fragments - 1)]:
+            group.append(other_index)
+            current = _unique_points([p for index in group
+                                      for p in fragments[index]["current"]])
+            temporal = _unique_points([p for index in group
+                                       for p in fragments[index]["temporal"]])
+            support = _unique_points(list(current) + list(temporal))
+            stats["recovery_attempts"] += 1
+            if len(current) < recovery_min_current or len(support) < min_points:
+                continue
+            axis_e = _extent(support)
+            if oriented_enabled:
+                e, yaw = _oriented_extent(support)
+            else:
+                e, yaw = list(axis_e), 0.0
+            hl = max(float(e[0]), float(e[1]))
+            hs = min(float(e[0]), float(e[1]))
+            h = float(e[2])
+            if not (min_length <= hl <= max_length and
+                    min_width <= hs <= max_width and
+                    min_height <= h <= max_height):
+                continue
+            built_group = (list(group), current, temporal, axis_e, e, yaw)
+            break
+        if built_group is None:
+            continue
+        indices, current, temporal, axis_e, e, yaw = built_group
+        stats["recovery_template_pass"] += 1
+        x, y, z = _center(current)
+        if _near_existing(x, y, occupied, dedupe):
+            stats["recovery_dedupe"] += 1
+            used.update(indices)
+            continue
+        item = {"x": x, "y": y, "z": z,
+                "point_count": len(current) + len(temporal),
+                "current_point_count": len(current),
+                "temporal_point_count": len(temporal),
+                "extent": e, "axis_aligned_extent": axis_e,
+                "oriented_yaw": yaw, "oriented_extent": e,
+                "cluster_mode": "far_geometry_builder",
+                "scale_votes": len(indices),
+                "scale_modes": ["far_geometry_recovery"],
+                "far_geometry_built": True,
+                "far_geometry_quality_v2": True,
+                "far_geometry_temporal_supported": bool(temporal),
+                "far_geometry_recovered": True,
+                "recovery_fragment_count": len(indices),
+                "sparse_rescued": False, "sparse_discovered": False}
+        out.append(item)
+        occupied.append(item)
+        used.update(indices)
+        stats["recovery_built"] += 1
         stats["built"] += 1
         if max_candidates and len(out) >= max_candidates:
             break

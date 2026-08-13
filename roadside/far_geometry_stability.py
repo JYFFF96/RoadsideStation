@@ -65,9 +65,17 @@ def install_far_geometry_stability_patch():
         adaptive_items = [x for x in corridor_items
                           if ((x.get("roi_details", {}) or x.get("details", {}) or {})
                               .get("adaptive_corridor", {}).get("enabled", False))]
-        adaptive_rescued = sum(1 for x in roi_pass_items
-                               if (x.get("roi_details", {}) or {}).get("geometry_rescued", False)
-                               and (x.get("roi_details", {}) or {}).get("adaptive_corridor", {}).get("enabled", False))
+        adaptive_rescued = 0
+        for item in roi_pass_items:
+            details = item.get("roi_details", {}) or {}
+            adaptive = details.get("adaptive_corridor", {}) or {}
+            if not adaptive.get("enabled", False):
+                continue
+            base_allowed = (0.5 * float(details.get("lane_width", 0.0)) +
+                            float(adaptive.get("base_margin", 0.0)))
+            direct_rescue = float(details.get("lateral", 0.0)) > base_allowed
+            if direct_rescue or details.get("geometry_rescued", False):
+                adaptive_rescued += 1
 
         stats["roi_pass"] = len(roi_pass_items)
         stats["roi_reject"] = len(roi_reject_items)
@@ -98,6 +106,14 @@ def install_far_geometry_stability_patch():
                    stats.get("temporal_current_points", 0),
                    stats.get("temporal_added_points", 0),
                    stats.get("temporal_components", 0)))
+
+            print("  [FAR GEOMETRY RECOVERY] Fragments:%d Attempts:%d TemplatePass:%d "
+                  "Dedupe:%d Built:%d" %
+                  (stats.get("recovery_fragments", 0),
+                   stats.get("recovery_attempts", 0),
+                   stats.get("recovery_template_pass", 0),
+                   stats.get("recovery_dedupe", 0),
+                   stats.get("recovery_built", 0)))
 
             print("  [FAR ROI DIAG] Built:%d ROIPass:%d ROIReject:%d "
                   "ScorePass:%d ScoreReject:%d Dynamic:%d" %

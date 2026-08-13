@@ -143,6 +143,16 @@ fusion:
   far_geometry_temporal_z_gate: 1.20
   far_geometry_temporal_max_added: 12
 
+  # V0.6.12.6: bridge only nearby undersized current-frame fragments.
+  far_geometry_recovery_enabled: true
+  far_geometry_recovery_bridge_distance: 3.0
+  far_geometry_recovery_z_gate: 1.0
+  far_geometry_recovery_max_fragments: 3
+  far_geometry_recovery_min_current_points: 3
+  far_geometry_recovery_max_fragment_points: 12
+  far_geometry_recovery_fragment_max_height: 2.0
+  far_geometry_recovery_max_candidates: 8
+
   far_sparse_discovery_enabled: true
   far_sparse_discovery_min_range: 30.0
   far_sparse_discovery_max_range: 80.0
