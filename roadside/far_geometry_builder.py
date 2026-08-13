@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import math
+import time
 from collections import defaultdict, deque
 
 
@@ -26,12 +27,7 @@ def _extent(points):
 
 
 def _oriented_extent(points):
-    """Return PCA-aligned XY length/width plus Z height without numpy.
-
-    Sparse far-range components frequently look much wider in world-aligned
-    X/Y bounds when the road/vehicle is diagonal. A 2x2 covariance PCA gives
-    a stable major/minor axis while remaining Python 3.7 compatible.
-    """
+    """Return PCA-aligned XY length/width plus Z height without numpy."""
     if not points:
         return [0.0, 0.0, 0.0], 0.0
     xs = [float(p[0]) for p in points]
@@ -44,7 +40,6 @@ def _oriented_extent(points):
     cyy = sum((y - my) * (y - my) for y in ys) / n
     cxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(len(xs))) / n
 
-    # Principal-axis angle for a symmetric 2x2 covariance matrix.
     yaw = 0.5 * math.atan2(2.0 * cxy, cxx - cyy) if len(points) >= 2 else 0.0
     ca = math.cos(yaw)
     sa = math.sin(yaw)
@@ -64,6 +59,59 @@ def _oriented_extent(points):
     return [length, width, height], yaw
 
 
+def _point_key(p):
+    return (round(float(p[0]), 3), round(float(p[1]), 3), round(float(p[2]), 3))
+
+
+def _build_history_grid(history_frames, grid_size):
+    cells = defaultdict(list)
+    inv = 1.0 / max(0.2, float(grid_size))
+    for _, pts in history_frames:
+        for p in pts:
+            x = float(p[0])
+            y = float(p[1])
+            cells[(int(math.floor(x * inv)), int(math.floor(y * inv)))].append(p)
+    return cells, inv
+
+
+def _temporal_support(current_support, history_cells, inv, gate, z_gate, max_added):
+    """Add only history points spatially attached to a current-frame seed.
+
+    History can never create a component by itself because this function is
+    called only for components already formed by current-frame cells.
+    """
+    if not current_support or not history_cells or max_added <= 0:
+        return []
+    g2 = float(gate) * float(gate)
+    zg = float(z_gate)
+    best = {}
+    for cp in current_support:
+        cx = float(cp[0])
+        cy = float(cp[1])
+        cz = float(cp[2])
+        ix = int(math.floor(cx * inv))
+        iy = int(math.floor(cy * inv))
+        for ox in (-1, 0, 1):
+            for oy in (-1, 0, 1):
+                for hp in history_cells.get((ix + ox, iy + oy), []):
+                    hx = float(hp[0])
+                    hy = float(hp[1])
+                    hz = float(hp[2])
+                    if abs(hz - cz) > zg:
+                        continue
+                    dx = hx - cx
+                    dy = hy - cy
+                    d2 = dx * dx + dy * dy
+                    if d2 > g2:
+                        continue
+                    key = _point_key(hp)
+                    old = best.get(key)
+                    if old is None or d2 < old[0]:
+                        best[key] = (d2, hp)
+    ranked = sorted(best.values(), key=lambda x: x[0])
+    return [p for _, p in ranked[:max_added]]
+
+
 def _empty_stats():
     return {
         "input_points": 0,
@@ -76,6 +124,10 @@ def _empty_stats():
         "dedupe": 0,
         "built": 0,
         "oriented_components": 0,
+        "temporal_history_frames": 0,
+        "temporal_current_points": 0,
+        "temporal_added_points": 0,
+        "temporal_components": 0,
         "roi_pass": 0,
         "score_pass": 0,
         "dynamic_pass": 0,
@@ -83,12 +135,14 @@ def _empty_stats():
 
 
 def build_far_geometry_candidates(points, existing_geometry, config=None):
-    """Supplement 50-80m geometry from sparse current-frame LiDAR points.
+    """Supplement 50-80m geometry from sparse LiDAR points.
 
-    V0.6.12.3 keeps this path tracker-, history- and CARLA-truth-independent,
-    but evaluates sparse component length/width in a PCA-aligned frame. This
-    reduces diagonal-road box inflation without relaxing the global road ROI.
-    Output still passes the normal ROI/Score/Tracker path.
+    V0.6.12.4 adds conservative short-term LiDAR temporal support. Every
+    component is still seeded exclusively by current-frame points. History is
+    limited by TTL/frame count and can only add nearby support to that seed;
+    it can never create a candidate on its own. Candidate center remains based
+    on current-frame points to avoid temporal lag. No tracker, camera, CARLA
+    actor or ground-truth information is consumed.
     """
     c = config or {}
     stats = _empty_stats()
@@ -111,14 +165,38 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     max_candidates = max(0, int(c.get("far_geometry_builder_max_candidates", 30)))
     oriented_enabled = bool(c.get("far_geometry_builder_oriented_extent_enabled", True))
 
+    temporal_enabled = bool(c.get("far_geometry_temporal_enabled", True))
+    temporal_ttl = max(0.0, float(c.get("far_geometry_temporal_ttl", 0.25)))
+    temporal_frames = max(0, int(c.get("far_geometry_temporal_frames", 2)))
+    temporal_gate = max(0.2, float(c.get("far_geometry_temporal_gate", 0.90)))
+    temporal_z_gate = max(0.1, float(c.get("far_geometry_temporal_z_gate", 1.20)))
+    temporal_max_added = max(0, int(c.get("far_geometry_temporal_max_added", 12)))
+
+    now = time.time()
+    history = getattr(build_far_geometry_candidates, "_history", deque())
+    while history and (now - float(history[0][0]) > temporal_ttl):
+        history.popleft()
+    while temporal_frames >= 0 and len(history) > temporal_frames:
+        history.popleft()
+
+    current_far_points = []
     cells = defaultdict(list)
     for p in points:
         x, y = float(p[0]), float(p[1])
         rng = _range_xy(x, y)
         if rng < min_range or rng > max_range:
             continue
+        current_far_points.append(p)
         stats["input_points"] += 1
         cells[(int(math.floor(x / cell)), int(math.floor(y / cell)))].append(p)
+
+    stats["temporal_current_points"] = len(current_far_points)
+    active_history = list(history) if temporal_enabled and temporal_frames > 0 else []
+    stats["temporal_history_frames"] = len(active_history)
+    if active_history:
+        history_cells, history_inv = _build_history_grid(active_history, temporal_gate)
+    else:
+        history_cells, history_inv = {}, 1.0
 
     remaining = set(cells)
     occupied = list(existing_geometry or [])
@@ -136,10 +214,20 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
                         remaining.remove(nk)
                         q.append(nk)
                         keys.append(nk)
-        support = []
+
+        current_support = []
         for k in keys:
-            support.extend(cells[k])
+            current_support.extend(cells[k])
         stats["components"] += 1
+
+        temporal_added = _temporal_support(
+            current_support, history_cells, history_inv, temporal_gate,
+            temporal_z_gate, temporal_max_added) if temporal_enabled else []
+        if temporal_added:
+            stats["temporal_components"] += 1
+            stats["temporal_added_points"] += len(temporal_added)
+        support = list(current_support) + list(temporal_added)
+
         if len(support) < min_points:
             stats["too_few_points"] += 1
             continue
@@ -170,16 +258,21 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
             continue
 
         stats["template_pass"] += 1
-        n = float(len(support))
-        x = sum(float(p[0]) for p in support) / n
-        y = sum(float(p[1]) for p in support) / n
-        z = sum(float(p[2]) for p in support) / n
+        # Position is intentionally current-frame-only. Historical points are
+        # support evidence, never a source of temporal position lag.
+        n = float(len(current_support))
+        x = sum(float(p[0]) for p in current_support) / n
+        y = sum(float(p[1]) for p in current_support) / n
+        z = sum(float(p[2]) for p in current_support) / n
         if _near_existing(x, y, occupied, dedupe):
             stats["dedupe"] += 1
             continue
 
         item = {"x": x, "y": y, "z": z,
-                "point_count": len(support), "extent": e,
+                "point_count": len(support),
+                "current_point_count": len(current_support),
+                "temporal_point_count": len(temporal_added),
+                "extent": e,
                 "axis_aligned_extent": axis_e,
                 "oriented_yaw": yaw,
                 "oriented_extent": e,
@@ -187,6 +280,7 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
                 "scale_votes": 1, "scale_modes": ["far_geometry_builder"],
                 "far_geometry_built": True,
                 "far_geometry_quality_v2": True,
+                "far_geometry_temporal_supported": bool(temporal_added),
                 "sparse_rescued": False, "sparse_discovered": False}
         out.append(item)
         occupied.append(item)
@@ -194,8 +288,16 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
         if max_candidates and len(out) >= max_candidates:
             break
 
+    if temporal_enabled and temporal_frames > 0 and current_far_points:
+        history.append((now, list(current_far_points)))
+        while len(history) > temporal_frames:
+            history.popleft()
+    elif not temporal_enabled:
+        history.clear()
+    build_far_geometry_candidates._history = history
     build_far_geometry_candidates.last_stats = stats
     return out
 
 
+build_far_geometry_candidates._history = deque()
 build_far_geometry_candidates.last_stats = _empty_stats()
