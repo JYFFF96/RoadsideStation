@@ -85,6 +85,56 @@ class GroundTruthEvaluator(object):
         metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected)})
         return metrics
 
+    def _has_match(self, gt, candidates):
+        for det in candidates or []:
+            d=math.hypot(float(det.get("x",0.0))-float(gt.get("x",0.0)),float(det.get("y",0.0))-float(gt.get("y",0.0)))
+            if d<=self.match_distance:return True
+        return False
+
+    @staticmethod
+    def _empty_drop_counts():
+        return {"truth":0,"pass":0,"no_geometry_candidate":0,"roi_reject":0,"roi_lost":0,"score_reject":0,"score_lost":0,"dynamic_drop":0}
+
+    def analyze_detection_drop_reasons(self, geometry_candidates, roi_candidates, scored_candidates,
+                                       dynamic_candidates, roi_rejections=None, score_rejections=None):
+        """V0.6.8 evaluation-only stage drop diagnosis.
+
+        Ground truth is used only to explain where a truth vehicle disappears from
+        the already-produced perception stages. It never feeds back into perception,
+        tracking, fusion or FusedObjectList.
+
+        `no_geometry_candidate` deliberately means no candidate survived into the
+        Geometry stage. With the current pipeline this cannot yet distinguish raw
+        point-support failure from an earlier clustering/geometry rejection.
+        """
+        truth=self.truth_vehicles()
+        geo=self._detected_with_range(geometry_candidates)
+        roi=self._detected_with_range(roi_candidates)
+        scored=self._detected_with_range(scored_candidates)
+        dyn=self._detected_with_range(dynamic_candidates)
+        roi_rej=self._detected_with_range(roi_rejections)
+        score_rej=self._detected_with_range(score_rejections)
+        total=self._empty_drop_counts();bins=[];lower=0.0
+        for upper in self.range_bins:
+            c=self._empty_drop_counts();c["min_range"]=lower;c["max_range"]=upper;bins.append(c);lower=upper
+        details=[]
+        for gt in truth:
+            if not self._has_match(gt,geo):reason="no_geometry_candidate"
+            elif not self._has_match(gt,roi):reason="roi_reject" if self._has_match(gt,roi_rej) else "roi_lost"
+            elif not self._has_match(gt,scored):reason="score_reject" if self._has_match(gt,score_rej) else "score_lost"
+            elif not self._has_match(gt,dyn):reason="dynamic_drop"
+            else:reason="pass"
+            total["truth"]+=1;total[reason]+=1
+            rng=float(gt.get("range",0.0));lower=0.0
+            for b in bins:
+                upper=float(b["max_range"])
+                if (lower<=rng<upper) or (upper==self.range_bins[-1] and lower<=rng<=upper):
+                    b["truth"]+=1;b[reason]+=1;break
+                lower=upper
+            details.append({"actor_id":gt.get("actor_id"),"range":rng,"reason":reason})
+        total["range_bins"]=bins;total["details"]=details
+        return total
+
     def analyze_roi_false_rejections(self, accepted_candidates, rejected_candidates, min_range=30.0, max_range=50.0):
         """Evaluation-only diagnosis of truth vehicles lost specifically at ROI.
 
