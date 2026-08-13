@@ -41,7 +41,6 @@ class NearestTracker(object):
         self.coast_low_score = float(coast_low_score)
         self.coast_edge_ratio = float(coast_edge_ratio)
 
-        # V0.6.6 Track Quality defaults. configure_quality() may override them.
         self.quality_enabled = True
         self.quality_high = .72
         self.quality_medium = .50
@@ -51,11 +50,13 @@ class NearestTracker(object):
         self.quality_radar_bonus = .08
         self.quality_sensor_memory = 1.5
         self.quality_coast_penalty = .10
+        self.quality_low_min_hits_for_coast = 3
 
         self._tracks = {}
         self._next_id = 1
         self.last_stats = {"new": 0, "update": 0, "coast": 0,
-                           "drop": 0, "suppress": 0}
+                           "drop": 0, "suppress": 0,
+                           "low_hit_keep": 0, "low_new_drop": 0}
 
     def configure_quality(self, config):
         c = config or {}
@@ -68,6 +69,7 @@ class NearestTracker(object):
         self.quality_radar_bonus = float(c.get("track_quality_radar_bonus", .08))
         self.quality_sensor_memory = max(.1, float(c.get("track_quality_sensor_memory", 1.5)))
         self.quality_coast_penalty = max(0.0, float(c.get("track_quality_coast_penalty", .10)))
+        self.quality_low_min_hits_for_coast = max(1, int(c.get("track_quality_low_min_hits_for_coast", 3)))
 
     def _clamp_velocity(self, vx, vy):
         s = math.hypot(vx, vy)
@@ -201,6 +203,8 @@ class NearestTracker(object):
             return allowed
         if band == "medium":
             return min(allowed, self.quality_medium_coast_frames)
+        if int(t.get("hits", 1)) < self.quality_low_min_hits_for_coast:
+            return 0
         return min(allowed, self.quality_low_coast_frames)
 
     def _sensor_string(self, t, now=None):
@@ -247,11 +251,6 @@ class NearestTracker(object):
         return self._decorate_quality(item, t, now)
 
     def apply_sensor_confirmations(self, track_ids, sensor="camera", timestamp=None):
-        """Apply generic post-association sensor evidence by track ID.
-
-        No CARLA object or ground-truth type enters this interface. A future
-        YOLO/RTSP adapter can call the exact same method.
-        """
         now = time.time() if timestamp is None else float(timestamp)
         key_time = "last_camera_time" if sensor == "camera" else "last_radar_time"
         key_count = "camera_confirmations" if sensor == "camera" else "radar_confirmations"
@@ -288,7 +287,8 @@ class NearestTracker(object):
         unmatched = set(self._tracks)
         results = []
         pending = []
-        stats = {"new": 0, "update": 0, "coast": 0, "drop": 0, "suppress": 0}
+        stats = {"new": 0, "update": 0, "coast": 0, "drop": 0, "suppress": 0,
+                 "low_hit_keep": 0, "low_new_drop": 0}
 
         for di, det in enumerate(detections):
             for tid in unmatched:
@@ -367,7 +367,6 @@ class NearestTracker(object):
                 track["radar_confirmations"] += 1
             self._tracks[tid] = track
 
-            q = self._quality_value(track, now)
             state = "new" if old is None else "confirmed"
             item = dict(det)
             item.update({
@@ -388,12 +387,20 @@ class NearestTracker(object):
             if t is None:
                 continue
             t["misses"] = int(t.get("misses", 0)) + 1
+            q = self._quality_value(t, now)
+            band = self._quality_band(q)
+            hits = int(t.get("hits", 1))
             allowed = self._allowed_coast(t, now)
-            if now - float(t.get("timestamp", now)) <= self.max_age and t["misses"] <= allowed:
+            in_age = now - float(t.get("timestamp", now)) <= self.max_age
+            if in_age and t["misses"] <= allowed:
                 results.append(self._coast_item(tid, t, now))
                 stats["coast"] += 1
-            elif now - float(t.get("timestamp", now)) <= self.max_age:
+                if band == "low" and hits >= self.quality_low_min_hits_for_coast:
+                    stats["low_hit_keep"] += 1
+            elif in_age:
                 stats["suppress"] += 1
+                if band == "low" and hits < self.quality_low_min_hits_for_coast:
+                    stats["low_new_drop"] += 1
 
         stale = [tid for tid, t in self._tracks.items()
                  if now - t["timestamp"] > self.max_age]
