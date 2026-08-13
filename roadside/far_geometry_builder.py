@@ -25,6 +25,45 @@ def _extent(points):
     return [max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)]
 
 
+def _oriented_extent(points):
+    """Return PCA-aligned XY length/width plus Z height without numpy.
+
+    Sparse far-range components frequently look much wider in world-aligned
+    X/Y bounds when the road/vehicle is diagonal. A 2x2 covariance PCA gives
+    a stable major/minor axis while remaining Python 3.7 compatible.
+    """
+    if not points:
+        return [0.0, 0.0, 0.0], 0.0
+    xs = [float(p[0]) for p in points]
+    ys = [float(p[1]) for p in points]
+    zs = [float(p[2]) for p in points]
+    n = float(len(points))
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    cxx = sum((x - mx) * (x - mx) for x in xs) / n
+    cyy = sum((y - my) * (y - my) for y in ys) / n
+    cxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(len(xs))) / n
+
+    # Principal-axis angle for a symmetric 2x2 covariance matrix.
+    yaw = 0.5 * math.atan2(2.0 * cxy, cxx - cyy) if len(points) >= 2 else 0.0
+    ca = math.cos(yaw)
+    sa = math.sin(yaw)
+    major = []
+    minor = []
+    for x, y in zip(xs, ys):
+        dx = x - mx
+        dy = y - my
+        major.append(ca * dx + sa * dy)
+        minor.append(-sa * dx + ca * dy)
+    length = max(major) - min(major) if major else 0.0
+    width = max(minor) - min(minor) if minor else 0.0
+    height = max(zs) - min(zs) if zs else 0.0
+    if width > length:
+        length, width = width, length
+        yaw += math.pi * 0.5
+    return [length, width, height], yaw
+
+
 def _empty_stats():
     return {
         "input_points": 0,
@@ -36,6 +75,7 @@ def _empty_stats():
         "template_pass": 0,
         "dedupe": 0,
         "built": 0,
+        "oriented_components": 0,
         "roi_pass": 0,
         "score_pass": 0,
         "dynamic_pass": 0,
@@ -45,10 +85,10 @@ def _empty_stats():
 def build_far_geometry_candidates(points, existing_geometry, config=None):
     """Supplement 50-80m geometry from sparse current-frame LiDAR points.
 
-    V0.6.12.1 adds observer-only rejection counters. The candidate algorithm,
-    thresholds and output semantics are intentionally unchanged from V0.6.11.2.
-    Tracker- and CARLA-truth-independent. Output still passes the normal
-    ROI/Score/Tracker path.
+    V0.6.12.3 keeps this path tracker-, history- and CARLA-truth-independent,
+    but evaluates sparse component length/width in a PCA-aligned frame. This
+    reduces diagonal-road box inflation without relaxing the global road ROI.
+    Output still passes the normal ROI/Score/Tracker path.
     """
     c = config or {}
     stats = _empty_stats()
@@ -69,6 +109,7 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     max_height = float(c.get("far_geometry_builder_max_height", 3.2))
     dedupe = float(c.get("far_geometry_builder_dedupe_distance", 1.8))
     max_candidates = max(0, int(c.get("far_geometry_builder_max_candidates", 30)))
+    oriented_enabled = bool(c.get("far_geometry_builder_oriented_extent_enabled", True))
 
     cells = defaultdict(list)
     for p in points:
@@ -103,7 +144,14 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
             stats["too_few_points"] += 1
             continue
 
-        e = _extent(support)
+        axis_e = _extent(support)
+        if oriented_enabled:
+            e, yaw = _oriented_extent(support)
+            stats["oriented_components"] += 1
+        else:
+            e = list(axis_e)
+            yaw = 0.0
+
         hl = max(float(e[0]), float(e[1]))
         hs = min(float(e[0]), float(e[1]))
         h = float(e[2])
@@ -132,9 +180,13 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
 
         item = {"x": x, "y": y, "z": z,
                 "point_count": len(support), "extent": e,
+                "axis_aligned_extent": axis_e,
+                "oriented_yaw": yaw,
+                "oriented_extent": e,
                 "cluster_mode": "far_geometry_builder",
                 "scale_votes": 1, "scale_modes": ["far_geometry_builder"],
                 "far_geometry_built": True,
+                "far_geometry_quality_v2": True,
                 "sparse_rescued": False, "sparse_discovered": False}
         out.append(item)
         occupied.append(item)
