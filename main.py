@@ -3,6 +3,7 @@ import signal,sys,time,yaml,math
 import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
+from roadside.detection_stability import DetectionStabilityDiagnostics
 from roadside.camera_fusion import CameraProjector
 from roadside.camera_lidar_association import associate_camera_to_lidar
 from roadside.fused_objects import build_fused_object_list
@@ -47,11 +48,15 @@ def _print_stage(name,m):
  for b in m.get("range_bins",[]):
   print("    [%02.0f-%02.0fm] Cand:%d Match:%d Miss:%d FP:%d Recall:%s"%(b["min_range"],b["max_range"],b["detected"],b["matched"],b["missed"],b["false_positive"],_pct(b["recall"])))
 
+def _print_detection_stability(ds):
+ print("  [DETECTION STABILITY] Dyn:%d Persistent:%d New:%d OneFrameLost:%d Reassoc:%d Fragmented:%d Lost:%d Jump(avg/max):%.2f/%.2fm ExtentDelta:%.2f"%(ds.get("candidates",0),ds.get("persistent",0),ds.get("new",0),ds.get("one_frame_lost",0),ds.get("reassociated",0),ds.get("fragmented",0),ds.get("lost",0),float(ds.get("mean_jump",0.0)),float(ds.get("max_jump",0.0)),float(ds.get("mean_extent_delta",0.0))))
+
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
- print("RoadsideStation V0.6.6.2 Track Quality Hit History Gate starting...")
+ dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={}
+ print("RoadsideStation V0.6.7 Detection Stability Diagnostics starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -69,7 +74,8 @@ def main():
  else:print("Candidate scoring: disabled")
  print("Adaptive track persistence: %s | young=%d stable=%d far=%d frames | stable_hits=%d far>=%.0fm | low_score<%.2f edge>=%.2f | decay=%.2f"%("enabled" if fc.get("track_adaptive_coast_enabled",False) else "disabled",int(fc.get("track_coast_young_frames",1)),int(fc.get("track_coast_stable_frames",3)),int(fc.get("track_coast_far_frames",4)),int(fc.get("track_coast_stable_hits",3)),float(fc.get("track_coast_far_range",50.0)),float(fc.get("track_coast_low_score",0.55)),float(fc.get("track_coast_edge_ratio",0.90)),float(fc.get("track_coast_confidence_decay",.84))))
  print("Track Quality: %s | high>=%.2f medium>=%.2f | medium_coast<=%d low_coast<=%d | low coast requires hits>=%d | camera=+%.2f radar=+%.2f memory=%.1fs penalty=%.2f/miss"%("enabled" if fc.get("track_quality_enabled",True) else "disabled",float(fc.get("track_quality_high",.72)),float(fc.get("track_quality_medium",.50)),int(fc.get("track_quality_medium_coast_frames",2)),int(fc.get("track_quality_low_coast_frames",0)),int(fc.get("track_quality_low_min_hits_for_coast",3)),float(fc.get("track_quality_camera_bonus",.12)),float(fc.get("track_quality_radar_bonus",.08)),float(fc.get("track_quality_sensor_memory",1.5)),float(fc.get("track_quality_coast_penalty",.10))))
- print("Qt/C++ portability: quality policy uses scalar detection/temporal/sensor/stability/range evidence only; no CARLA-specific logic.")
+ print("Detection Stability diagnostics: observer-only | match<=%.1fm missed<=%d fragmentation<=%.1fm"%(detdiag.match_distance,detdiag.max_missed_frames,detdiag.fragmentation_distance))
+ print("Qt/C++ portability: quality/diagnostic policies use plain scalar candidate evidence only; no CARLA-specific logic.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
  if station.camera_transform is not None:
@@ -82,9 +88,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.6.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.7 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> road ROI -> fixed far score -> tracker -> Track Quality -> Hit History Gate -> fusion")
+ print("ARCH: traffic -> ground removal -> road ROI -> far score -> Detection Stability(observer) -> tracker -> Track Quality -> Hit History Gate -> fusion")
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
@@ -92,7 +98,7 @@ def main():
  last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
  try:
   while not _STOP_REQUESTED:
-   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None);camera_objects=[];pairs=[]
+   camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);camera_objects=[];pairs=[]
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
@@ -104,6 +110,7 @@ def main():
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
+    _print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
@@ -117,6 +124,7 @@ def main():
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
+    _print_detection_stability(ds)
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
