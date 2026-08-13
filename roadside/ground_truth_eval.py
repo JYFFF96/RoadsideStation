@@ -85,6 +85,33 @@ class GroundTruthEvaluator(object):
         metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected)})
         return metrics
 
+    def analyze_roi_false_rejections(self, accepted_candidates, rejected_candidates, min_range=30.0, max_range=50.0):
+        """Evaluation-only diagnosis of truth vehicles lost specifically at ROI.
+
+        A truth vehicle is reported only when it has no accepted ROI candidate
+        within the normal evaluator gate but does have a rejected candidate.
+        Ground truth never feeds back into perception or fusion.
+        """
+        lo=float(min_range);hi=float(max_range)
+        truth=[x for x in self.truth_vehicles() if lo<=x.get("range",0.0)<hi]
+        accepted=[x for x in self._detected_with_range(accepted_candidates) if lo<=x.get("range",0.0)<hi]
+        rejected=[x for x in self._detected_with_range(rejected_candidates) if lo<=x.get("range",0.0)<hi]
+        accepted_pairs=self._match(truth,accepted);covered=set(p[0] for p in accepted_pairs)
+        remaining=[(idx,gt) for idx,gt in enumerate(truth) if idx not in covered]
+        if not remaining or not rejected:return []
+        reduced_truth=[gt for _,gt in remaining];pairs=self._match(reduced_truth,rejected);out=[]
+        for ti,di,d in pairs:
+            original_index,gt=remaining[ti];rej=rejected[di];details=rej.get("details",{}) or {}
+            out.append({
+                "actor_id":gt.get("actor_id"),"type_id":gt.get("type_id"),"truth_range":gt.get("range"),
+                "reason":rej.get("reason","rejected"),"candidate_distance":float(d),
+                "lateral":details.get("lateral"),"allowed_lateral":details.get("allowed_lateral"),
+                "center_excess":details.get("center_excess"),"bbox_overlap":details.get("bbox_overlap"),
+                "roi_margin":details.get("roi_margin"),"candidate_range":rej.get("range")
+            })
+        out.sort(key=lambda x:(x.get("truth_range",0.0),x.get("candidate_distance",0.0)))
+        return out
+
     def evaluate(self, detected_tracks, camera_objects=None, camera_pairs=None, radar_matched=0):
         metrics=self.evaluate_candidates(detected_tracks)
         metrics.update({"camera_visible":len(camera_objects or []),"camera_lidar_matched":len(camera_pairs or []),"radar_matched":int(radar_matched)})
