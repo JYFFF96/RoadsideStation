@@ -123,6 +123,24 @@ fusion:
   sparse_geometry_rescue_max_height: 3.0
   sparse_geometry_rescue_score_bonus: 0.08
 
+  # V0.6.11.2: independent 50-80m sparse Far Geometry Builder.
+  # Uses only current-frame non-ground LiDAR points; no tracker and no GT.
+  # Output is deduplicated against normal geometry and still passes ROI/Score/Track.
+  far_geometry_builder_enabled: true
+  far_geometry_builder_min_range: 50.0
+  far_geometry_builder_max_range: 80.0
+  far_geometry_builder_cell_size: 1.0
+  far_geometry_builder_neighbor_cells: 1
+  far_geometry_builder_min_points: 2
+  far_geometry_builder_min_length: 0.25
+  far_geometry_builder_max_length: 7.5
+  far_geometry_builder_min_width: 0.08
+  far_geometry_builder_max_width: 3.5
+  far_geometry_builder_min_height: 0.04
+  far_geometry_builder_max_height: 3.2
+  far_geometry_builder_dedupe_distance: 1.8
+  far_geometry_builder_max_candidates: 30
+
   # V0.6.10: track-independent sparse discovery for first-seen 30-80m targets.
   # This path uses only current-frame LiDAR points; no tracker or CARLA truth.
   # 0-30m is deliberately excluded. ROI and the existing far score remain
