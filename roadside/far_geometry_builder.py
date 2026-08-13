@@ -25,16 +25,33 @@ def _extent(points):
     return [max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)]
 
 
+def _empty_stats():
+    return {
+        "input_points": 0,
+        "components": 0,
+        "too_few_points": 0,
+        "length_reject": 0,
+        "width_reject": 0,
+        "height_reject": 0,
+        "template_pass": 0,
+        "dedupe": 0,
+        "built": 0,
+        "roi_pass": 0,
+        "score_pass": 0,
+        "dynamic_pass": 0,
+    }
+
+
 def build_far_geometry_candidates(points, existing_geometry, config=None):
     """Supplement 50-80m geometry from sparse current-frame LiDAR points.
 
-    Tracker- and CARLA-truth-independent. Performs coarse BEV connected-component
-    grouping, conservative vehicle-template filtering, and deduplication against
-    existing local geometry. Output still passes normal ROI/Score/Tracker gates.
+    V0.6.12.1 adds observer-only rejection counters. The candidate algorithm,
+    thresholds and output semantics are intentionally unchanged from V0.6.11.2.
+    Tracker- and CARLA-truth-independent. Output still passes the normal
+    ROI/Score/Tracker path.
     """
     c = config or {}
-    stats = {"input_points": 0, "components": 0, "template_pass": 0,
-             "dedupe": 0, "built": 0}
+    stats = _empty_stats()
     if not c.get("far_geometry_builder_enabled", True) or points is None:
         build_far_geometry_candidates.last_stats = stats
         return []
@@ -83,14 +100,27 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
             support.extend(cells[k])
         stats["components"] += 1
         if len(support) < min_points:
+            stats["too_few_points"] += 1
             continue
+
         e = _extent(support)
         hl = max(float(e[0]), float(e[1]))
         hs = min(float(e[0]), float(e[1]))
         h = float(e[2])
-        if hl < min_length or hl > max_length or hs < min_width or hs > max_width or \
-                h < min_height or h > max_height:
+
+        rejected = False
+        if hl < min_length or hl > max_length:
+            stats["length_reject"] += 1
+            rejected = True
+        if hs < min_width or hs > max_width:
+            stats["width_reject"] += 1
+            rejected = True
+        if h < min_height or h > max_height:
+            stats["height_reject"] += 1
+            rejected = True
+        if rejected:
             continue
+
         stats["template_pass"] += 1
         n = float(len(support))
         x = sum(float(p[0]) for p in support) / n
@@ -99,6 +129,7 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
         if _near_existing(x, y, occupied, dedupe):
             stats["dedupe"] += 1
             continue
+
         item = {"x": x, "y": y, "z": z,
                 "point_count": len(support), "extent": e,
                 "cluster_mode": "far_geometry_builder",
@@ -115,7 +146,4 @@ def build_far_geometry_candidates(points, existing_geometry, config=None):
     return out
 
 
-build_far_geometry_candidates.last_stats = {
-    "input_points": 0, "components": 0, "template_pass": 0,
-    "dedupe": 0, "built": 0
-}
+build_far_geometry_candidates.last_stats = _empty_stats()
