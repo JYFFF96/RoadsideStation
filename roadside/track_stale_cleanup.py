@@ -56,7 +56,7 @@ def cleanup_stale_tracks(tracker, output_items, now, config=None):
 
 
 def install_stale_cleanup_patch():
-    """Install a conservative post-update cleanup hook on NearestTracker."""
+    """Install conservative V0.6.12 post-update cleanup on NearestTracker."""
     from .tracking import NearestTracker
     if getattr(NearestTracker, "_v0612_stale_patch", False):
         return
@@ -66,6 +66,7 @@ def install_stale_cleanup_patch():
     def configure_quality(self, config):
         original_configure(self, config)
         self._stale_cleanup_config = dict(config or {})
+        self._stale_last_print = 0.0
 
     def update(self, detections, timestamp=None):
         now = time.time() if timestamp is None else float(timestamp)
@@ -79,6 +80,12 @@ def install_stale_cleanup_patch():
         s["stale_miss_keep"] = int(d.get("miss_keep", 0))
         s["stale_cleaned"] = int(d.get("cleaned", 0))
         self.last_stats = s
+        if getattr(self, "_stale_cleanup_config", {}).get("track_stale_cleanup_enabled", False):
+            if now - float(getattr(self, "_stale_last_print", 0.0)) >= 1.0:
+                print("  [TRACK STALE] Checked:%d MissKeep:%d QualityKeep:%d SensorProtected:%d Cleaned:%d" %
+                      (s["stale_checked"], s["stale_miss_keep"], s["stale_quality_keep"],
+                       s["stale_protected"], s["stale_cleaned"]))
+                self._stale_last_print = now
         return out
 
     NearestTracker.configure_quality = configure_quality
