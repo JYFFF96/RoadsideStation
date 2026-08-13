@@ -1,94 +1,122 @@
+carla:
+  host: 127.0.0.1
+  port: 2000
+  timeout: 60.0
+  map: Town05_Opt
+  load_world_on_start: true
+  synchronous_mode: false
+
+traffic:
+  mode: external
+  source: carla_generate_traffic
+
+environment:
+  unload_foliage: true
+
 station:
   id: RSU_001
   deployment: auto_cross_junction
   junction_index: 0
-  transform:
-    x: 0.0
-    y: 0.0
-    z: 5.0
-    roll: 0.0
-    pitch: 0.0
-    yaw: 0.0
+  height: 8.0
+  lateral_offset: 7.0
+  transform: {x: 0.0, y: 0.0, z: 8.0, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 camera:
+  id: CAM_01
   enabled: true
   width: 1280
   height: 720
-  fov: 90.0
-  fps: 10.0
+  fov: 90
+  transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
+
+camera_detection:
+  enabled: true
+  backend: yolov5_onnx_opencv
+  model: models/yolov5n.onnx
+  input_size: 640
+  confidence: 0.35
+  nms: 0.45
+
+camera_fusion:
+  source: carla_truth
+  note: simulation-only adapter; replace with detector when RTSP camera backend is ready
+
+camera_lidar_association:
+  min_iou: 0.05
+  max_center_distance: 120.0
 
 lidar:
   enabled: true
   channels: 64
-  range: 100.0
-  points_per_second: 1300000
+  range: 80.0
+  points_per_second: 400000
   rotation_frequency: 10.0
-  upper_fov: 10.0
-  lower_fov: -30.0
+  upper_fov: 5.0
+  lower_fov: -35.0
+  transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 radar:
   enabled: true
-  horizontal_fov: 35.0
-  vertical_fov: 20.0
-  range: 100.0
-  points_per_second: 1500
+  horizontal_fov: 80.0
+  vertical_fov: 25.0
+  range: 80.0
+  transform: {x: 0.0, y: 0.0, z: 0.2, pitch: -5.0, yaw: 0.0, roll: 0.0}
 
-perception:
-  voxel_size: 0.8
-  cluster_min_points: 6
-  lidar_min_z: -7.5
-  lidar_max_z: 2.0
-  max_range: 80.0
-  max_objects: 120
+fusion:
+  ground_removal_enabled: true
+  ground_clearance: 0.30
 
   range_adaptive_clustering: true
   range_bands:
-    - max_range: 30.0
-      voxel_size: 0.55
-      min_points: 5
-      min_length: 0.5
-      min_width: 0.3
-      min_height: 0.2
-    - max_range: 50.0
-      voxel_size: 0.75
-      min_points: 4
-      min_length: 0.45
-      min_width: 0.25
-      min_height: 0.15
-    - max_range: 80.0
-      voxel_size: 1.0
-      min_points: 3
-      min_length: 0.35
-      min_width: 0.15
-      min_height: 0.10
+    - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.75, max_length: 6.5, min_width: 0.55, max_width: 3.4, min_height: 0.45, max_height: 2.6}
+    - {max_range: 50.0, mode: 3d, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
+    - {max_range: 80.0, mode: bev_multiscale, bev_cell_sizes: [0.55, 0.85], bev_neighbor_cells: 1, bev_dedupe_distance: 1.40, min_points: 2, min_length: 0.18, min_width: 0.10, min_height: 0.07}
 
-  vehicle_min_length: 0.6
+  voxel_size: 0.5
+  cluster_min_points: 4
+  lidar_min_z: -9.5
+  lidar_max_z: 1.0
+  max_range: 80.0
+  vehicle_min_length: 0.4
   vehicle_max_length: 8.0
-  vehicle_min_width: 0.4
+  vehicle_min_width: 0.25
   vehicle_max_width: 4.0
-  vehicle_min_height: 0.25
+  vehicle_min_height: 0.15
   vehicle_max_height: 4.0
+  max_objects: 140
 
   cluster_merge_enabled: true
-  cluster_merge_gap: 1.4
+  cluster_merge_gap: 1.2
   merged_vehicle_max_length: 14.0
   merged_vehicle_max_width: 4.2
   merged_vehicle_max_height: 4.2
+
   near_merge_range: 30.0
   near_merge_gap: 0.65
   near_merged_vehicle_max_length: 7.5
   near_merged_vehicle_max_width: 3.2
 
-  ground_removal_enabled: true
-  ground_clearance: 0.30
-
   sparse_geometry_rescue_enabled: true
   sparse_geometry_rescue_min_range: 30.0
   sparse_geometry_rescue_max_range: 80.0
-  sparse_geometry_rescue_search_radius: 2.2
-  sparse_geometry_rescue_min_points: 2
-  sparse_geometry_rescue_min_quality: 0.45
-  sparse_geometry_rescue_min_hits: 2
+  sparse_geometry_rescue_far_range: 50.0
+  sparse_geometry_rescue_min_track_hits: 3
+  sparse_geometry_rescue_mid_min_quality: 0.55
+  sparse_geometry_rescue_far_min_quality: 0.47
+  sparse_geometry_rescue_mid_max_streak: 2
+  sparse_geometry_rescue_far_max_streak: 3
+  sparse_geometry_rescue_mid_radius: 2.2
+  sparse_geometry_rescue_far_radius: 3.0
+  sparse_geometry_rescue_z_window: 2.0
+  sparse_geometry_rescue_dedupe_distance: 2.0
+  sparse_geometry_rescue_mid_min_points: 3
+  sparse_geometry_rescue_far_min_points: 2
+  sparse_geometry_rescue_min_length: 0.18
+  sparse_geometry_rescue_min_width: 0.08
+  sparse_geometry_rescue_min_height: 0.05
+  sparse_geometry_rescue_max_length: 7.5
+  sparse_geometry_rescue_max_width: 3.5
+  sparse_geometry_rescue_max_height: 3.0
   sparse_geometry_rescue_score_bonus: 0.08
 
   far_geometry_builder_enabled: true
@@ -105,7 +133,6 @@ perception:
   far_geometry_builder_max_height: 3.2
   far_geometry_builder_dedupe_distance: 1.8
   far_geometry_builder_max_candidates: 30
-  # V0.6.12.3: evaluate sparse far components in their PCA-aligned XY frame.
   far_geometry_builder_oriented_extent_enabled: true
 
   far_sparse_discovery_enabled: true
@@ -165,6 +192,7 @@ perception:
   track_quality_sensor_memory: 1.5
   track_quality_coast_penalty: 0.10
 
+  # V0.6.12: remove weak stale internal tracks so suppressed/coasting FP cannot resurrect.
   track_stale_cleanup_enabled: true
   track_stale_cleanup_min_misses: 2
   track_stale_cleanup_max_quality: 0.55
@@ -191,10 +219,34 @@ perception:
   geometry_aware_roi_min_overlap: 0.25
   geometry_aware_roi_max_center_excess: 1.8
   geometry_aware_roi_max_half_width: 1.8
+  geometry_aware_roi_mid_min_overlap: 0.10
+  geometry_aware_roi_mid_max_center_excess: 2.6
+  geometry_aware_roi_mid_max_half_width: 2.0
 
   background_filter_enabled: false
-  calibration_seconds: 6.0
-  cell_size: 1.0
-  occupancy_ratio: 0.45
-  moving_radar_speed: 1.2
-  neighbor_radius_cells: 2
+  background_calibration_seconds: 6.0
+  background_cell_size: 1.0
+  background_occupancy_ratio: 0.45
+  background_moving_radar_speed: 1.2
+  background_neighbor_radius_cells: 2
+  static_confirm_seconds: 3.0
+  static_max_speed: 0.8
+
+evaluation:
+  enabled: true
+  radius: 80.0
+  range_bins: [30.0, 50.0, 80.0]
+  match_distance: 4.0
+  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
+  report_interval: 2.0
+  roi_false_reject_diagnostics: true
+  roi_false_reject_min_range: 30.0
+  roi_false_reject_max_range: 50.0
+  roi_false_reject_max_print: 6
+
+mqtt:
+  enabled: false
+  host: 127.0.0.1
+  port: 1883
+  topic_object_list: roadside/RSU_001/object_list
+  topic_rsm: roadside/RSU_001/rsm
