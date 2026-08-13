@@ -6,6 +6,7 @@ from roadside.fusion import SimpleFusion
 from roadside.detection_stability import DetectionStabilityDiagnostics
 from roadside.discovery_diagnostics import DiscoveryDiagnostics
 from roadside.sparse_geometry_rescue import track_guided_sparse_rescue
+from roadside.far_geometry_builder import build_far_geometry_candidates
 from roadside.camera_fusion import CameraProjector
 from roadside.camera_lidar_association import associate_camera_to_lidar
 from roadside.fused_objects import build_fused_object_list
@@ -71,12 +72,16 @@ def _print_rescue_gate():
  print("    [30-50m] Eligible:%d QualityBlock:%d StreakBlock:%d SupportBlock:%d GeometryBlock:%d Built:%d"%(mid.get("eligible",0),mid.get("quality_block",0),mid.get("streak_block",0),mid.get("support_block",0),mid.get("geometry_block",0),mid.get("built",0)))
  print("    [50-80m] Eligible:%d QualityBlock:%d StreakBlock:%d SupportBlock:%d GeometryBlock:%d Built:%d"%(far.get("eligible",0),far.get("quality_block",0),far.get("streak_block",0),far.get("support_block",0),far.get("geometry_block",0),far.get("built",0)))
 
+def _print_far_geometry():
+ g=getattr(build_far_geometry_candidates,"last_stats",{}) or {}
+ print("  [FAR GEOMETRY] InputPts:%d Components:%d TemplatePass:%d Dedupe:%d Built:%d"%(g.get("input_points",0),g.get("components",0),g.get("template_pass",0),g.get("dedupe",0),g.get("built",0)))
+
 def main():
  global _STOP_REQUESTED
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.11.1 Range-aware Rescue Gate starting...")
+ print("RoadsideStation V0.6.11.2 Far Geometry Builder starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -86,6 +91,7 @@ def main():
  near_band=(fc.get("range_bands") or [{}])[0]
  print("Teaching acceptance focus: 0-30m UNCHANGED | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
+ print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far New Object Discovery: %s | range=%.0f..%.0fm | cell mid/far=%.2f/%.2fm | points mid/far>=%d/%d | max=%d"%("enabled" if fc.get("far_sparse_discovery_enabled",False) else "disabled",float(fc.get("far_sparse_discovery_min_range",30.0)),float(fc.get("far_sparse_discovery_max_range",80.0)),float(fc.get("far_sparse_discovery_mid_cell",0.90)),float(fc.get("far_sparse_discovery_far_cell",1.20)),int(fc.get("far_sparse_discovery_mid_min_points",4)),int(fc.get("far_sparse_discovery_far_min_points",3)),int(fc.get("far_sparse_discovery_max_candidates",40))))
  print("Discovery Diagnostics: observer-only | split TrackRescue/NewDiscovery stages + discovery-born track lifecycle")
  print("Road ROI margins: near=%.1fm mid=%.1fm far=%.1fm"%(float(fc.get("road_roi_margin",3.0)),float(fc.get("road_roi_margin_mid",4.2)),float(fc.get("road_roi_margin_far",4.5))))
@@ -99,7 +105,7 @@ def main():
  print("Track Quality: %s | high>=%.2f medium>=%.2f | medium_coast<=%d low_coast<=%d | low coast requires hits>=%d | camera=+%.2f radar=+%.2f memory=%.1fs penalty=%.2f/miss"%("enabled" if fc.get("track_quality_enabled",True) else "disabled",float(fc.get("track_quality_high",.72)),float(fc.get("track_quality_medium",.50)),int(fc.get("track_quality_medium_coast_frames",2)),int(fc.get("track_quality_low_coast_frames",0)),int(fc.get("track_quality_low_min_hits_for_coast",3)),float(fc.get("track_quality_camera_bonus",.12)),float(fc.get("track_quality_radar_bonus",.08)),float(fc.get("track_quality_sensor_memory",1.5)),float(fc.get("track_quality_coast_penalty",.10))))
  print("Detection Stability diagnostics: observer-only | match<=%.1fm missed<=%d fragmentation<=%.1fm"%(detdiag.match_distance,detdiag.max_missed_frames,detdiag.fragmentation_distance))
  print("Detection Drop diagnostics: evaluation-only | Geometry -> ROI -> Score -> Dynamic | never feeds perception/fusion")
- print("Qt/C++ portability: rescue/discovery/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
+ print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
  if station.camera_transform is not None:
@@ -112,9 +118,9 @@ def main():
    if station.base_transform is not None:return station.base_transform.location
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.11.1 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.11.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
- print("ARCH: traffic -> ground removal -> clustering -> V0.6.11.1 range-aware track rescue + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
+ print("ARCH: traffic -> ground removal -> clustering -> V0.6.11.1 range-aware rescue + V0.6.11.2 far geometry builder + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
  print("ARCH: Discovery Diagnostics observes source stages and discovery-born track lifecycle only.")
  print("ARCH: Detection Stability/Drop diagnostics remain observer/evaluation-only.")
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
@@ -136,7 +142,7 @@ def main():
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
-    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_detection_stability(ds)
+    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
@@ -150,7 +156,7 @@ def main():
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
-    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_detection_stability(ds);_print_detection_drop(dd)
+    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_detection_drop(dd)
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
