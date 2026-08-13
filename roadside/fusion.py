@@ -24,7 +24,7 @@ class PersistentStaticFilter(object):
 class SimpleFusion(object):
  def __init__(self,station_id,config):
   self.station_id=station_id;self.config=config
-  self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.25),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35),config.get("velocity_window",5),config.get("position_alpha",.45),config.get("stationary_speed",.35))
+  self.tracker=NearestTracker(config.get("track_match_distance",4.),config.get("track_max_age",1.5),config.get("track_max_speed",20.),config.get("velocity_alpha",.25),config.get("extent_alpha",.25),config.get("extent_shrink_alpha",.05),config.get("extent_lock_hits",5),config.get("radar_velocity_alpha",.35),config.get("velocity_window",5),config.get("position_alpha",.45),config.get("stationary_speed",.35),config.get("track_coast_frames",0),config.get("track_coast_confidence_decay",.88))
   self.background=PersistentStaticFilter(**config);self.world_transform=None;self.radar_matrix=None;self.radar_origin=None;self.ground_reference_z=None;self.candidate_validator=None
   self.last_stats={};self.last_geometry_world=[];self.last_roi_candidates=[];self.last_scored_candidates=[];self.last_dynamic_candidates=[];self.last_tracked_candidates=[];self.last_roi_rejections=[];self.last_score_rejections=[]
  def set_world_transform(self,t):
@@ -115,13 +115,13 @@ class SimpleFusion(object):
  def _score_candidates(self,items):
   c=self.config
   if not c.get("candidate_scoring_enabled",False):return [dict(x) for x in items],[]
-  min_range=float(c.get("candidate_scoring_min_range",50.0));threshold=float(c.get("candidate_scoring_threshold_far",0.48));kept=[];rejected=[]
+  min_range=float(c.get("candidate_scoring_min_range",50.0));far_relaxed=float(c.get("candidate_scoring_far_relaxed_range",65.0));threshold=float(c.get("candidate_scoring_threshold_far",0.46));threshold_long=float(c.get("candidate_scoring_threshold_far_long",0.42));kept=[];rejected=[]
   for src in items:
    item=dict(src);rng=self._sensor_range(item["x"],item["y"]);item["sensor_range"]=rng
    if rng<min_range:
-    item["candidate_score"]=1.0;item["candidate_score_bypass"]=True;kept.append(item);continue
-   score=self._candidate_score(item);item["candidate_score"]=score;item["candidate_score_bypass"]=False
-   if score>=threshold:kept.append(item)
+    item["candidate_score"]=1.0;item["candidate_score_threshold"]=0.0;item["candidate_score_bypass"]=True;kept.append(item);continue
+   score=self._candidate_score(item);use_threshold=threshold_long if rng>=far_relaxed else threshold;item["candidate_score"]=score;item["candidate_score_threshold"]=use_threshold;item["candidate_score_bypass"]=False
+   if score>=use_threshold:kept.append(item)
    else:
     r=dict(item);r["reason"]="candidate_score";rejected.append(r)
   return kept,rejected
@@ -153,6 +153,6 @@ class SimpleFusion(object):
   objs=[DetectedObject(i["id"],i["x"],i["y"],i["z"],vx=i["vx"],vy=i["vy"],object_type="unknown",confidence=i["confidence"],sources=i["sources"]) for i in tracked]
   nearest=[x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None];reasons=defaultdict(int)
   for r in roi_rejections:reasons[r.get("reason","rejected")]+=1
-  score_values=[float(x.get("candidate_score",1.0)) for x in scored if not x.get("candidate_score_bypass",False)]
-  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(accepted),"roi_rejected":len(roi_rejections),"roi_rescued":roi_rescued,"roi_rejection_reasons":dict(reasons),"scored_candidates":len(scored),"score_rejected":len(score_rejections),"candidate_scoring_enabled":bool(c.get("candidate_scoring_enabled",False)),"candidate_score_avg":(sum(score_values)/len(score_values) if score_values else None),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs)}
+  score_values=[float(x.get("candidate_score",1.0)) for x in scored if not x.get("candidate_score_bypass",False)];ts=dict(getattr(self.tracker,"last_stats",{}) or {})
+  self.last_stats={"lidar_points":0 if lidar_points is None else len(lidar_points),"ground_removed_points":ground_removed,"lidar_points_after_ground":0 if clean_points is None else len(clean_points),"raw_lidar_clusters":len(raw),"geometry_clusters":len(filtered),"lidar_clusters":len(clusters),"world_geometry_candidates":len(world_clusters),"roi_candidates":len(accepted),"roi_rejected":len(roi_rejections),"roi_rescued":roi_rescued,"roi_rejection_reasons":dict(reasons),"scored_candidates":len(scored),"score_rejected":len(score_rejections),"candidate_scoring_enabled":bool(c.get("candidate_scoring_enabled",False)),"candidate_score_avg":(sum(score_values)/len(score_values) if score_values else None),"background_candidates":len(dyn),"background_rejected":max(0,len(roi)-len(dyn)),"background_ready":background_ready,"background_remaining":background_remaining,"background_cells":background_cells,"background_filter_enabled":bool(c.get("background_filter_enabled",False)),"range_adaptive_clustering":bool(c.get("range_adaptive_clustering",False)),"radar_detections":0 if not radar_detections else len(radar_detections),"radar_world_points":radar_world_count,"radar_matched_objects":radar_matched,"radar_nearest_min":min(nearest) if nearest else None,"tracked_objects":len(objs),"track_new":int(ts.get("new",0)),"track_update":int(ts.get("update",0)),"track_coast":int(ts.get("coast",0)),"track_drop":int(ts.get("drop",0))}
   return ObjectList(self.station_id,objs,timestamp=now)
