@@ -266,6 +266,19 @@ def _print_selected_admission_score_profile(report):
     _pct(item.get("precision")),_pct(item.get("truth_retention"))))
   print("    [SELECTED ADMISSION ABLATION %s] %s"%(label," | ".join(parts) if parts else "-"))
 
+def _print_selected_track_admission_profile(report):
+ if not report.get("enabled",False):return
+ for scope,label in (("frame","FRAME"),("run","RUN")):
+  values=report.get(scope,{}) or {};parts=[]
+  for key,name in (("hold","HOLD"),("confirm","CONFIRM"),
+                   ("expired","EXPIRED"),("existing_track","TRACK-BYPASS"),
+                   ("sensor","SENSOR-BYPASS")):
+   value=values.get(key,{}) or {}
+   parts.append("%s C:%d M:%d FP:%d P:%s Classes:%s"%(
+    name,value.get("candidates",0),value.get("matched",0),value.get("fp",0),
+    _pct(value.get("precision")),value.get("classes",{})))
+  print("    [SELECTED NEW-TRACK ADMISSION %s] %s"%(label," | ".join(parts)))
+
 def _adaptive_feature(profile,name):
  values=(profile or {}).get(name,{}) or {}
  return "%s/%s/%s/%s"%(_num(values.get("mean")),_num(values.get("p10")),
@@ -358,7 +371,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.22 Selected Admission Path Attribution starting...")
+ print("RoadsideStation V0.6.12.8.2.2.23 Selected New-Track Admission Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -425,6 +438,7 @@ def main():
  print("ARCH: Discovery Diagnostics observes source stages and discovery-born track lifecycle only.")
  print("ARCH: Far admission is observer-only in shadow mode; every dynamic candidate still reaches Tracker.")
  print("ARCH: Far admission uses LiDAR frame IDs; repeated reads of one frame cannot confirm a pending target.")
+ print("ARCH: Selected new-track admission is Shadow-only; first-frame holds and repeat confirmations never filter Tracker input.")
  print("ARCH: Detection Stability/Drop diagnostics remain observer/evaluation-only.")
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
@@ -436,6 +450,8 @@ def main():
    camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
    if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
+   if evaluator is not None and lidar is not None and eval_cfg.get("selected_track_admission_profiling",False):
+    evaluator.observe_selected_track_admission(fusion.last_selected_track_admission_rejections,fusion.last_selected_track_admission_candidates,fusion.last_selected_track_admission_expired_candidates,frame_id=lidar[0])
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
@@ -455,6 +471,7 @@ def main():
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     print("  [FAR TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("far_admission_shadow_mode",False) else "ENFORCE",s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0),s.get("far_admission_tracker_input",0)))
+    print("  [SELECTED NEW-TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("selected_track_admission_shadow_mode",False) else "ENFORCE",s.get("selected_track_admission_pending",0),s.get("selected_track_admission_held",0),s.get("selected_track_admission_confirmed",0),s.get("selected_track_admission_expired",0),s.get("selected_track_admission_sensor_bypass",0),s.get("selected_track_admission_track_bypass",0),s.get("selected_track_admission_tracker_input",0)))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  Geometry-aware ROI rescued: %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  Candidate score rejected: %d"%s.get("score_rejected",0))
@@ -468,6 +485,7 @@ def main():
     _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_road_object_profile(road_ga);_print_road_object_stage_attribution(road_stage);_print_road_object_cap_comparison(road_cap);_print_selected_enforcement_attribution(selected_attr);_print_selected_admission_score_profile(selected_score);_print_adaptive_temporal_profile(road_adaptive);_print_hybrid_selection_profile(road_hybrid);_print_hybrid_rescue_profile(road_rescue);_print_truth_lifecycle(truth_lifecycle);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
+    _print_selected_track_admission_profile(evaluator.report_selected_track_admission())
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
      admission_report=evaluator.report_far_admission_decisions(reset=True)
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)
@@ -482,6 +500,7 @@ def main():
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     print("  [FAR TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("far_admission_shadow_mode",False) else "ENFORCE",s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0),s.get("far_admission_tracker_input",0)))
+    print("  [SELECTED NEW-TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("selected_track_admission_shadow_mode",False) else "ENFORCE",s.get("selected_track_admission_pending",0),s.get("selected_track_admission_held",0),s.get("selected_track_admission_confirmed",0),s.get("selected_track_admission_expired",0),s.get("selected_track_admission_sensor_bypass",0),s.get("selected_track_admission_track_bypass",0),s.get("selected_track_admission_tracker_input",0)))
     if s.get("roi_rejection_reasons"):print("  [ROI REJECT] %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  [ROI RESCUED] %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  [SCORE REJECT] %d"%s.get("score_rejected",0))

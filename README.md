@@ -289,6 +289,16 @@ separate truth from false positives and that Near Rescue contains valuable
 pedestrians, so this CARLA-only attribution identifies a narrower portable
 sensor-policy target before any further enforcement.
 
+V0.6.12.8.2.2.23 profiles a Selected-only new-track temporal admission rule.
+The preceding path run found similar precision for Near/Far and Strict/Rescue,
+while Selected-created New tracks were weaker than Confirmed and Coast tracks.
+In Shadow mode, a Selected candidate without an existing track or radar support
+is marked as a first-frame hold and a spatially consistent observation on the
+next LiDAR frame is marked as confirmed. Original candidates still reach the
+Tracker unchanged. CARLA-only reports compare Hold, Confirm, Expired,
+Track-Bypass and Sensor-Bypass truth/false-positive counts and classes; runtime
+decisions consume sensor and track geometry only.
+
 ## Current scope
 
 - Fixed roadside RGB camera

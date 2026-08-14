@@ -22,6 +22,9 @@ class GroundTruthEvaluator(object):
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
         self._far_admission_totals = self._empty_admission_totals()
+        self._selected_track_admission_last_frame = None
+        self._selected_track_admission_totals = self._empty_selected_track_admission_totals()
+        self._selected_track_admission_frame = {}
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._hybrid_selection_samples = {}
@@ -58,6 +61,12 @@ class GroundTruthEvaluator(object):
         return {"frames":0,"candidates":0,"matched":0,"fp":0,
                 "truth_scores":[],"fp_scores":[],"thresholds":{}}
 
+    @staticmethod
+    def _empty_selected_track_admission_totals():
+        return {"frames": 0, "decisions": dict(
+            (name, {"candidates": 0, "matched": 0, "fp": 0, "classes": {}})
+            for name in ("hold", "confirm", "expired", "existing_track", "sensor"))}
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -68,6 +77,9 @@ class GroundTruthEvaluator(object):
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
         self._selected_enforcement_totals = self._empty_selected_enforcement_totals()
         self._selected_admission_score_totals = self._empty_selected_admission_score_totals()
+        self._selected_track_admission_last_frame = None
+        self._selected_track_admission_totals = self._empty_selected_track_admission_totals()
+        self._selected_track_admission_frame = {}
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
@@ -552,6 +564,65 @@ class GroundTruthEvaluator(object):
             value = item.get("far_track_admission_frame_gap")
             if value is not None:totals["frame_gaps"].append(float(value))
         return True
+
+    def observe_selected_track_admission(self, held_candidates, admitted_candidates,
+                                          expired_candidates, frame_id=None):
+        """Label the Selected new-track Shadow decisions inside CARLA evaluation."""
+        if not self.config.get("selected_track_admission_profiling", False):
+            return False
+        if frame_id is not None and frame_id == self._selected_track_admission_last_frame:
+            return False
+        if frame_id is None and not (held_candidates or admitted_candidates or expired_candidates):
+            return False
+        self._selected_track_admission_last_frame = frame_id
+        admitted = list(admitted_candidates or [])
+        groups = {
+            "hold": list(held_candidates or []),
+            "confirm": [x for x in admitted
+                        if x.get("selected_track_admission_reason") == "repeat"],
+            "expired": list(expired_candidates or []),
+            "existing_track": [x for x in admitted
+                               if x.get("selected_track_admission_reason") == "existing_track"],
+            "sensor": [x for x in admitted
+                       if x.get("selected_track_admission_reason") == "sensor"],
+        }
+        truth = self.truth_objects()
+        totals = self._selected_track_admission_totals
+        totals["frames"] += 1
+        frame = {}
+        for name, candidates in groups.items():
+            detected, pairs = self._admission_classification(truth, candidates)
+            classes = {}
+            for truth_index, unused_detected, unused_distance in pairs:
+                object_type = str(truth[truth_index].get(
+                    "object_type", "unknown_obstacle"))
+                classes[object_type] = int(classes.get(object_type, 0)) + 1
+            matched = len(pairs);count = len(detected);fp = max(0, count - matched)
+            frame[name] = {"candidates": count, "matched": matched, "fp": fp,
+                           "precision": (float(matched) / count if count else None),
+                           "classes": classes}
+            bucket = totals["decisions"][name]
+            bucket["candidates"] += count;bucket["matched"] += matched;bucket["fp"] += fp
+            for object_type, value in classes.items():
+                bucket["classes"][object_type] = int(
+                    bucket["classes"].get(object_type, 0)) + value
+        self._selected_track_admission_frame = frame
+        return True
+
+    def report_selected_track_admission(self):
+        if not self.config.get("selected_track_admission_profiling", False):
+            return {"enabled": False}
+        run = {}
+        for name, source in self._selected_track_admission_totals["decisions"].items():
+            item = dict(source)
+            count = int(item.get("candidates", 0))
+            item["classes"] = dict(source.get("classes", {}))
+            item["precision"] = (float(item.get("matched", 0)) / count
+                                 if count else None)
+            run[name] = item
+        return {"enabled": True,
+                "frames": int(self._selected_track_admission_totals["frames"]),
+                "frame": dict(self._selected_track_admission_frame), "run": run}
 
     def report_far_admission_decisions(self, reset=True):
         totals = self._far_admission_totals

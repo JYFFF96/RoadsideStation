@@ -104,6 +104,12 @@ class SimpleFusion(object):
         self._far_admission_pending = []
         self._far_admission_last_frame = None
         self._far_admission_sequence = 0
+        self.last_selected_track_admission_candidates = []
+        self.last_selected_track_admission_rejections = []
+        self.last_selected_track_admission_expired_candidates = []
+        self._selected_track_admission_pending = []
+        self._selected_track_admission_last_frame = None
+        self._selected_track_admission_sequence = 0
 
     def set_world_transform(self, t):
         if t is None:
@@ -576,6 +582,138 @@ class SimpleFusion(object):
         source = dynamic_items if shadow else admitted_items
         return [dict(x) for x in source]
 
+    def _selected_track_support(self, item, previous_tracks):
+        gate = float(self.config.get("selected_track_admission_track_gate",
+                                     self.config.get("track_match_distance", 4.0)))
+        best = None
+        for track in previous_tracks or []:
+            d = math.hypot(float(track.get("x", 0.0)) - float(item["x"]),
+                           float(track.get("y", 0.0)) - float(item["y"]))
+            if d <= gate and (best is None or d < best):
+                best = d
+        return best
+
+    def _gate_selected_new_tracks(self, items, previous_tracks, now, frame_id=None):
+        """Profile repeat evidence for Selected candidates that would start tracks.
+
+        Default Shadow mode computes sensor-only decisions while preserving the
+        original Tracker input.
+        """
+        if not self.config.get("selected_track_admission_enabled", False):
+            self.last_selected_track_admission_expired_candidates = []
+            return [dict(x) for x in items], [], {
+                "pending": 0, "held": 0, "confirmed": 0, "expired": 0,
+                "sensor_bypass": 0, "track_bypass": 0}
+        required = max(2, int(self.config.get(
+            "selected_track_admission_required_frames", 2)))
+        match_gate = float(self.config.get(
+            "selected_track_admission_match_gate", 2.5))
+        ttl = float(self.config.get("selected_track_admission_ttl", 0.5))
+        if frame_id is None:
+            self._selected_track_admission_sequence += 1
+            token = self._selected_track_admission_sequence
+        else:
+            token = frame_id
+        new_frame = token != self._selected_track_admission_last_frame
+        if new_frame:
+            self._selected_track_admission_last_frame = token
+
+        pending, expired = [], []
+        for old in self._selected_track_admission_pending:
+            age = max(0.0, now - float(old.get("last_time", now)))
+            if not new_frame or age <= ttl:
+                pending.append(old)
+            else:
+                item = dict(old)
+                item["selected_track_admission_reason"] = "expired"
+                item["selected_track_admission_time_gap"] = age
+                expired.append(item)
+        self._selected_track_admission_pending = pending
+        self.last_selected_track_admission_expired_candidates = expired
+
+        admitted, rejected, used = [], [], set()
+        stats = {"pending": 0, "held": 0, "confirmed": 0,
+                 "expired": len(expired), "sensor_bypass": 0,
+                 "track_bypass": 0}
+        for src in items or []:
+            item = dict(src)
+            if not item.get("road_object_selected_enforced", False):
+                admitted.append(item)
+                continue
+            if item.get("radar_radial_velocity") is not None:
+                item["selected_track_admission_reason"] = "sensor"
+                item["selected_track_admission_would_pass"] = True
+                stats["sensor_bypass"] += 1
+                admitted.append(item)
+                continue
+            best = None
+            for index, old in enumerate(self._selected_track_admission_pending):
+                if index in used:
+                    continue
+                d = math.hypot(float(old["x"]) - float(item["x"]),
+                               float(old["y"]) - float(item["y"]))
+                if d <= match_gate and (best is None or d < best[0]):
+                    best = (d, index, old)
+            if best is None:
+                track_distance = self._selected_track_support(item, previous_tracks)
+                if track_distance is not None:
+                    item["selected_track_admission_reason"] = "existing_track"
+                    item["selected_track_admission_track_distance"] = track_distance
+                    item["selected_track_admission_would_pass"] = True
+                    stats["track_bypass"] += 1
+                    admitted.append(item)
+                    continue
+                entry = dict(item)
+                entry.update({"x": float(item["x"]), "y": float(item["y"]),
+                              "z": float(item.get("z", 0.0)), "hits": 1,
+                              "last_time": now, "last_frame": token})
+                self._selected_track_admission_pending.append(entry)
+                used.add(len(self._selected_track_admission_pending) - 1)
+                hits = 1
+            else:
+                distance, index, entry = best
+                used.add(index)
+                previous_time = float(entry.get("last_time", now))
+                previous_frame = entry.get("last_frame")
+                item["selected_track_admission_match_distance"] = distance
+                item["selected_track_admission_time_gap"] = max(0.0, now - previous_time)
+                try:
+                    gap = float(token) - float(previous_frame)
+                    if gap >= 0.0:
+                        item["selected_track_admission_frame_gap"] = gap
+                except (TypeError, ValueError):
+                    pass
+                if new_frame and previous_frame != token:
+                    entry.update(item)
+                    entry["hits"] = int(entry.get("hits", 1)) + 1
+                    entry["last_time"] = now
+                    entry["last_frame"] = token
+                hits = int(entry.get("hits", 1))
+            item["selected_track_admission_hits"] = hits
+            if hits >= required:
+                item["selected_track_admission_reason"] = "repeat"
+                item["selected_track_admission_would_pass"] = True
+                stats["confirmed"] += 1
+                admitted.append(item)
+                if best is not None:
+                    self._selected_track_admission_pending[best[1]]["confirmed"] = True
+            else:
+                item["selected_track_admission_reason"] = "pending"
+                item["selected_track_admission_would_pass"] = False
+                item["reason"] = "selected_track_admission"
+                stats["held"] += 1
+                rejected.append(item)
+        self._selected_track_admission_pending = [
+            p for p in self._selected_track_admission_pending
+            if not p.get("confirmed", False)]
+        stats["pending"] = len(self._selected_track_admission_pending)
+        return admitted, rejected, stats
+
+    def _selected_admission_tracker_candidates(self, original, admitted):
+        shadow = (self.config.get("selected_track_admission_enabled", False) and
+                  self.config.get("selected_track_admission_shadow_mode", True))
+        return [dict(x) for x in (original if shadow else admitted)]
+
     def _refresh_quality_stats(self):
         qs = self.tracker.quality_stats()
         self.last_stats["track_quality_active"] = qs["active"]
@@ -714,6 +852,19 @@ class SimpleFusion(object):
                                 c.get("far_track_admission_shadow_mode", False))
         self.last_far_admission_candidates = [dict(x) for x in admitted]
         self.last_far_admission_rejections = [dict(x) for x in admission_rejections]
+        selected_admitted, selected_rejections, selected_admission_stats = \
+            self._gate_selected_new_tracks(
+                tracker_candidates, previous_tracks, now, frame_id=frame_id)
+        selected_admission_shadow = bool(
+            c.get("selected_track_admission_enabled", False) and
+            c.get("selected_track_admission_shadow_mode", True))
+        self.last_selected_track_admission_candidates = [
+            dict(x) for x in selected_admitted
+            if x.get("road_object_selected_enforced", False)]
+        self.last_selected_track_admission_rejections = [
+            dict(x) for x in selected_rejections]
+        tracker_candidates = self._selected_admission_tracker_candidates(
+            tracker_candidates, selected_admitted)
         self.last_dynamic_candidates = [dict(x) for x in tracker_candidates]
         tracked = self.tracker.update(tracker_candidates, now)
         self.last_tracked_candidates = [dict(x) for x in tracked]
@@ -807,6 +958,14 @@ class SimpleFusion(object):
             "far_admission_track_bypass": int(admission_stats.get("track_bypass", 0)),
             "far_admission_shadow_mode": admission_shadow,
             "far_admission_tracker_input": len(tracker_candidates),
+            "selected_track_admission_pending": int(selected_admission_stats.get("pending", 0)),
+            "selected_track_admission_held": int(selected_admission_stats.get("held", 0)),
+            "selected_track_admission_confirmed": int(selected_admission_stats.get("confirmed", 0)),
+            "selected_track_admission_expired": int(selected_admission_stats.get("expired", 0)),
+            "selected_track_admission_sensor_bypass": int(selected_admission_stats.get("sensor_bypass", 0)),
+            "selected_track_admission_track_bypass": int(selected_admission_stats.get("track_bypass", 0)),
+            "selected_track_admission_shadow_mode": selected_admission_shadow,
+            "selected_track_admission_tracker_input": len(tracker_candidates),
             "range_adaptive_clustering": bool(c.get("range_adaptive_clustering", False)),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "radar_world_points": radar_world_count, "radar_matched_objects": radar_matched,

@@ -148,6 +148,14 @@ fusion:
   # V0.6.12.8.2.2.21: safest observed gate retained 75/75 truth samples.
   road_object_selected_admission_score_enforcing: true
   road_object_selected_admission_score_threshold: 0.20
+  # V0.6.12.8.2.2.23: profile a two-frame gate only for Selected candidates
+  # that have neither an existing track nor independent radar evidence.
+  selected_track_admission_enabled: true
+  selected_track_admission_shadow_mode: true
+  selected_track_admission_required_frames: 2
+  selected_track_admission_match_gate: 2.5
+  selected_track_admission_track_gate: 4.0
+  selected_track_admission_ttl: 0.5
 
   range_adaptive_clustering: true
   range_bands:
@@ -408,6 +416,7 @@ evaluation:
   # V0.6.12.8.2.2.20: compare selected score gates without filtering runtime.
   selected_admission_score_profiling: true
   selected_admission_score_thresholds: [0.20, 0.25, 0.30, 0.35, 0.40, 0.45]
+  selected_track_admission_profiling: true
   # V0.6.12.8.2.2.14: parallel Shadow gates; no candidate is filtered.
   road_object_rescue_near_area_ablations: [0.02, 0.04, 0.06, 0.08]
   road_object_rescue_far_range_ablations: [26.0, 28.0, 30.0, 32.0]
