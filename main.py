@@ -59,6 +59,11 @@ def _print_detection_drop(dd):
  for b in dd.get("range_bins",[]):
   print("    [%02.0f-%02.0fm] Truth:%d Pass:%d NoGeometry:%d ROIReject:%d ScoreReject:%d DynamicDrop:%d"%(b.get("min_range",0.0),b.get("max_range",0.0),b.get("truth",0),b.get("pass",0),b.get("no_geometry_candidate",0),b.get("roi_reject",0)+b.get("roi_lost",0),b.get("score_reject",0)+b.get("score_lost",0),b.get("dynamic_drop",0)))
 
+def _print_far_admission_eval(a):
+ print("  [FAR ADMISSION EVAL] Frames:%d WouldHold:%d WouldHoldTruth:%d WouldHoldFP:%d WouldConfirm:%d WouldConfirmTruth:%d WouldConfirmFP:%d Expired:%d ExpiredTruth:%d ExpiredFP:%d"%(a.get("frames",0),a.get("would_hold",0),a.get("would_hold_truth",0),a.get("would_hold_fp",0),a.get("would_confirm",0),a.get("would_confirm_truth",0),a.get("would_confirm_fp",0),a.get("expired",0),a.get("expired_truth",0),a.get("expired_fp",0)))
+ jump=a.get("candidate_jump",{});gap=a.get("time_gap",{});frames=a.get("frame_gap",{})
+ print("  [FAR ADMISSION MOTION] Samples:%d Jump(avg/p50/p90/max):%s/%s/%s/%sm TimeGap(avg/p90/max):%s/%s/%ss FrameGap(avg/p90/max):%s/%s/%s"%(jump.get("samples",0),_num(jump.get("mean")),_num(jump.get("p50")),_num(jump.get("p90")),_num(jump.get("max")),_num(gap.get("mean")),_num(gap.get("p90")),_num(gap.get("max")),_num(frames.get("mean")),_num(frames.get("p90")),_num(frames.get("max"))))
+
 def _print_sparse_geometry(s):
  print("  [SPARSE GEOMETRY] Built:%d ROI:%d Score:%d Dynamic:%d"%(s.get("sparse_rescue_candidates",0),s.get("sparse_rescue_roi",0),s.get("sparse_rescue_score",0),s.get("sparse_rescue_dynamic",0)))
 
@@ -81,7 +86,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.7.1 Far Admission Shadow Mode starting...")
+ print("RoadsideStation V0.6.12.7.2 Far Admission Decision Evaluation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -112,6 +117,7 @@ def main():
  print("Track Quality: %s | high>=%.2f medium>=%.2f | medium_coast<=%d low_coast<=%d | low coast requires hits>=%d | camera=+%.2f radar=+%.2f memory=%.1fs penalty=%.2f/miss"%("enabled" if fc.get("track_quality_enabled",True) else "disabled",float(fc.get("track_quality_high",.72)),float(fc.get("track_quality_medium",.50)),int(fc.get("track_quality_medium_coast_frames",2)),int(fc.get("track_quality_low_coast_frames",0)),int(fc.get("track_quality_low_min_hits_for_coast",3)),float(fc.get("track_quality_camera_bonus",.12)),float(fc.get("track_quality_radar_bonus",.08)),float(fc.get("track_quality_sensor_memory",1.5)),float(fc.get("track_quality_coast_penalty",.10))))
  print("Detection Stability diagnostics: observer-only | match<=%.1fm missed<=%d fragmentation<=%.1fm"%(detdiag.match_distance,detdiag.max_missed_frames,detdiag.fragmentation_distance))
  print("Detection Drop diagnostics: evaluation-only | Geometry -> ROI -> Score -> Dynamic | never feeds perception/fusion")
+ print("Far Admission Decision diagnostics: evaluation-only | truth labels never feed admission/tracking/fusion")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
@@ -140,6 +146,8 @@ def main():
  try:
   while not _STOP_REQUESTED:
    camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
+   if evaluator is not None and lidar is not None and eval_cfg.get("far_admission_decision_diagnostics",False):
+    evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
@@ -167,6 +175,7 @@ def main():
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_detection_drop(dd)
+    if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(evaluator.report_far_admission_decisions(reset=True))
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))

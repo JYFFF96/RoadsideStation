@@ -291,6 +291,8 @@ evaluation:
   match_distance: 4.0
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   report_interval: 2.0
+  # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.
+  far_admission_decision_diagnostics: true
   roi_false_reject_diagnostics: true
   roi_false_reject_min_range: 30.0
   roi_false_reject_max_range: 50.0

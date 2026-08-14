@@ -18,6 +18,8 @@ class GroundTruthEvaluator(object):
         self.match_distance = float(self.config.get("match_distance", 4.0))
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
+        self._far_admission_last_frame = None
+        self._far_admission_totals = self._empty_admission_totals()
 
     def _parse_bins(self, values):
         bins = []
@@ -84,6 +86,90 @@ class GroundTruthEvaluator(object):
         truth=self.truth_vehicles();detected=self._detected_with_range(detected_candidates);pairs=self._match(truth,detected);metrics=self._metrics(len(truth),len(detected),pairs)
         metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected)})
         return metrics
+
+    @staticmethod
+    def _empty_admission_totals():
+        return {
+            "frames": 0,
+            "would_hold": 0, "would_hold_truth": 0, "would_hold_fp": 0,
+            "would_confirm": 0, "would_confirm_truth": 0, "would_confirm_fp": 0,
+            "expired": 0, "expired_truth": 0, "expired_fp": 0,
+            "match_distances": [], "time_gaps": [], "frame_gaps": [],
+        }
+
+    @staticmethod
+    def _percentile(values, fraction):
+        ordered = sorted(float(x) for x in values)
+        if not ordered:return None
+        if len(ordered) == 1:return ordered[0]
+        position = max(0.0, min(1.0, float(fraction))) * (len(ordered) - 1)
+        lower = int(math.floor(position));upper = int(math.ceil(position))
+        if lower == upper:return ordered[lower]
+        weight = position - lower
+        return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+    @classmethod
+    def _distribution(cls, values):
+        clean = [float(x) for x in values if x is not None]
+        return {
+            "samples": len(clean),
+            "mean": (sum(clean) / len(clean)) if clean else None,
+            "p50": cls._percentile(clean, 0.50),
+            "p90": cls._percentile(clean, 0.90),
+            "max": max(clean) if clean else None,
+        }
+
+    def _admission_classification(self, truth, candidates):
+        detected = self._detected_with_range(candidates)
+        pairs = self._match(truth, detected)
+        matched = len(pairs)
+        return len(detected), matched, max(0, len(detected) - matched)
+
+    def observe_far_admission_decisions(self, held_candidates, admitted_candidates,
+                                        expired_candidates, frame_id=None):
+        """Accumulate admission labels once per real LiDAR frame for evaluation only.
+
+        CARLA truth is consumed exclusively inside this evaluator. The returned
+        labels are never passed to Fusion, Tracker, admission state or ObjectList.
+        """
+        if frame_id is not None and frame_id == self._far_admission_last_frame:
+            return False
+        if frame_id is None and not (held_candidates or admitted_candidates or expired_candidates):
+            return False
+        self._far_admission_last_frame = frame_id
+        held = list(held_candidates or [])
+        confirmed = [x for x in (admitted_candidates or [])
+                     if x.get("far_track_admission_reason") == "repeat"]
+        expired = list(expired_candidates or [])
+        truth = self.truth_vehicles()
+        totals = self._far_admission_totals
+        totals["frames"] += 1
+        for name, candidates in (("would_hold", held),
+                                 ("would_confirm", confirmed),
+                                 ("expired", expired)):
+            count, matched, false_positive = self._admission_classification(
+                truth, candidates)
+            totals[name] += count
+            totals[name + "_truth"] += matched
+            totals[name + "_fp"] += false_positive
+        for item in held + confirmed:
+            value = item.get("far_track_admission_match_distance")
+            if value is not None:totals["match_distances"].append(float(value))
+            value = item.get("far_track_admission_time_gap")
+            if value is not None:totals["time_gaps"].append(float(value))
+            value = item.get("far_track_admission_frame_gap")
+            if value is not None:totals["frame_gaps"].append(float(value))
+        return True
+
+    def report_far_admission_decisions(self, reset=True):
+        totals = self._far_admission_totals
+        result = dict((k, v) for k, v in totals.items()
+                      if k not in ("match_distances", "time_gaps", "frame_gaps"))
+        result["candidate_jump"] = self._distribution(totals["match_distances"])
+        result["time_gap"] = self._distribution(totals["time_gaps"])
+        result["frame_gap"] = self._distribution(totals["frame_gaps"])
+        if reset:self._far_admission_totals = self._empty_admission_totals()
+        return result
 
     def _has_match(self, gt, candidates):
         for det in candidates or []:

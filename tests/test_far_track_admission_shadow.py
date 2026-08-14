@@ -57,6 +57,22 @@ class FarTrackAdmissionShadowTest(unittest.TestCase):
         self.assertEqual(1, len(admitted))
         self.assertEqual([], rejected)
         self.assertEqual(1, stats["confirmed"])
+        self.assertAlmostEqual(0.0, admitted[0]["far_track_admission_match_distance"])
+        self.assertAlmostEqual(0.2, admitted[0]["far_track_admission_time_gap"])
+        self.assertAlmostEqual(1.0, admitted[0]["far_track_admission_frame_gap"])
+
+    def test_pending_expires_only_on_a_new_lidar_frame(self):
+        fusion = self._fusion(True)
+        dynamic = [self._weak_far_candidate()]
+        fusion._gate_far_new_tracks(dynamic, [], 10.0, frame_id=100)
+
+        _, _, stats = fusion._gate_far_new_tracks([], [], 10.6, frame_id=100)
+        self.assertEqual(0, stats["expired"])
+        self.assertEqual(1, stats["pending"])
+
+        _, _, stats = fusion._gate_far_new_tracks([], [], 10.7, frame_id=101)
+        self.assertEqual(1, stats["expired"])
+        self.assertEqual(1, len(fusion.last_far_admission_expired_candidates))
 
 
 if __name__ == "__main__":

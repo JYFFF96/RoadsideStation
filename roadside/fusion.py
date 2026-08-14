@@ -97,6 +97,7 @@ class SimpleFusion(object):
         self.last_recovery_quality_rejections = []
         self.last_far_admission_candidates = []
         self.last_far_admission_rejections = []
+        self.last_far_admission_expired_candidates = []
         self._far_admission_pending = []
         self._far_admission_last_frame = None
         self._far_admission_sequence = 0
@@ -397,6 +398,7 @@ class SimpleFusion(object):
     def _gate_far_new_tracks(self, items, previous_tracks, now, frame_id=None):
         """Require repeat evidence before a far pure-LiDAR candidate reaches Tracker."""
         if not self.config.get("far_track_admission_enabled", True):
+            self.last_far_admission_expired_candidates = []
             return [dict(x) for x in items], [], {
                 "pending": 0, "held": 0, "confirmed": 0, "expired": 0,
                 "sensor_bypass": 0, "strong_bypass": 0, "track_bypass": 0}
@@ -416,18 +418,23 @@ class SimpleFusion(object):
         if new_frame:
             self._far_admission_last_frame = token
 
-        expired = 0
+        expired_items = []
         pending = []
         for p in self._far_admission_pending:
-            if now - float(p.get("last_time", now)) <= ttl:
+            age = max(0.0, now - float(p.get("last_time", now)))
+            if not new_frame or age <= ttl:
                 pending.append(p)
-            elif new_frame:
-                expired += 1
+            else:
+                item = dict(p)
+                item["far_track_admission_reason"] = "expired"
+                item["far_track_admission_time_gap"] = age
+                expired_items.append(item)
         self._far_admission_pending = pending
+        self.last_far_admission_expired_candidates = expired_items
 
         kept, rejected, used = [], [], set()
         stats = {"pending": 0, "held": 0, "confirmed": 0,
-                 "expired": expired, "sensor_bypass": 0,
+                 "expired": len(expired_items), "sensor_bypass": 0,
                  "strong_bypass": 0, "track_bypass": 0}
         for src in items or []:
             item = dict(src)
@@ -473,8 +480,18 @@ class SimpleFusion(object):
                 used.add(len(self._far_admission_pending) - 1)
                 hits = 1
             else:
-                _, index, entry = best
+                match_distance, index, entry = best
                 used.add(index)
+                previous_time = float(entry.get("last_time", now))
+                previous_frame = entry.get("last_frame")
+                item["far_track_admission_match_distance"] = float(match_distance)
+                item["far_track_admission_time_gap"] = max(0.0, now - previous_time)
+                try:
+                    frame_gap = float(token) - float(previous_frame)
+                    if frame_gap >= 0.0:
+                        item["far_track_admission_frame_gap"] = frame_gap
+                except (TypeError, ValueError):
+                    pass
                 if new_frame and entry.get("last_frame") != token:
                     entry["hits"] = int(entry.get("hits", 1)) + 1
                     entry["x"] = float(item["x"])
