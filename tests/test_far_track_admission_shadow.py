@@ -73,6 +73,9 @@ class FarTrackAdmissionShadowTest(unittest.TestCase):
         _, _, stats = fusion._gate_far_new_tracks([], [], 10.7, frame_id=101)
         self.assertEqual(1, stats["expired"])
         self.assertEqual(1, len(fusion.last_far_admission_expired_candidates))
+        self.assertAlmostEqual(
+            0.50,
+            fusion.last_far_admission_expired_candidates[0]["candidate_score"])
 
 
 if __name__ == "__main__":

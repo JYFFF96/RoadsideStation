@@ -44,8 +44,15 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
         evaluator = self._evaluator()
         held = [
             {"x": 61.0, "y": 0.0, "far_track_admission_match_distance": 1.2,
-             "far_track_admission_time_gap": 0.1, "far_track_admission_frame_gap": 1},
-            {"x": 70.0, "y": 8.0},
+             "far_track_admission_time_gap": 0.1, "far_track_admission_frame_gap": 1,
+             "candidate_score": 0.60, "point_count": 8,
+             "extent": [4.0, 1.8, 1.5], "cluster_mode": "far_geometry_builder",
+             "far_geometry_recovered": True,
+             "roi_details": {"lateral": 2.0, "allowed_lateral": 4.0}},
+            {"x": 70.0, "y": 8.0, "candidate_score": 0.40,
+             "point_count": 3, "extent": [1.0, 0.2, 0.4],
+             "cluster_mode": "bev_multiscale",
+             "roi_details": {"lateral": 3.6, "allowed_lateral": 4.0}},
         ]
         confirmed = [{"x": 59.5, "y": 0.0,
                       "far_track_admission_reason": "repeat",
@@ -61,6 +68,14 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
         self.assertEqual(1, report["would_confirm_truth"])
         self.assertEqual(2, report["candidate_jump"]["samples"])
         self.assertAlmostEqual(1.0, report["candidate_jump"]["mean"])
+        profile = report["feature_profiles"]["would_hold"]
+        self.assertEqual(1, profile["truth"]["count"])
+        self.assertEqual(1, profile["fp"]["count"])
+        self.assertAlmostEqual(0.60, profile["truth"]["scores"]["mean"])
+        self.assertAlmostEqual(0.40, profile["fp"]["scores"]["mean"])
+        self.assertEqual(1, profile["truth"]["recovery"])
+        self.assertEqual({"far_geometry_builder": 1},
+                         profile["truth"]["cluster_modes"])
 
     def test_same_lidar_frame_is_counted_once(self):
         evaluator = self._evaluator()
@@ -76,12 +91,18 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
     def test_expired_truth_is_evaluation_only(self):
         evaluator = self._evaluator()
         expired = [{"x": 60.5, "y": 0.0,
-                    "far_track_admission_reason": "expired"}]
+                    "far_track_admission_reason": "expired",
+                    "candidate_score": 0.35, "point_count": 3,
+                    "extent": [1.2, 0.3, 0.5],
+                    "cluster_mode": "bev_multiscale"}]
         evaluator.observe_far_admission_decisions([], [], expired, frame_id=30)
         report = evaluator.report_far_admission_decisions()
         self.assertEqual(1, report["expired"])
         self.assertEqual(1, report["expired_truth"])
         self.assertEqual(0, report["expired_fp"])
+        profile = report["feature_profiles"]["expired"]["truth"]
+        self.assertAlmostEqual(0.35, profile["scores"]["mean"])
+        self.assertEqual({"bev_multiscale": 1}, profile["cluster_modes"])
 
 
 if __name__ == "__main__":

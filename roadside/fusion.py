@@ -473,9 +473,10 @@ class SimpleFusion(object):
                 if d <= match_gate and (best is None or d < best[0]):
                     best = (d, index, old)
             if best is None:
-                entry = {"x": float(item["x"]), "y": float(item["y"]),
-                         "z": float(item.get("z", 0.0)), "hits": 1,
-                         "last_time": now, "last_frame": token}
+                entry = dict(item)
+                entry.update({"x": float(item["x"]), "y": float(item["y"]),
+                              "z": float(item.get("z", 0.0)), "hits": 1,
+                              "last_time": now, "last_frame": token})
                 self._far_admission_pending.append(entry)
                 used.add(len(self._far_admission_pending) - 1)
                 hits = 1
@@ -493,7 +494,9 @@ class SimpleFusion(object):
                 except (TypeError, ValueError):
                     pass
                 if new_frame and entry.get("last_frame") != token:
-                    entry["hits"] = int(entry.get("hits", 1)) + 1
+                    next_hits = int(entry.get("hits", 1)) + 1
+                    entry.update(item)
+                    entry["hits"] = next_hits
                     entry["x"] = float(item["x"])
                     entry["y"] = float(item["y"])
                     entry["z"] = float(item.get("z", 0.0))

@@ -89,12 +89,24 @@ class GroundTruthEvaluator(object):
 
     @staticmethod
     def _empty_admission_totals():
+        def feature_bucket():
+            return {
+                "count": 0,
+                "scores": [], "points": [], "ranges": [], "edge_ratios": [],
+                "lengths": [], "widths": [], "heights": [],
+                "recovery": 0, "sparse": 0, "temporal": 0,
+                "far_builder": 0, "score_bypass": 0, "radar": 0,
+                "cluster_modes": {},
+            }
         return {
             "frames": 0,
             "would_hold": 0, "would_hold_truth": 0, "would_hold_fp": 0,
             "would_confirm": 0, "would_confirm_truth": 0, "would_confirm_fp": 0,
             "expired": 0, "expired_truth": 0, "expired_fp": 0,
             "match_distances": [], "time_gaps": [], "frame_gaps": [],
+            "profiles": dict((decision, {
+                "truth": feature_bucket(), "fp": feature_bucket()})
+                for decision in ("would_hold", "would_confirm", "expired")),
         }
 
     @staticmethod
@@ -122,8 +134,55 @@ class GroundTruthEvaluator(object):
     def _admission_classification(self, truth, candidates):
         detected = self._detected_with_range(candidates)
         pairs = self._match(truth, detected)
-        matched = len(pairs)
-        return len(detected), matched, max(0, len(detected) - matched)
+        return detected, pairs
+
+    @staticmethod
+    def _append_feature(bucket, name, value):
+        if value is None:return
+        try:bucket[name].append(float(value))
+        except (TypeError, ValueError):pass
+
+    def _record_admission_features(self, bucket, item):
+        bucket["count"] += 1
+        self._append_feature(bucket, "scores", item.get("candidate_score"))
+        self._append_feature(bucket, "points", item.get(
+            "current_point_count", item.get("point_count")))
+        self._append_feature(bucket, "ranges", item.get("range"))
+        extent = list(item.get("extent", [None, None, None]) or [None, None, None])
+        while len(extent) < 3:extent.append(None)
+        self._append_feature(bucket, "lengths", extent[0])
+        self._append_feature(bucket, "widths", extent[1])
+        self._append_feature(bucket, "heights", extent[2])
+        details = item.get("roi_details", {}) or item.get("details", {}) or {}
+        lateral = details.get("lateral");allowed = details.get("allowed_lateral")
+        try:
+            if lateral is not None and float(allowed) > 0.0:
+                self._append_feature(bucket, "edge_ratios",
+                                     abs(float(lateral)) / float(allowed))
+        except (TypeError, ValueError):pass
+        flags = {
+            "recovery": bool(item.get("far_geometry_recovered", False)),
+            "sparse": bool(item.get("sparse_rescued", False)),
+            "temporal": bool(item.get("far_geometry_temporal_supported", False)),
+            "far_builder": str(item.get("cluster_mode", "")) == "far_geometry_builder",
+            "score_bypass": bool(item.get("candidate_score_bypass", False)),
+            "radar": item.get("radar_radial_velocity") is not None,
+        }
+        for name, enabled in flags.items():
+            if enabled:bucket[name] += 1
+        mode = str(item.get("cluster_mode", "unknown"))
+        bucket["cluster_modes"][mode] = int(bucket["cluster_modes"].get(mode, 0)) + 1
+
+    def _summarize_feature_bucket(self, bucket):
+        result = {"count": int(bucket.get("count", 0))}
+        for source in ("recovery", "sparse", "temporal", "far_builder",
+                       "score_bypass", "radar"):
+            result[source] = int(bucket.get(source, 0))
+        result["cluster_modes"] = dict(bucket.get("cluster_modes", {}))
+        for name in ("scores", "points", "ranges", "edge_ratios",
+                     "lengths", "widths", "heights"):
+            result[name] = self._distribution(bucket.get(name, []))
+        return result
 
     def observe_far_admission_decisions(self, held_candidates, admitted_candidates,
                                         expired_candidates, frame_id=None):
@@ -147,11 +206,17 @@ class GroundTruthEvaluator(object):
         for name, candidates in (("would_hold", held),
                                  ("would_confirm", confirmed),
                                  ("expired", expired)):
-            count, matched, false_positive = self._admission_classification(
-                truth, candidates)
+            detected, pairs = self._admission_classification(truth, candidates)
+            matched_indices = set(pair[1] for pair in pairs)
+            count = len(detected);matched = len(matched_indices)
+            false_positive = max(0, count - matched)
             totals[name] += count
             totals[name + "_truth"] += matched
             totals[name + "_fp"] += false_positive
+            profile = totals["profiles"][name]
+            for index, item in enumerate(detected):
+                label = "truth" if index in matched_indices else "fp"
+                self._record_admission_features(profile[label], item)
         for item in held + confirmed:
             value = item.get("far_track_admission_match_distance")
             if value is not None:totals["match_distances"].append(float(value))
@@ -164,10 +229,15 @@ class GroundTruthEvaluator(object):
     def report_far_admission_decisions(self, reset=True):
         totals = self._far_admission_totals
         result = dict((k, v) for k, v in totals.items()
-                      if k not in ("match_distances", "time_gaps", "frame_gaps"))
+                      if k not in ("match_distances", "time_gaps", "frame_gaps",
+                                   "profiles"))
         result["candidate_jump"] = self._distribution(totals["match_distances"])
         result["time_gap"] = self._distribution(totals["time_gaps"])
         result["frame_gap"] = self._distribution(totals["frame_gaps"])
+        result["feature_profiles"] = dict((decision, dict(
+            (label, self._summarize_feature_bucket(bucket))
+            for label, bucket in labels.items()))
+            for decision, labels in totals["profiles"].items())
         if reset:self._far_admission_totals = self._empty_admission_totals()
         return result
 

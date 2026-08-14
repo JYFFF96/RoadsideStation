@@ -1,8 +1,8 @@
-__version__ = "0.6.12.7.2"
+__version__ = "0.6.12.7.3"
 
 from .track_stale_cleanup import install_stale_cleanup_patch
 from .far_geometry_stability import install_far_geometry_stability_patch
 
 install_stale_cleanup_patch()
 install_far_geometry_stability_patch()
-print("RoadsideStation V0.6.12.7.2 Far Admission Decision Evaluation active")
+print("RoadsideStation V0.6.12.7.3 Far Admission Feature Profiling active")

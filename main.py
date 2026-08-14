@@ -64,6 +64,14 @@ def _print_far_admission_eval(a):
  jump=a.get("candidate_jump",{});gap=a.get("time_gap",{});frames=a.get("frame_gap",{})
  print("  [FAR ADMISSION MOTION] Samples:%d Jump(avg/p50/p90/max):%s/%s/%s/%sm TimeGap(avg/p90/max):%s/%s/%ss FrameGap(avg/p90/max):%s/%s/%s"%(jump.get("samples",0),_num(jump.get("mean")),_num(jump.get("p50")),_num(jump.get("p90")),_num(jump.get("max")),_num(gap.get("mean")),_num(gap.get("p90")),_num(gap.get("max")),_num(frames.get("mean")),_num(frames.get("p90")),_num(frames.get("max"))))
 
+def _profile_stat(bucket,name,field="mean"):
+ return _num((bucket.get(name,{}) or {}).get(field))
+
+def _print_far_admission_profile(name,profile):
+ truth=profile.get("truth",{}) or {};fp=profile.get("fp",{}) or {};label=name.upper()
+ print("  [FAR ADMISSION PROFILE %s] Truth:%d FP:%d Score(avg/p50 T/F):%s/%s/%s/%s Points(avg/p90 T/F):%s/%s/%s/%s Range(avg T/F):%s/%sm Edge(avg T/F):%s/%s"%(label,truth.get("count",0),fp.get("count",0),_profile_stat(truth,"scores"),_profile_stat(truth,"scores","p50"),_profile_stat(fp,"scores"),_profile_stat(fp,"scores","p50"),_profile_stat(truth,"points"),_profile_stat(truth,"points","p90"),_profile_stat(fp,"points"),_profile_stat(fp,"points","p90"),_profile_stat(truth,"ranges"),_profile_stat(fp,"ranges"),_profile_stat(truth,"edge_ratios"),_profile_stat(fp,"edge_ratios")))
+ print("  [FAR ADMISSION SOURCE %s] SizeLWH(avg T/F):%s/%s,%s/%s,%s/%s Recovery:%d/%d Sparse:%d/%d Temporal:%d/%d FarBuilder:%d/%d ScoreBypass:%d/%d Radar:%d/%d ModesT:%s ModesF:%s"%(label,_profile_stat(truth,"lengths"),_profile_stat(fp,"lengths"),_profile_stat(truth,"widths"),_profile_stat(fp,"widths"),_profile_stat(truth,"heights"),_profile_stat(fp,"heights"),truth.get("recovery",0),fp.get("recovery",0),truth.get("sparse",0),fp.get("sparse",0),truth.get("temporal",0),fp.get("temporal",0),truth.get("far_builder",0),fp.get("far_builder",0),truth.get("score_bypass",0),fp.get("score_bypass",0),truth.get("radar",0),fp.get("radar",0),truth.get("cluster_modes",{}),fp.get("cluster_modes",{})))
+
 def _print_sparse_geometry(s):
  print("  [SPARSE GEOMETRY] Built:%d ROI:%d Score:%d Dynamic:%d"%(s.get("sparse_rescue_candidates",0),s.get("sparse_rescue_roi",0),s.get("sparse_rescue_score",0),s.get("sparse_rescue_dynamic",0)))
 
@@ -86,7 +94,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.7.2 Far Admission Decision Evaluation starting...")
+ print("RoadsideStation V0.6.12.7.3 Far Admission Feature Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{})
  if fc.get("ground_removal_enabled",True):
@@ -118,6 +126,7 @@ def main():
  print("Detection Stability diagnostics: observer-only | match<=%.1fm missed<=%d fragmentation<=%.1fm"%(detdiag.match_distance,detdiag.max_missed_frames,detdiag.fragmentation_distance))
  print("Detection Drop diagnostics: evaluation-only | Geometry -> ROI -> Score -> Dynamic | never feeds perception/fusion")
  print("Far Admission Decision diagnostics: evaluation-only | truth labels never feed admission/tracking/fusion")
+ print("Far Admission Feature Profiling: evaluation-only | score/points/range/shape/source truth-vs-FP")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
@@ -146,7 +155,7 @@ def main():
  try:
   while not _STOP_REQUESTED:
    camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
-   if evaluator is not None and lidar is not None and eval_cfg.get("far_admission_decision_diagnostics",False):
+   if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
@@ -175,7 +184,12 @@ def main():
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_detection_drop(dd)
-    if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(evaluator.report_far_admission_decisions(reset=True))
+    if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False):
+     admission_report=evaluator.report_far_admission_decisions(reset=True)
+     if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)
+     if eval_cfg.get("far_admission_feature_profiling",False):
+      profiles=admission_report.get("feature_profiles",{})
+      _print_far_admission_profile("hold",profiles.get("would_hold",{}));_print_far_admission_profile("confirm",profiles.get("would_confirm",{}));_print_far_admission_profile("expired",profiles.get("expired",{}))
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
