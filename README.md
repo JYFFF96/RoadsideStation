@@ -125,6 +125,12 @@ matches, gate keeps and point/height/range rejection counts. Point thresholds
 8, 9 and 10 are evaluated in parallel so the next enforcing version can select
 a threshold using measured object coverage instead of aggregate samples alone.
 
+V0.6.12.8.2.2.2 attributes every tagged obstacle across the low-slice raw
+support, connected-component, shape, temporal, deduplication and output-cap
+stages. Per-actor and 5-25m/25-35m/35-45m summaries remain evaluation-only and
+show whether a missed object lacks LiDAR support or is rejected later in the
+recovery pipeline. No recovery threshold or production output is changed.
+
 ## Current scope
 
 - Fixed roadside RGB camera

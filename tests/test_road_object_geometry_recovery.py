@@ -43,6 +43,19 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual([],recovery.update(self._points(),existing,.30,config))
         self.assertEqual(1,recovery.last_stats["dedupe"])
 
+    def test_stage_diagnostics_distinguish_candidate_cap(self):
+        recovery=RoadObjectGeometryRecovery();config=self._config();config.update({
+            "road_object_recovery_temporal_frames":1,"road_object_recovery_max_candidates":1})
+        points=[[5.00,0.00,.10],[5.18,.08,.35],[5.28,.14,.62],
+                [10.00,0.00,.10],[10.20,.10,.35]]
+        out=recovery.update(points,[],.30,config,frame_id=1)
+        self.assertEqual(1,len(out))
+        self.assertEqual(2,len(recovery.last_stage_outputs["shape"]))
+        self.assertEqual(2,len(recovery.last_stage_outputs["temporal"]))
+        self.assertEqual(2,len(recovery.last_stage_outputs["dedupe_pass"]))
+        self.assertEqual(1,len(recovery.last_stage_outputs["output"]))
+        self.assertEqual(1,recovery.last_stats["cap_reject"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -61,6 +74,9 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
                              for x in fusion.last_geometry_world))
         self.assertFalse(any(x.get("cluster_mode")=="road_object_low"
                              for x in fusion.last_dynamic_candidates))
+        diagnostics=fusion.road_object_recovery_diagnostics_world()
+        self.assertEqual(3,len(diagnostics["input_points"]))
+        self.assertEqual(1,len(diagnostics["stages"]["output"]))
 
     def test_precision_profile_uses_percentiles_and_normalized_sides(self):
         items=[{"point_count":5,"extent":[.8,.2,.1],"range":10.0},
@@ -111,6 +127,27 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(1,failures["points"])
         self.assertEqual(1,failures["height"])
         self.assertEqual(1,failures["range"])
+
+    def test_range_stage_attribution_profiles_raw_to_output(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_raw_support_radius":1.5,"road_object_stage_match_distance":2.0,
+            "road_object_recovery_min_range":5.0,"road_object_stage_range_bins":[25,35,45]})
+        truth=[{"actor_id":1,"type_id":"static.prop.box02","role":"rsu_test_obstacle",
+                "object_type":"unknown_obstacle","x":10.0,"y":0.0,"range":10.0},
+               {"actor_id":2,"type_id":"static.prop.trashcan03","role":"rsu_test_obstacle",
+                "object_type":"unknown_obstacle","x":30.0,"y":0.0,"range":30.0}]
+        evaluator.truth_objects=lambda:truth
+        near={"x":10.1,"y":0.0,"z":0.1};far={"x":30.1,"y":0.0,"z":0.1}
+        report=evaluator.analyze_road_object_recovery_stages({
+            "input_points":[near,far],"stages":{"component":[near],"shape":[near],
+            "temporal":[near],"dedupe_pass":[near],"output":[near]}})
+        actors=report["actors"]
+        self.assertEqual(1,actors[0]["raw_frames"])
+        self.assertEqual(1,actors[0]["stage_frames"]["output"])
+        self.assertEqual(1,actors[1]["raw_frames"])
+        self.assertEqual(0,actors[1]["stage_frames"]["component"])
+        self.assertEqual(1,report["range_bands"][0]["output"])
+        self.assertEqual(0,report["range_bands"][1]["output"])
 
 
 if __name__=="__main__":unittest.main()

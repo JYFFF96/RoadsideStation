@@ -24,6 +24,7 @@ class GroundTruthEvaluator(object):
         self._far_admission_totals = self._empty_admission_totals()
         self._road_object_samples = {"classes": {}, "false": []}
         self._road_object_actor_coverage = {}
+        self._road_object_stage_coverage = {}
 
     def _parse_bins(self, values):
         bins = []
@@ -470,6 +471,51 @@ class GroundTruthEvaluator(object):
             for name in failures:bucket["gate_failures"][name]=bucket["gate_failures"].get(name,0)+1
             for value in thresholds:
                 if self._road_object_gate_pass(candidate,value):bucket["ablation_kept"][str(value)]+=1
+
+    @staticmethod
+    def _candidate_distance(gt, item):
+        return math.hypot(float(item.get("x",0.0))-float(gt.get("x",0.0)),
+                          float(item.get("y",0.0))-float(gt.get("y",0.0)))
+
+    def analyze_road_object_recovery_stages(self, diagnostics):
+        """Attribute low-slice support and every recovery stage to tagged actors."""
+        truth=self.truth_objects();raw=(diagnostics or {}).get("input_points",[]) or []
+        stages=(diagnostics or {}).get("stages",{}) or {};support_radius=float(self.config.get("road_object_raw_support_radius",1.50))
+        stage_gate=float(self.config.get("road_object_stage_match_distance",2.00))
+        stage_names=("component","shape","temporal","dedupe_pass","output")
+        for gt in truth:
+            if gt.get("object_type")!="unknown_obstacle" or gt.get("role")!="rsu_test_obstacle":continue
+            actor_id=int(gt.get("actor_id",0));bucket=self._road_object_stage_coverage.setdefault(actor_id,{
+                "actor_id":actor_id,"type_id":gt.get("type_id","unknown"),"visible_frames":0,
+                "range_min":None,"range_max":None,"raw_frames":0,"raw_points_total":0,
+                "raw_points_max":0,"stage_frames":dict((name,0) for name in stage_names)})
+            distance=float(gt.get("range",0.0));bucket["visible_frames"]+=1
+            bucket["range_min"]=distance if bucket["range_min"] is None else min(bucket["range_min"],distance)
+            bucket["range_max"]=distance if bucket["range_max"] is None else max(bucket["range_max"],distance)
+            point_count=sum(1 for point in raw if self._candidate_distance(gt,point)<=support_radius)
+            bucket["raw_points_total"]+=point_count;bucket["raw_points_max"]=max(bucket["raw_points_max"],point_count)
+            if point_count>0:bucket["raw_frames"]+=1
+            for name in stage_names:
+                if any(self._candidate_distance(gt,item)<=stage_gate for item in stages.get(name,[]) or []):
+                    bucket["stage_frames"][name]+=1
+        actors=[dict(item) for _,item in sorted(self._road_object_stage_coverage.items())]
+        values=self.config.get("road_object_stage_range_bins",[25.0,35.0,45.0]);uppers=[]
+        for value in values or []:
+            try:value=float(value)
+            except (TypeError,ValueError):continue
+            if value>0 and value not in uppers:uppers.append(value)
+        uppers.sort();lower=float(self.config.get("road_object_recovery_min_range",5.0));bands=[]
+        for upper in uppers:
+            selected=[]
+            for item in actors:
+                distance=((item.get("range_min") or 0.0)+(item.get("range_max") or 0.0))*.5
+                if lower<=distance<upper or (upper==uppers[-1] and lower<=distance<=upper):selected.append(item)
+            visible=sum(item.get("visible_frames",0) for item in selected)
+            band={"min_range":lower,"max_range":upper,"actors":len(selected),"visible_frames":visible,
+                  "raw_frames":sum(item.get("raw_frames",0) for item in selected)}
+            for name in stage_names:band[name]=sum(item.get("stage_frames",{}).get(name,0) for item in selected)
+            bands.append(band);lower=upper
+        return {"actors":actors,"range_bands":bands,"support_radius":support_radius,"stage_gate":stage_gate}
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""

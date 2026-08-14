@@ -138,6 +138,21 @@ class SimpleFusion(object):
         s = math.sin(t["yaw"])
         return t["x"] + c * x - s * y, t["y"] + s * x + c * y, t["z"] + z
 
+    def road_object_recovery_diagnostics_world(self):
+        """Transform the latest scalar recovery diagnostics for evaluation only."""
+        raw=[]
+        for point in self.road_object_recovery.last_input_points:
+            x,y,z=self._to_world(float(point[0]),float(point[1]),float(point[2]))
+            raw.append({"x":x,"y":y,"z":z})
+        stages={}
+        for name,items in (self.road_object_recovery.last_stage_outputs or {}).items():
+            world=[]
+            for item in items or []:
+                candidate=dict(item);x,y,z=self._to_world(item["x"],item["y"],item["z"])
+                candidate.update({"x":x,"y":y,"z":z});world.append(candidate)
+            stages[name]=world
+        return {"input_points":raw,"stages":stages}
+
     def _sensor_range(self, x, y):
         if self.world_transform is None:
             return math.hypot(float(x), float(y))
@@ -705,6 +720,7 @@ class SimpleFusion(object):
             "road_object_recovery_pending": int(road_stats.get("pending",0)),
             "road_object_recovery_temporal_pass": int(road_stats.get("temporal_pass",0)),
             "road_object_recovery_dedupe": int(road_stats.get("dedupe",0)),
+            "road_object_recovery_cap_reject": int(road_stats.get("cap_reject",0)),
             "road_object_recovery_built": int(road_stats.get("built",0)),
             "road_object_recovery_shadow_mode": road_object_shadow,
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),

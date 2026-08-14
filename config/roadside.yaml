@@ -336,6 +336,10 @@ evaluation:
   road_object_gate_point_ablations: [8, 9, 10]
   road_object_gate_max_height: 0.45
   road_object_gate_max_range: 25.0
+  # V0.6.12.8.2.2.2: evaluation-only raw support and recovery-stage attribution.
+  road_object_raw_support_radius: 1.50
+  road_object_stage_match_distance: 2.00
+  road_object_stage_range_bins: [25.0, 35.0, 45.0]
   # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.
   far_admission_decision_diagnostics: true
   # V0.6.12.7.3: compare truth/FP score, geometry and source distributions.
