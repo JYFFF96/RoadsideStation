@@ -38,7 +38,11 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
         world = _World([_Actor(1, 60.0, 0.0)])
         return GroundTruthEvaluator(world, lambda: _Vector(), {
             "radius": 80.0, "match_distance": 4.0,
-            "include_roles": ["autopilot"]})
+            "include_roles": ["autopilot"],
+            "far_admission_edge_risk_shadow": True,
+            "far_admission_edge_hard_ratio": 0.65,
+            "far_admission_edge_soft_ratio": 0.35,
+            "far_admission_edge_soft_score": 0.68})
 
     def test_truth_and_false_positive_attribution(self):
         evaluator = self._evaluator()
@@ -48,7 +52,7 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
              "candidate_score": 0.60, "point_count": 8,
              "extent": [4.0, 1.8, 1.5], "cluster_mode": "far_geometry_builder",
              "far_geometry_recovered": True,
-             "roi_details": {"lateral": 2.0, "allowed_lateral": 4.0}},
+             "roi_details": {"lateral": 0.2, "allowed_lateral": 4.0}},
             {"x": 70.0, "y": 8.0, "candidate_score": 0.40,
              "point_count": 3, "extent": [1.0, 0.2, 0.4],
              "cluster_mode": "bev_multiscale",
@@ -76,6 +80,30 @@ class FarAdmissionDecisionEvaluationTest(unittest.TestCase):
         self.assertEqual(1, profile["truth"]["recovery"])
         self.assertEqual({"far_geometry_builder": 1},
                          profile["truth"]["cluster_modes"])
+        risk = report["edge_risk_shadow"]["would_hold"]
+        self.assertEqual(1, risk["truth"]["kept"])
+        self.assertEqual(1, risk["fp"]["rejected"])
+        self.assertEqual(1, risk["fp"]["hard_edge"])
+
+    def test_edge_risk_shadow_combines_edge_score_and_source(self):
+        evaluator = self._evaluator()
+        confirmed = [
+            {"x": 60.5, "y": 0.0, "far_track_admission_reason": "repeat",
+             "candidate_score": 0.45, "cluster_mode": "far_geometry_builder",
+             "roi_details": {"lateral": 0.2, "allowed_lateral": 4.0}},
+            {"x": 70.0, "y": 8.0, "far_track_admission_reason": "repeat",
+             "candidate_score": 0.90, "cluster_mode": "bev@0.85",
+             "roi_details": {"lateral": 3.2, "allowed_lateral": 4.0}},
+            {"x": 72.0, "y": 8.0, "far_track_admission_reason": "repeat",
+             "candidate_score": 0.50, "cluster_mode": "bev@0.55",
+             "roi_details": {"lateral": 1.8, "allowed_lateral": 4.0}},
+        ]
+        evaluator.observe_far_admission_decisions([], confirmed, [], frame_id=11)
+        risk = evaluator.report_far_admission_decisions()["edge_risk_shadow"]["would_confirm"]
+        self.assertEqual(1, risk["truth"]["kept"])
+        self.assertEqual(2, risk["fp"]["rejected"])
+        self.assertEqual(1, risk["fp"]["hard_edge"])
+        self.assertEqual(1, risk["fp"]["soft_risk"])
 
     def test_same_lidar_frame_is_counted_once(self):
         evaluator = self._evaluator()

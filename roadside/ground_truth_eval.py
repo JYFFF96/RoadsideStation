@@ -98,6 +98,11 @@ class GroundTruthEvaluator(object):
                 "far_builder": 0, "score_bypass": 0, "radar": 0,
                 "cluster_modes": {},
             }
+        def risk_bucket():
+            return {
+                "total": 0, "kept": 0, "rejected": 0,
+                "hard_edge": 0, "soft_risk": 0, "unknown_edge": 0,
+            }
         return {
             "frames": 0,
             "would_hold": 0, "would_hold_truth": 0, "would_hold_fp": 0,
@@ -106,6 +111,9 @@ class GroundTruthEvaluator(object):
             "match_distances": [], "time_gaps": [], "frame_gaps": [],
             "profiles": dict((decision, {
                 "truth": feature_bucket(), "fp": feature_bucket()})
+                for decision in ("would_hold", "would_confirm", "expired")),
+            "risk_shadow": dict((decision, {
+                "truth": risk_bucket(), "fp": risk_bucket()})
                 for decision in ("would_hold", "would_confirm", "expired")),
         }
 
@@ -173,6 +181,50 @@ class GroundTruthEvaluator(object):
         mode = str(item.get("cluster_mode", "unknown"))
         bucket["cluster_modes"][mode] = int(bucket["cluster_modes"].get(mode, 0)) + 1
 
+    @staticmethod
+    def _admission_edge_ratio(item):
+        details = item.get("roi_details", {}) or item.get("details", {}) or {}
+        lateral = details.get("lateral");allowed = details.get("allowed_lateral")
+        try:
+            if lateral is not None and float(allowed) > 0.0:
+                return abs(float(lateral)) / float(allowed)
+        except (TypeError, ValueError):pass
+        return None
+
+    def _admission_shadow_risk_reason(self, item):
+        """Return the simulated V0.6.12.7.4 decision reason.
+
+        This method runs only in the CARLA evaluator. Its result is counted for
+        diagnostics and is never returned to Fusion, Tracker or ObjectList.
+        """
+        edge = self._admission_edge_ratio(item)
+        if edge is None:return "unknown_edge"
+        hard = float(self.config.get("far_admission_edge_hard_ratio", 0.65))
+        soft = float(self.config.get("far_admission_edge_soft_ratio", 0.35))
+        soft_score = float(self.config.get("far_admission_edge_soft_score", 0.68))
+        if edge >= hard:return "hard_edge"
+        mode = str(item.get("cluster_mode", ""))
+        risk_modes = set(self.config.get("far_admission_edge_risk_modes",
+                                         ["far_geometry_builder", "far_discovery_far"]))
+        risky_source = (mode in risk_modes or
+                        bool(item.get("far_geometry_recovered", False)) or
+                        bool(item.get("far_geometry_temporal_supported", False)) or
+                        bool(item.get("sparse_rescued", False)))
+        score = item.get("candidate_score")
+        try:low_score = score is not None and float(score) < soft_score
+        except (TypeError, ValueError):low_score = False
+        if edge >= soft and (low_score or risky_source):return "soft_risk"
+        return "keep"
+
+    def _record_admission_shadow_risk(self, bucket, item):
+        reason = self._admission_shadow_risk_reason(item)
+        bucket["total"] += 1
+        if reason in ("hard_edge", "soft_risk"):
+            bucket["rejected"] += 1
+        else:
+            bucket["kept"] += 1
+        if reason in bucket:bucket[reason] += 1
+
     def _summarize_feature_bucket(self, bucket):
         result = {"count": int(bucket.get("count", 0))}
         for source in ("recovery", "sparse", "temporal", "far_builder",
@@ -214,9 +266,12 @@ class GroundTruthEvaluator(object):
             totals[name + "_truth"] += matched
             totals[name + "_fp"] += false_positive
             profile = totals["profiles"][name]
+            risk_profile = totals["risk_shadow"][name]
             for index, item in enumerate(detected):
                 label = "truth" if index in matched_indices else "fp"
                 self._record_admission_features(profile[label], item)
+                if self.config.get("far_admission_edge_risk_shadow", False):
+                    self._record_admission_shadow_risk(risk_profile[label], item)
         for item in held + confirmed:
             value = item.get("far_track_admission_match_distance")
             if value is not None:totals["match_distances"].append(float(value))
@@ -230,7 +285,7 @@ class GroundTruthEvaluator(object):
         totals = self._far_admission_totals
         result = dict((k, v) for k, v in totals.items()
                       if k not in ("match_distances", "time_gaps", "frame_gaps",
-                                   "profiles"))
+                                   "profiles", "risk_shadow"))
         result["candidate_jump"] = self._distribution(totals["match_distances"])
         result["time_gap"] = self._distribution(totals["time_gaps"])
         result["frame_gap"] = self._distribution(totals["frame_gaps"])
@@ -238,6 +293,9 @@ class GroundTruthEvaluator(object):
             (label, self._summarize_feature_bucket(bucket))
             for label, bucket in labels.items()))
             for decision, labels in totals["profiles"].items())
+        result["edge_risk_shadow"] = dict((decision, dict(
+            (label, dict(bucket)) for label, bucket in labels.items()))
+            for decision, labels in totals["risk_shadow"].items())
         if reset:self._far_admission_totals = self._empty_admission_totals()
         return result
 
