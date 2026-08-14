@@ -149,6 +149,7 @@ class SimpleFusion(object):
             world=[]
             for item in items or []:
                 candidate=dict(item);x,y,z=self._to_world(item["x"],item["y"],item["z"])
+                candidate["sensor_range"]=math.hypot(float(item["x"]),float(item["y"]))
                 candidate.update({"x":x,"y":y,"z":z});world.append(candidate)
             stages[name]=world
         return {"input_points":raw,"stages":stages}

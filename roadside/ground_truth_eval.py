@@ -640,17 +640,17 @@ class GroundTruthEvaluator(object):
     def _adaptive_temporal_profile(cls, items):
         values={"points":[],"current_points":[],"history_points":[],"rank_score":[],
                 "support_frames":[],"height":[],"long_side":[],
-                "short_side":[],"range":[]};bands={}
+                "short_side":[],"footprint_area":[],"range":[],"sensor_range":[]};bands={}
         for item in items or []:
             for name,key in (("points","point_count"),("current_points","current_point_count"),
                              ("history_points","temporal_point_count"),
                              ("support_frames","support_frames"),("rank_score","adaptive_rank_score"),
-                             ("range","range")):
+                             ("range","range"),("sensor_range","sensor_range")):
                 try:values[name].append(float(item.get(key)))
                 except (TypeError,ValueError):pass
             extent=list(item.get("extent",[]) or [])
             try:
-                x=float(extent[0]);y=float(extent[1]);values["long_side"].append(max(x,y));values["short_side"].append(min(x,y))
+                x=float(extent[0]);y=float(extent[1]);values["long_side"].append(max(x,y));values["short_side"].append(min(x,y));values["footprint_area"].append(x*y)
                 values["height"].append(float(extent[2]))
             except (IndexError,TypeError,ValueError):pass
             band=str(item.get("adaptive_band","unknown"));bands[band]=bands.get(band,0)+1
@@ -751,7 +751,45 @@ class GroundTruthEvaluator(object):
                 total["classes"].setdefault(name,[]).extend(items)
             total["false"].extend(bucket["false"])
         return {"enabled":True,"frame":self._hybrid_selection_summary(frame),
-                "run":self._hybrid_selection_summary(self._hybrid_rescue_samples)}
+                "run":self._hybrid_selection_summary(self._hybrid_rescue_samples),
+                "ablations_frame":self._hybrid_rescue_ablations(frame),
+                "ablations_run":self._hybrid_rescue_ablations(self._hybrid_rescue_samples)}
+
+    def _hybrid_rescue_ablations(self, buckets):
+        """Evaluate portable scalar rescue gates without filtering perception."""
+        result={}
+        for source,bucket in sorted((buckets or {}).items()):
+            truth=[]
+            for items in (bucket.get("classes",{}) or {}).values():truth.extend(items)
+            false=list(bucket.get("false",[]) or []);tests=[]
+            if source=="near_baseline":
+                for value in self.config.get("road_object_rescue_near_area_ablations",[]) or []:
+                    try:threshold=float(value)
+                    except (TypeError,ValueError):continue
+                    tests.append(("area>=%.3f"%threshold,
+                                  lambda item,t=threshold:self._candidate_footprint_area(item)>=t))
+            else:
+                for value in self.config.get("road_object_rescue_far_range_ablations",[]) or []:
+                    try:threshold=float(value)
+                    except (TypeError,ValueError):continue
+                    tests.append(("sensor_range<=%.1f"%threshold,
+                                  lambda item,t=threshold:float(item.get("sensor_range",1e9))<=t))
+            source_result={}
+            for label,gate in tests:
+                truth_kept=sum(1 for item in truth if gate(item));fp_kept=sum(1 for item in false if gate(item))
+                kept=truth_kept+fp_kept
+                source_result[label]={"truth":len(truth),"truth_kept":truth_kept,
+                                      "fp":len(false),"fp_kept":fp_kept,
+                                      "fp_rejected":len(false)-fp_kept,
+                                      "precision":(float(truth_kept)/kept if kept else None)}
+            result[source]=source_result
+        return result
+
+    @staticmethod
+    def _candidate_footprint_area(item):
+        extent=list(item.get("extent",[]) or [])
+        try:return max(0.0,float(extent[0]))*max(0.0,float(extent[1]))
+        except (IndexError,TypeError,ValueError):return 0.0
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""

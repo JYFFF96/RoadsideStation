@@ -392,6 +392,9 @@ evaluation:
   road_object_hybrid_feature_profiling: true
   # V0.6.12.8.2.2.13.1: activate incremental Rescue profiling in evaluation.
   road_object_hybrid_rescue_feature_profiling: true
+  # V0.6.12.8.2.2.14: parallel Shadow gates; no candidate is filtered.
+  road_object_rescue_near_area_ablations: [0.02, 0.04, 0.06, 0.08]
+  road_object_rescue_far_range_ablations: [26.0, 28.0, 30.0, 32.0]
   # Track benchmark actor entry, boundary exit, unexpected disappearance and jumps.
   truth_lifecycle_diagnostics: true
   truth_lifecycle_boundary_margin: 10.0

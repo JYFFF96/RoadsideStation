@@ -245,7 +245,10 @@ def _print_hybrid_rescue_profile(report):
    for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
    fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
    for name,count,profile in profiles:
-    print("      [RESCUE FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Range:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"range")))
+    print("      [RESCUE FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Area:%s Range:%s SensorRange:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"footprint_area"),_adaptive_feature(profile,"range"),_adaptive_feature(profile,"sensor_range")))
+  for source,tests in sorted((report.get("ablations_"+key,{}) or {}).items()):
+   for gate,value in sorted((tests or {}).items()):
+    print("    [ROAD-OBJECT RESCUE ABLATION %s %s %s] TruthKeep:%d/%d FPReject:%d/%d Precision:%s"%(label,source,gate,value.get("truth_kept",0),value.get("truth",0),value.get("fp_rejected",0),value.get("fp",0),_pct(value.get("precision"))))
 
 def _print_truth_lifecycle(report):
  if not report.get("enabled",False):return
@@ -298,7 +301,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.13.1 Rescue Profiling and Truth Lifecycle Diagnostics starting...")
+ print("RoadsideStation V0.6.12.8.2.2.14 Rescue Geometry Gate Ablation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

@@ -206,6 +206,12 @@ reported when they enter, cross the evaluation boundary, disappear while still
 well inside it, or move by a teleport-sized step. These diagnostics remain
 CARLA evaluation-only and never affect perception or tracking.
 
+V0.6.12.8.2.2.14 adds Shadow ablations for a source-aware Rescue geometry
+gate. Near Baseline rescues compare minimum footprint areas, while Far Ranked
+rescues compare maximum sensor ranges. The profiler now reports sensor range
+and footprint area directly, keeping all features portable to a real roadside
+sensor coordinate frame. No ablation filters ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

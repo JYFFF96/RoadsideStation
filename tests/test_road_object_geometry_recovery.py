@@ -246,6 +246,7 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         diagnostics=fusion.road_object_recovery_diagnostics_world()
         self.assertEqual(3,len(diagnostics["input_points"]))
         self.assertEqual(1,len(diagnostics["stages"]["output"]))
+        self.assertGreater(diagnostics["stages"]["output"][0]["sensor_range"],0.0)
 
     def test_precision_profile_uses_percentiles_and_normalized_sides(self):
         items=[{"point_count":5,"extent":[.8,.2,.1],"range":10.0},
@@ -383,7 +384,9 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
 
     def test_hybrid_rescue_profile_uses_only_incremental_rescues(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
-            "road_object_hybrid_rescue_feature_profiling":True})
+            "road_object_hybrid_rescue_feature_profiling":True,
+            "road_object_rescue_near_area_ablations":[.08],
+            "road_object_rescue_far_range_ablations":[28.0]})
         truth=[{"actor_id":42,"type_id":"static.prop.box02","role":"rsu_test_obstacle",
                 "object_type":"unknown_obstacle","x":10.0,"y":0.0,"range":10.0},
                {"actor_id":43,"type_id":"walker.pedestrian.0001","role":"rsu_test_walker",
@@ -396,11 +399,11 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
               "road_object_temporal_hits":3,"extent":[.4,.2,.8],
               "adaptive_hybrid_source":"near_baseline",
               "adaptive_hybrid_temporal_rescue":True}
-        far={"x":30.1,"y":0.0,"range":30.1,"point_count":4,
+        far={"x":30.1,"y":0.0,"range":30.1,"sensor_range":27.0,"point_count":4,
              "current_point_count":1,"temporal_point_count":3,"support_frames":3,
              "extent":[.4,.2,.8],"adaptive_hybrid_source":"far_ranked",
              "adaptive_hybrid_temporal_rescue":True}
-        false={"x":25.0,"y":8.0,"range":26.2,"point_count":4,
+        false={"x":25.0,"y":8.0,"range":26.2,"sensor_range":31.0,"point_count":4,
                "current_point_count":1,"support_frames":3,"extent":[.5,.2,.4],
                "adaptive_hybrid_source":"far_ranked",
                "adaptive_hybrid_temporal_rescue":True}
@@ -409,6 +412,11 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(1,report["frame"]["far_ranked"]["matched"])
         self.assertEqual(1,report["frame"]["far_ranked"]["fp"])
         self.assertEqual(3,sum(value["candidates"] for value in report["frame"].values()))
+        near_gate=report["ablations_frame"]["near_baseline"]["area>=0.080"]
+        self.assertEqual(1,near_gate["truth_kept"])
+        far_gate=report["ablations_frame"]["far_ranked"]["sensor_range<=28.0"]
+        self.assertEqual(1,far_gate["truth_kept"])
+        self.assertEqual(1,far_gate["fp_rejected"])
         report=evaluator.analyze_road_object_hybrid_rescue_profile([gated,near,far,false])
         self.assertEqual(4,report["run"]["far_ranked"]["candidates"])
 
