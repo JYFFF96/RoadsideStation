@@ -49,7 +49,9 @@ class GroundTruthEvaluator(object):
     @staticmethod
     def _empty_selected_enforcement_totals():
         return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
-                    for name in ("roi","score","dynamic","track_current","track_ever"))
+                    for name in ("roi","score","dynamic","track_current","track_ever",
+                                 "score_near","score_far","score_strict","score_rescue",
+                                 "track_new","track_confirmed","track_coast"))
 
     @staticmethod
     def _empty_selected_admission_score_totals():
@@ -236,6 +238,27 @@ class GroundTruthEvaluator(object):
             "dynamic":[x for x in (dynamic or []) if x.get("road_object_selected_enforced",False)],
             "track_current":[x for x in (tracks or []) if x.get("track_selected_enforced_current",False)],
             "track_ever":[x for x in (tracks or []) if x.get("track_selected_enforced_ever",False)],
+            "score_near":[x for x in (scored or [])
+                          if x.get("road_object_selected_enforced",False) and
+                          x.get("adaptive_hybrid_source")=="near_baseline"],
+            "score_far":[x for x in (scored or [])
+                         if x.get("road_object_selected_enforced",False) and
+                         x.get("adaptive_hybrid_source")=="far_ranked"],
+            "score_strict":[x for x in (scored or [])
+                            if x.get("road_object_selected_enforced",False) and
+                            not x.get("adaptive_hybrid_temporal_rescue",False)],
+            "score_rescue":[x for x in (scored or [])
+                            if x.get("road_object_selected_enforced",False) and
+                            x.get("adaptive_hybrid_temporal_rescue",False)],
+            "track_new":[x for x in (tracks or [])
+                         if x.get("track_selected_enforced_current",False) and
+                         x.get("track_state")=="new"],
+            "track_confirmed":[x for x in (tracks or [])
+                               if x.get("track_selected_enforced_current",False) and
+                               x.get("track_state")=="confirmed"],
+            "track_coast":[x for x in (tracks or [])
+                           if x.get("track_selected_enforced_ever",False) and
+                           x.get("track_state")=="coast"],
         }
         truth=self.truth_objects();frame={}
         for name,items in sources.items():

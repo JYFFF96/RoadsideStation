@@ -281,6 +281,14 @@ the selected recovery channel, remains sensor-only and has an explicit switch
 for rollback. Profiling continues across accepted and rejected candidates so
 the enforced result can be checked against the same full input population.
 
+V0.6.12.8.2.2.22 adds path-level attribution after the conservative gate. It
+separates accepted Selected candidates into Near/Far and Strict/Temporal-Rescue
+paths, then separates Selected-influenced tracks into New, Confirmed and Coast
+states. The previous run showed that a global score threshold cannot safely
+separate truth from false positives and that Near Rescue contains valuable
+pedestrians, so this CARLA-only attribution identifies a narrower portable
+sensor-policy target before any further enforcement.
+
 ## Current scope
 
 - Fixed roadside RGB camera

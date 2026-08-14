@@ -327,20 +327,29 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         evaluator.truth_objects=lambda:[
             {"x":10.0,"y":0.0,"range":10.0,"object_type":"person"},
             {"x":20.0,"y":0.0,"range":20.0,"object_type":"unknown_obstacle"}]
-        selected_true={"x":10.2,"y":0.0,"road_object_selected_enforced":True}
-        selected_fp={"x":40.0,"y":0.0,"road_object_selected_enforced":True}
+        selected_true={"x":10.2,"y":0.0,"road_object_selected_enforced":True,
+                       "adaptive_hybrid_source":"near_baseline",
+                       "adaptive_hybrid_temporal_rescue":True}
+        selected_fp={"x":40.0,"y":0.0,"road_object_selected_enforced":True,
+                     "adaptive_hybrid_source":"far_ranked"}
         regular={"x":20.0,"y":0.0}
         tracks=[dict(selected_true,track_selected_enforced_current=True,
-                     track_selected_enforced_ever=True),
+                     track_selected_enforced_ever=True,track_state="new"),
                 {"x":20.1,"y":0.0,"track_selected_enforced_current":False,
-                 "track_selected_enforced_ever":True},regular]
+                 "track_selected_enforced_ever":True,"track_state":"coast"},regular]
         report=evaluator.analyze_selected_enforcement_attribution(
-            [selected_true,selected_fp,regular],[selected_true],
+            [selected_true,selected_fp,regular],[selected_true,selected_fp],
             [selected_true,selected_fp],tracks)
         self.assertEqual(2,report["frame"]["roi"]["candidates"])
         self.assertEqual(1,report["frame"]["roi"]["matched"])
         self.assertEqual({"person":1},report["frame"]["track_current"]["classes"])
         self.assertEqual(2,report["frame"]["track_ever"]["matched"])
+        self.assertEqual(1,report["frame"]["score_near"]["matched"])
+        self.assertEqual(1,report["frame"]["score_far"]["fp"])
+        self.assertEqual(1,report["frame"]["score_rescue"]["matched"])
+        self.assertEqual(1,report["frame"]["score_strict"]["fp"])
+        self.assertEqual(1,report["frame"]["track_new"]["matched"])
+        self.assertEqual(1,report["frame"]["track_coast"]["matched"])
         report=evaluator.analyze_selected_enforcement_attribution([],[],[],[])
         self.assertEqual(2,report["run"]["roi"]["candidates"])
 
