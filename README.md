@@ -257,6 +257,14 @@ state and active candidate count so the next benchmark can measure the real
 Tracker/ObjectList effect. The selection still uses sensor geometry only and
 does not consume CARLA truth.
 
+V0.6.12.8.2.2.19 adds end-to-end attribution for that enforcing trial. Selected
+candidate provenance now survives ROI, scoring, dynamic filtering and tracking;
+tracks report both a current selected measurement and any selected contribution
+in their lifetime, including coast frames. The CARLA-only evaluator prints
+frame and cumulative candidate, match, false-positive, precision and class
+counts for every stage. This makes it possible to distinguish useful recovery
+from temporal FP persistence before changing production thresholds.
+
 ## Current scope
 
 - Fixed roadside RGB camera

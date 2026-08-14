@@ -8,6 +8,7 @@ import yaml
 from roadside.road_object_geometry_recovery import RoadObjectGeometryRecovery
 from roadside.fusion import SimpleFusion
 from roadside.ground_truth_eval import GroundTruthEvaluator
+from roadside.tracking import NearestTracker
 
 
 class RoadObjectGeometryRecoveryTest(unittest.TestCase):
@@ -295,12 +296,53 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         output,policy,enforcing=RoadObjectGeometryRecovery._active_output(
             baseline,selected,"adaptive_hybrid_geometry_gated",{
                 "road_object_recovery_selected_output_enforcing":True})
-        self.assertEqual(selected,output)
+        self.assertEqual("selected",output[0]["id"])
         self.assertEqual("adaptive_hybrid_geometry_gated",policy);self.assertTrue(enforcing)
+        self.assertTrue(output[0]["road_object_selected_enforced"])
+        self.assertEqual("adaptive_hybrid_geometry_gated",
+                         output[0]["road_object_selected_policy"])
+        self.assertNotIn("road_object_selected_enforced",selected[0])
         output,policy,enforcing=RoadObjectGeometryRecovery._active_output(
             baseline,[],"disabled",{"road_object_recovery_selected_output_enforcing":True})
         self.assertEqual(baseline,output);self.assertEqual("baseline",policy)
         self.assertFalse(enforcing)
+
+    def test_tracker_keeps_current_and_lifetime_selected_provenance(self):
+        tracker=NearestTracker(max_distance=2.0)
+        selected={"x":10.0,"y":0.0,"z":0.0,"extent":[.5,.3,.2],
+                  "road_object_selected_enforced":True}
+        first=tracker.update([selected],timestamp=1.0)[0]
+        self.assertTrue(first["track_selected_enforced_current"])
+        self.assertTrue(first["track_selected_enforced_ever"])
+        self.assertTrue(first["track_selected_enforced_origin"])
+        regular={"x":10.1,"y":0.0,"z":0.0,"extent":[.5,.3,.2]}
+        second=tracker.update([regular],timestamp=1.1)[0]
+        self.assertFalse(second["track_selected_enforced_current"])
+        self.assertTrue(second["track_selected_enforced_ever"])
+        self.assertEqual(1,second["track_selected_enforced_hits"])
+
+    def test_selected_enforcement_attribution_profiles_stages_and_run(self):
+        center=type("Location",(object,),{"x":0.0,"y":0.0})()
+        evaluator=GroundTruthEvaluator(None,lambda:center,{"radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[
+            {"x":10.0,"y":0.0,"range":10.0,"object_type":"person"},
+            {"x":20.0,"y":0.0,"range":20.0,"object_type":"unknown_obstacle"}]
+        selected_true={"x":10.2,"y":0.0,"road_object_selected_enforced":True}
+        selected_fp={"x":40.0,"y":0.0,"road_object_selected_enforced":True}
+        regular={"x":20.0,"y":0.0}
+        tracks=[dict(selected_true,track_selected_enforced_current=True,
+                     track_selected_enforced_ever=True),
+                {"x":20.1,"y":0.0,"track_selected_enforced_current":False,
+                 "track_selected_enforced_ever":True},regular]
+        report=evaluator.analyze_selected_enforcement_attribution(
+            [selected_true,selected_fp,regular],[selected_true],
+            [selected_true,selected_fp],tracks)
+        self.assertEqual(2,report["frame"]["roi"]["candidates"])
+        self.assertEqual(1,report["frame"]["roi"]["matched"])
+        self.assertEqual({"person":1},report["frame"]["track_current"]["classes"])
+        self.assertEqual(2,report["frame"]["track_ever"]["matched"])
+        report=evaluator.analyze_selected_enforcement_attribution([],[],[],[])
+        self.assertEqual(2,report["run"]["roi"]["candidates"])
 
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
@@ -340,6 +382,8 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         fusion.set_ground_reference(0.0);fusion.fuse(self._points(),[],frame_id=1)
         fusion.fuse(self._points(),[],frame_id=2)
         self.assertTrue(any(x.get("road_object_recovered",False) for x in fusion.last_geometry_world))
+        self.assertTrue(any(x.get("road_object_selected_enforced",False)
+                            for x in fusion.last_geometry_world))
         self.assertTrue(fusion.last_stats["road_object_recovery_selected_output_enforcing"])
         self.assertEqual("baseline",fusion.last_stats["road_object_recovery_active_output_policy"])
 
@@ -550,6 +594,7 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         evaluator._road_object_samples["false"].append({"point_count":4})
         evaluator._adaptive_temporal_samples["false"].append({"point_count":5})
         evaluator._road_object_cap_totals["baseline"]["candidates"]=7
+        evaluator._selected_enforcement_totals["roi"]["candidates"]=5
         self.assertFalse(evaluator._sync_road_object_benchmark_session([])["reset"])
         walkers=[{"actor_id":10,"role":"rsu_test_walker"}]
         pending=evaluator._sync_road_object_benchmark_session(walkers)
@@ -563,6 +608,7 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual([],evaluator._adaptive_temporal_samples["false"])
         self.assertEqual({},evaluator._hybrid_rescue_samples)
         self.assertEqual(0,evaluator._road_object_cap_totals["baseline"]["candidates"])
+        self.assertEqual(0,evaluator._selected_enforcement_totals["roi"]["candidates"])
         evaluator._road_object_cap_totals["baseline"]["candidates"]=3
         self.assertFalse(evaluator._sync_road_object_benchmark_session(first)["reset"])
         self.assertEqual(3,evaluator._road_object_cap_totals["baseline"]["candidates"])

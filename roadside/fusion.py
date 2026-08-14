@@ -634,7 +634,11 @@ class SimpleFusion(object):
                         "temporal_point_count", "oriented_yaw",
                         "oriented_extent", "axis_aligned_extent",
                         "far_geometry_recovered", "recovery_fragment_count",
-                        "road_object_recovered", "road_object_temporal_hits"):
+                        "road_object_recovered", "road_object_temporal_hits",
+                        "road_object_selected_enforced", "road_object_selected_policy",
+                        "adaptive_hybrid_source", "adaptive_hybrid_gate_keep",
+                        "adaptive_hybrid_temporal_rescue",
+                        "adaptive_hybrid_geometry_gate_keep"):
                 if key in i:
                     item[key] = i.get(key)
             item = self._mark_recovery_track_support(item, previous_tracks)

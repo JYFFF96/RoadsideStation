@@ -278,7 +278,14 @@ class RoadObjectGeometryRecovery(object):
     def _active_output(baseline, selected, selected_policy, config):
         """Choose the recovery output without silently bypassing the baseline."""
         enforcing=bool(config.get("road_object_recovery_selected_output_enforcing",False))
-        if enforcing and selected_policy!="disabled":return list(selected),selected_policy,True
+        if enforcing and selected_policy!="disabled":
+            output=[]
+            for source in selected:
+                item=dict(source)
+                item["road_object_selected_enforced"]=True
+                item["road_object_selected_policy"]=selected_policy
+                output.append(item)
+            return output,selected_policy,True
         return list(baseline),"baseline",False
 
     @staticmethod

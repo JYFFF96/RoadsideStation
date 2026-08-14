@@ -243,7 +243,11 @@ class NearestTracker(object):
             "track_hits": int(t.get("hits", 1)),
             "track_state": "coast",
             "coast_frames": int(t.get("misses", 0)),
-            "coast_allowed": allowed
+            "coast_allowed": allowed,
+            "track_selected_enforced_current": False,
+            "track_selected_enforced_ever": int(t.get("selected_enforced_hits", 0)) > 0,
+            "track_selected_enforced_hits": int(t.get("selected_enforced_hits", 0)),
+            "track_selected_enforced_origin": bool(t.get("selected_enforced_origin", False))
         })
         item["confidence"] = float(item.get("confidence", .72)) * (
             self.coast_confidence_decay ** max(1, int(t.get("misses", 1))))
@@ -350,6 +354,10 @@ class NearestTracker(object):
 
             last_det = dict(det)
             last_det.pop("id", None)
+            selected_current = bool(det.get("road_object_selected_enforced", False))
+            selected_hits = int(old.get("selected_enforced_hits", 0) if old else 0)
+            if selected_current:
+                selected_hits += 1
             track = {
                 "x": x, "y": y, "z": z, "vx": vx, "vy": vy,
                 "extent": extent, "hits": hits, "timestamp": now,
@@ -361,6 +369,9 @@ class NearestTracker(object):
                 "camera_confirmations": int(old.get("camera_confirmations", 0) if old else 0),
                 "last_radar_time": old.get("last_radar_time") if old else None,
                 "last_camera_time": old.get("last_camera_time") if old else None,
+                "selected_enforced_hits": selected_hits,
+                "selected_enforced_origin": bool(
+                    old.get("selected_enforced_origin", False) if old else selected_current),
             }
             if det.get("radar_radial_velocity") is not None:
                 track["last_radar_time"] = now
@@ -377,7 +388,11 @@ class NearestTracker(object):
                 "track_vy_before_radar": pre_radar_vy,
                 "vx": vx, "vy": vy, "extent": extent,
                 "track_hits": hits, "track_state": state,
-                "coast_frames": 0, "coast_allowed": self._allowed_coast(track, now)
+                "coast_frames": 0, "coast_allowed": self._allowed_coast(track, now),
+                "track_selected_enforced_current": selected_current,
+                "track_selected_enforced_ever": selected_hits > 0,
+                "track_selected_enforced_hits": selected_hits,
+                "track_selected_enforced_origin": track["selected_enforced_origin"]
             })
             self._decorate_quality(item, track, now)
             results.append(item)

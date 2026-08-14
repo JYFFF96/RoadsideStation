@@ -29,6 +29,7 @@ class GroundTruthEvaluator(object):
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
+        self._selected_enforcement_totals = self._empty_selected_enforcement_totals()
         self._road_object_benchmark_ids = set()
         self._road_object_benchmark_active = False
         self._road_object_benchmark_generation = 0
@@ -44,6 +45,11 @@ class GroundTruthEvaluator(object):
                                  "adaptive_hybrid_gated","adaptive_hybrid_rescued",
                                  "adaptive_hybrid_geometry_gated","selected"))
 
+    @staticmethod
+    def _empty_selected_enforcement_totals():
+        return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
+                    for name in ("roi","score","dynamic","track_current","track_ever"))
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -52,6 +58,7 @@ class GroundTruthEvaluator(object):
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
+        self._selected_enforcement_totals = self._empty_selected_enforcement_totals()
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
@@ -208,6 +215,44 @@ class GroundTruthEvaluator(object):
             bucket["recall"]=(float(bucket["matched"])/bucket["truth"] if bucket["truth"] else None)
         metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected),"class_metrics":classes})
         return metrics
+
+    def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
+        """Measure selected-output contribution without feeding truth to runtime.
+
+        Candidate stages use the current-frame provenance flag. Track reporting
+        separates a current selected measurement from any historical selected
+        contribution, including coasting tracks.
+        """
+        sources={
+            "roi":[x for x in (roi or []) if x.get("road_object_selected_enforced",False)],
+            "score":[x for x in (scored or []) if x.get("road_object_selected_enforced",False)],
+            "dynamic":[x for x in (dynamic or []) if x.get("road_object_selected_enforced",False)],
+            "track_current":[x for x in (tracks or []) if x.get("track_selected_enforced_current",False)],
+            "track_ever":[x for x in (tracks or []) if x.get("track_selected_enforced_ever",False)],
+        }
+        truth=self.truth_objects();frame={}
+        for name,items in sources.items():
+            detected=self._detected_with_range(items);pairs=self._match(truth,detected)
+            classes={}
+            for ti,unused_di,unused_distance in pairs:
+                object_type=str(truth[ti].get("object_type","unknown_obstacle"))
+                classes[object_type]=int(classes.get(object_type,0))+1
+            matched=len(pairs);count=len(detected);fp=max(0,count-matched)
+            result={"candidates":count,"matched":matched,"fp":fp,
+                    "precision":(float(matched)/count if count else None),
+                    "classes":classes}
+            frame[name]=result;total=self._selected_enforcement_totals[name]
+            total["candidates"]+=count;total["matched"]+=matched;total["fp"]+=fp
+            for object_type,value in classes.items():
+                total["classes"][object_type]=int(total["classes"].get(object_type,0))+value
+        run={}
+        for name,total in self._selected_enforcement_totals.items():
+            item={"candidates":total["candidates"],"matched":total["matched"],
+                  "fp":total["fp"],"classes":dict(total["classes"])}
+            item["precision"]=(float(item["matched"])/item["candidates"]
+                               if item["candidates"] else None)
+            run[name]=item
+        return {"frame":frame,"run":run}
 
     @staticmethod
     def _empty_admission_totals():

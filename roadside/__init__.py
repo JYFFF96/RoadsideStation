@@ -5,4 +5,4 @@ from .far_geometry_stability import install_far_geometry_stability_patch
 
 install_stale_cleanup_patch()
 install_far_geometry_stability_patch()
-print("RoadsideStation V0.6.12.8.2.2.18 Selected Output Controlled Enforcement active")
+print("RoadsideStation V0.6.12.8.2.2.19 Selected Enforcement Attribution active")
