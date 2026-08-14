@@ -247,7 +247,8 @@ class NearestTracker(object):
             "track_selected_enforced_current": False,
             "track_selected_enforced_ever": int(t.get("selected_enforced_hits", 0)) > 0,
             "track_selected_enforced_hits": int(t.get("selected_enforced_hits", 0)),
-            "track_selected_enforced_origin": bool(t.get("selected_enforced_origin", False))
+            "track_selected_enforced_origin": bool(t.get("selected_enforced_origin", False)),
+            "track_non_selected_hits": int(t.get("non_selected_hits", 0))
         })
         item["confidence"] = float(item.get("confidence", .72)) * (
             self.coast_confidence_decay ** max(1, int(t.get("misses", 1))))
@@ -356,8 +357,11 @@ class NearestTracker(object):
             last_det.pop("id", None)
             selected_current = bool(det.get("road_object_selected_enforced", False))
             selected_hits = int(old.get("selected_enforced_hits", 0) if old else 0)
+            non_selected_hits = int(old.get("non_selected_hits", 0) if old else 0)
             if selected_current:
                 selected_hits += 1
+            else:
+                non_selected_hits += 1
             track = {
                 "x": x, "y": y, "z": z, "vx": vx, "vy": vy,
                 "extent": extent, "hits": hits, "timestamp": now,
@@ -370,6 +374,7 @@ class NearestTracker(object):
                 "last_radar_time": old.get("last_radar_time") if old else None,
                 "last_camera_time": old.get("last_camera_time") if old else None,
                 "selected_enforced_hits": selected_hits,
+                "non_selected_hits": non_selected_hits,
                 "selected_enforced_origin": bool(
                     old.get("selected_enforced_origin", False) if old else selected_current),
             }
@@ -392,7 +397,8 @@ class NearestTracker(object):
                 "track_selected_enforced_current": selected_current,
                 "track_selected_enforced_ever": selected_hits > 0,
                 "track_selected_enforced_hits": selected_hits,
-                "track_selected_enforced_origin": track["selected_enforced_origin"]
+                "track_selected_enforced_origin": track["selected_enforced_origin"],
+                "track_non_selected_hits": non_selected_hits
             })
             self._decorate_quality(item, track, now)
             results.append(item)

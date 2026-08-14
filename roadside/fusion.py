@@ -588,6 +588,11 @@ class SimpleFusion(object):
                                      self.config.get("track_match_distance", 4.0)))
         best = None
         for track in previous_tracks or []:
+            # Shadow-held Selected measurements still create real Tracker state.
+            # Such state cannot be used as counterfactual existing-track proof;
+            # require at least one normal (non-Selected) geometry update.
+            if int(track.get("track_non_selected_hits", 0)) <= 0:
+                continue
             d = math.hypot(float(track.get("x", 0.0)) - float(item["x"]),
                            float(track.get("y", 0.0)) - float(item["y"]))
             if d <= gate and (best is None or d < best):

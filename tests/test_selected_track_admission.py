@@ -53,7 +53,8 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
     def test_existing_track_radar_and_non_selected_bypass(self):
         fusion = self._fusion(True)
         tracked, rejected, unused_stats = fusion._gate_selected_new_tracks(
-            [self._selected()], [{"x": 10.2, "y": 0.0}], 10.0, frame_id=1)
+            [self._selected()], [{"x": 10.2, "y": 0.0,
+                                  "track_non_selected_hits": 1}], 10.0, frame_id=1)
         self.assertEqual([], rejected)
         self.assertEqual("existing_track", tracked[0]["selected_track_admission_reason"])
         radar = self._selected(20.0);radar["radar_radial_velocity"] = 1.0
@@ -112,6 +113,19 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(0, transition["changed_label_or_actor"])
         self.assertEqual({"actors": 1, "classes": {"person": 1}},
                          report["coverage"]["confirm"])
+        self.assertEqual(1, report["actor_outcomes"]["confirm_only"]["actors"])
+        self.assertEqual(0, report["actor_outcomes"]["expired_only"]["actors"])
+        self.assertEqual(1.0, report["actor_outcomes"]["confirmation_coverage"])
+
+    def test_selected_only_shadow_track_is_not_existing_track_support(self):
+        fusion = self._fusion(True)
+        shadow_track = {"x": 10.1, "y": 0.0,
+                        "track_non_selected_hits": 0,
+                        "track_selected_enforced_ever": True}
+        admitted, rejected, stats = fusion._gate_selected_new_tracks(
+            [self._selected()], [shadow_track], 10.0, frame_id=1)
+        self.assertEqual([], admitted);self.assertEqual(1, len(rejected))
+        self.assertEqual(0, stats["track_bypass"])
 
 
 if __name__ == "__main__":

@@ -315,11 +315,13 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertTrue(first["track_selected_enforced_current"])
         self.assertTrue(first["track_selected_enforced_ever"])
         self.assertTrue(first["track_selected_enforced_origin"])
+        self.assertEqual(0,first["track_non_selected_hits"])
         regular={"x":10.1,"y":0.0,"z":0.0,"extent":[.5,.3,.2]}
         second=tracker.update([regular],timestamp=1.1)[0]
         self.assertFalse(second["track_selected_enforced_current"])
         self.assertTrue(second["track_selected_enforced_ever"])
         self.assertEqual(1,second["track_selected_enforced_hits"])
+        self.assertEqual(1,second["track_non_selected_hits"])
 
     def test_selected_enforcement_attribution_profiles_stages_and_run(self):
         center=type("Location",(object,),{"x":0.0,"y":0.0})()

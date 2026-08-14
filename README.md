@@ -309,6 +309,15 @@ Expired, whether the same truth actor survived, and unique actor/class coverage.
 The identifiers and decisions remain perception-side metadata in Shadow mode;
 truth labels never enter Fusion, Tracker or ObjectList.
 
+V0.6.12.8.2.2.25 removes Shadow-created-track contamination from the Selected
+admission study. A track can now bypass new-track admission only after at least
+one normal non-Selected geometry update; a track created solely because Shadow
+allowed a held Selected measurement is not counterfactual evidence. Tracker
+provenance records that independent update count through active and coast
+states. The evaluator also splits unique held actors into Confirm-Only,
+Expired-Only, Both and Unresolved outcomes with per-class counts and overall
+confirmation coverage. The gate remains non-enforcing.
+
 ## Current scope
 
 - Fixed roadside RGB camera

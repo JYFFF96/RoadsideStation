@@ -676,10 +676,34 @@ class GroundTruthEvaluator(object):
             for object_type in actors.values():
                 classes[object_type] = int(classes.get(object_type, 0)) + 1
             coverage[name] = {"actors": len(actors), "classes": classes}
+        actor_classes = self._selected_track_admission_totals["actor_classes"]
+        held = set(actor_classes["hold"]);confirmed = set(actor_classes["confirm"])
+        expired = set(actor_classes["expired"])
+        outcome_sets = {
+            "confirm_only": (held & confirmed) - expired,
+            "expired_only": (held & expired) - confirmed,
+            "both": held & confirmed & expired,
+            "unresolved": held - confirmed - expired,
+        }
+        outcomes = {}
+        for name, actor_ids in outcome_sets.items():
+            classes = {}
+            for actor_id in actor_ids:
+                object_type = actor_classes["hold"].get(
+                    actor_id, actor_classes["confirm"].get(
+                        actor_id, actor_classes["expired"].get(
+                            actor_id, "unknown_obstacle")))
+                classes[object_type] = int(classes.get(object_type, 0)) + 1
+            outcomes[name] = {"actors": len(actor_ids), "classes": classes}
+        outcomes["held_actors"] = len(held)
+        outcomes["ever_confirmed"] = len(held & confirmed)
+        outcomes["confirmation_coverage"] = (
+            float(len(held & confirmed)) / len(held) if held else None)
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
                 "frame": dict(self._selected_track_admission_frame), "run": run,
                 "coverage": coverage,
+                "actor_outcomes": outcomes,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
