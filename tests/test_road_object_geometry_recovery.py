@@ -195,5 +195,28 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(1,comparison["adaptive"]["matched"])
         self.assertEqual(1,comparison["adaptive_run"]["matched"])
 
+    def test_adaptive_temporal_feature_profile_accumulates_truth_and_fp(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_adaptive_feature_profiling":True})
+        truth=[{"actor_id":42,"type_id":"static.prop.box02","role":"rsu_test_obstacle",
+                "object_type":"unknown_obstacle","x":30.0,"y":0.0,"range":30.0}]
+        evaluator.truth_objects=lambda:truth
+        evaluator._detected_with_range=lambda items:list(items)
+        good={"x":30.1,"y":0.0,"range":30.1,"point_count":5,
+              "current_point_count":2,"temporal_point_count":3,"support_frames":3,
+              "extent":[.5,.2,.3],"adaptive_band":"25-35m"}
+        false={"x":40.0,"y":5.0,"range":40.3,"point_count":18,
+               "current_point_count":8,"temporal_point_count":10,"support_frames":4,
+               "extent":[1.0,.4,.8],"adaptive_band":"35-45m"}
+        report=evaluator.analyze_road_object_adaptive_profile([good,false])
+        self.assertEqual(1,report["frame"]["matched"])
+        self.assertEqual(1,report["frame"]["fp"])
+        profile=report["run"]["classes"]["unknown_obstacle"]["profile"]
+        self.assertEqual(2.0,profile["current_points"]["mean"])
+        self.assertEqual(3.0,profile["history_points"]["mean"])
+        self.assertEqual(1,report["run"]["bands"]["25-35m"]["truth"])
+        report=evaluator.analyze_road_object_adaptive_profile([good,false])
+        self.assertEqual(4,report["run"]["candidates"])
+
 
 if __name__=="__main__":unittest.main()

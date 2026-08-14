@@ -354,6 +354,8 @@ evaluation:
   road_object_raw_support_radius: 1.50
   road_object_stage_match_distance: 2.00
   road_object_stage_range_bins: [25.0, 35.0, 45.0]
+  # V0.6.12.8.2.2.5: profile Adaptive pre-cap truth/FP scalar features only.
+  road_object_adaptive_feature_profiling: true
   # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.
   far_admission_decision_diagnostics: true
   # V0.6.12.7.3: compare truth/FP score, geometry and source distributions.

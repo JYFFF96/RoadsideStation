@@ -174,6 +174,22 @@ def _print_road_object_cap_comparison(report):
    ap=float(adaptive.get("matched",0))/adaptive.get("candidates",0) if adaptive.get("candidates",0) else None
    print("    [ROAD-OBJECT ADAPTIVE COMPARE %s] C:%d M:%d FP:%d P:%s Classes:%s"%(label,adaptive.get("candidates",0),adaptive.get("matched",0),adaptive.get("fp",0),_pct(ap),adaptive.get("classes",{})))
 
+def _adaptive_feature(profile,name):
+ values=(profile or {}).get(name,{}) or {}
+ return "%s/%s/%s/%s"%(_num(values.get("mean")),_num(values.get("p10")),
+                         _num(values.get("p50")),_num(values.get("p90")))
+
+def _print_adaptive_temporal_profile(report):
+ if not report.get("enabled",False):return
+ for key,label in (("frame","FRAME"),("run","RUN")):
+  value=report.get(key,{}) or {}
+  print("    [ROAD-OBJECT ADAPTIVE PROFILE %s] PreCap:%d Truth:%d FP:%d Precision:%s Bands:%s"%(label,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("bands",{})))
+  profiles=[]
+  for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
+  fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
+  for name,count,profile in profiles:
+   print("      [ADAPTIVE FEATURE %s %s] N:%d TotalPts(avg/p10/p50/p90):%s Current:%s History:%s Frames:%s Height:%s Range:%s SensorBands:%s"%(label,name,count,_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"range"),profile.get("bands",{})))
+
 def _print_road_object_profile(a):
  precision=(float(a.get('matched',0))/a.get('geometry',0)) if a.get('geometry',0) else None
  print("  [ROAD-OBJECT SHADOW EVAL] Candidates:%d TruthMatched:%d FP:%d Precision:%s"%(a.get('geometry',0),a.get('matched',0),a.get('false_positive',0),_pct(precision)))
@@ -214,7 +230,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.4 Range-Adaptive Temporal Geometry Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.5 Adaptive Temporal Feature Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -318,11 +334,11 @@ def main():
      print("  %-12s type=%-7s state=%-9s q=%.2f sensors=%-3s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,q,sensors,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
    if evaluator is not None and now-last_eval>=eval_interval:
-    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);road_ga=evaluator.analyze_road_object_recovery(fusion.last_road_object_recovery_candidates);road_diag=fusion.road_object_recovery_diagnostics_world();road_stage=evaluator.analyze_road_object_recovery_stages(road_diag);road_stages=road_diag.get("stages",{}) or {};road_cap=evaluator.analyze_road_object_cap_comparison(fusion.last_road_object_recovery_candidates,road_stages.get("balanced_output",[]),road_stages.get("adaptive_output",[]));dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
+    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);road_ga=evaluator.analyze_road_object_recovery(fusion.last_road_object_recovery_candidates);road_diag=fusion.road_object_recovery_diagnostics_world();road_stage=evaluator.analyze_road_object_recovery_stages(road_diag);road_stages=road_diag.get("stages",{}) or {};road_cap=evaluator.analyze_road_object_cap_comparison(fusion.last_road_object_recovery_candidates,road_stages.get("balanced_output",[]),road_stages.get("adaptive_output",[]));road_adaptive=evaluator.analyze_road_object_adaptive_profile(road_stages.get("adaptive_dedupe_pass",[]));dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
-    _print_sparse_geometry(s);_print_road_object_recovery(s);_print_road_object_profile(road_ga);_print_road_object_stage_attribution(road_stage);_print_road_object_cap_comparison(road_cap);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
+    _print_sparse_geometry(s);_print_road_object_recovery(s);_print_road_object_profile(road_ga);_print_road_object_stage_attribution(road_stage);_print_road_object_cap_comparison(road_cap);_print_adaptive_temporal_profile(road_adaptive);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
      admission_report=evaluator.report_far_admission_decisions(reset=True)
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)

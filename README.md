@@ -144,6 +144,12 @@ and mandatory current-frame support. Logs compare its component, shape,
 temporal, deduplication and capped output against the unchanged Baseline and
 Balanced paths. Adaptive candidates never reach ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.5 profiles the Adaptive candidates before their output cap.
+Evaluation logs split truth classes and false positives by sensor-range band and
+report total/current/history point counts, support frames, height and evaluation
+range distributions. This identifies a scalar, real-device-portable ranking or
+gate without using CARLA labels in perception. The Adaptive path remains Shadow.
+
 ## Current scope
 
 - Fixed roadside RGB camera

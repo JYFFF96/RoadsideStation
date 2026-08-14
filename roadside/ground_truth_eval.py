@@ -23,6 +23,7 @@ class GroundTruthEvaluator(object):
         self._far_admission_last_frame = None
         self._far_admission_totals = self._empty_admission_totals()
         self._road_object_samples = {"classes": {}, "false": []}
+        self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
@@ -538,6 +539,68 @@ class GroundTruthEvaluator(object):
             result[name]=current;result[name+"_run"]={"candidates":total["candidates"],"matched":total["matched"],
                                                      "fp":total["fp"],"classes":dict(total["classes"])}
         return result
+
+    @classmethod
+    def _adaptive_temporal_profile(cls, items):
+        values={"points":[],"current_points":[],"history_points":[],
+                "support_frames":[],"height":[],"long_side":[],
+                "short_side":[],"range":[]};bands={}
+        for item in items or []:
+            for name,key in (("points","point_count"),("current_points","current_point_count"),
+                             ("history_points","temporal_point_count"),
+                             ("support_frames","support_frames"),("range","range")):
+                try:values[name].append(float(item.get(key)))
+                except (TypeError,ValueError):pass
+            extent=list(item.get("extent",[]) or [])
+            try:
+                x=float(extent[0]);y=float(extent[1]);values["long_side"].append(max(x,y));values["short_side"].append(min(x,y))
+                values["height"].append(float(extent[2]))
+            except (IndexError,TypeError,ValueError):pass
+            band=str(item.get("adaptive_band","unknown"));bands[band]=bands.get(band,0)+1
+        result={}
+        for name,items in values.items():
+            result[name]={"samples":len(items),"mean":(sum(items)/len(items) if items else None),
+                          "min":(min(items) if items else None),
+                          "p10":cls._percentile(items,.10),"p50":cls._percentile(items,.50),
+                          "p90":cls._percentile(items,.90),"max":(max(items) if items else None)}
+        result["bands"]=bands
+        return result
+
+    @classmethod
+    def _adaptive_temporal_summary(cls, class_items, false_items):
+        classes={};truth_total=0;band_totals={}
+        for name,items in (class_items or {}).items():
+            classes[name]={"samples":len(items),"profile":cls._adaptive_temporal_profile(items)}
+            truth_total+=len(items)
+            for band,count in classes[name]["profile"]["bands"].items():
+                bucket=band_totals.setdefault(band,{"truth":0,"fp":0});bucket["truth"]+=count
+        false_profile=cls._adaptive_temporal_profile(false_items)
+        for band,count in false_profile["bands"].items():
+            bucket=band_totals.setdefault(band,{"truth":0,"fp":0});bucket["fp"]+=count
+        for bucket in band_totals.values():
+            total=bucket["truth"]+bucket["fp"]
+            bucket["precision"]=(float(bucket["truth"])/total if total else None)
+        total=truth_total+len(false_items or [])
+        return {"candidates":total,"matched":truth_total,"fp":len(false_items or []),
+                "precision":(float(truth_total)/total if total else None),
+                "classes":classes,"false_profile":false_profile,"bands":band_totals}
+
+    def analyze_road_object_adaptive_profile(self, candidates):
+        """Profile pre-cap adaptive candidates; evaluation truth never feeds perception."""
+        if not self.config.get("road_object_adaptive_feature_profiling",False):return {"enabled":False}
+        truth=self.truth_objects();detected=self._detected_with_range(candidates);pairs=self._match(truth,detected)
+        used=set(di for _,di,_ in pairs);class_items={}
+        for ti,di,_ in pairs:
+            name=truth[ti].get("object_type","unknown_obstacle")
+            class_items.setdefault(name,[]).append(detected[di])
+        false_items=[item for index,item in enumerate(detected) if index not in used]
+        for name,items in class_items.items():
+            self._adaptive_temporal_samples["classes"].setdefault(name,[]).extend(items)
+        self._adaptive_temporal_samples["false"].extend(false_items)
+        return {"enabled":True,
+                "frame":self._adaptive_temporal_summary(class_items,false_items),
+                "run":self._adaptive_temporal_summary(self._adaptive_temporal_samples["classes"],
+                                                      self._adaptive_temporal_samples["false"])}
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""
