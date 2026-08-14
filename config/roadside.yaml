@@ -160,8 +160,9 @@ fusion:
   far_recovery_quality_track_min_hits: 3
   far_recovery_quality_track_min_quality: 0.47
 
-  # V0.6.12.7: delay weak new 50-80m pure-LiDAR tracks for one real LiDAR frame.
+  # V0.6.12.7.1: observe the far admission decision without filtering Tracker input.
   far_track_admission_enabled: true
+  far_track_admission_shadow_mode: true
   far_track_admission_min_range: 50.0
   far_track_admission_required_frames: 2
   far_track_admission_match_gate: 2.5

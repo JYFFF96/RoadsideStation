@@ -503,6 +503,13 @@ class SimpleFusion(object):
         stats["pending"] = len(self._far_admission_pending)
         return kept, rejected, stats
 
+    def _far_admission_tracker_candidates(self, dynamic_items, admitted_items):
+        """Select Tracker input while keeping admission diagnostics observer-only."""
+        shadow = (self.config.get("far_track_admission_enabled", True) and
+                  self.config.get("far_track_admission_shadow_mode", False))
+        source = dynamic_items if shadow else admitted_items
+        return [dict(x) for x in source]
+
     def _refresh_quality_stats(self):
         qs = self.tracker.quality_stats()
         self.last_stats["track_quality_active"] = qs["active"]
@@ -615,10 +622,13 @@ class SimpleFusion(object):
 
         admitted, admission_rejections, admission_stats = self._gate_far_new_tracks(
             dyn, previous_tracks, now, frame_id=frame_id)
+        tracker_candidates = self._far_admission_tracker_candidates(dyn, admitted)
+        admission_shadow = bool(c.get("far_track_admission_enabled", True) and
+                                c.get("far_track_admission_shadow_mode", False))
         self.last_far_admission_candidates = [dict(x) for x in admitted]
         self.last_far_admission_rejections = [dict(x) for x in admission_rejections]
-        self.last_dynamic_candidates = [dict(x) for x in admitted]
-        tracked = self.tracker.update(admitted, now)
+        self.last_dynamic_candidates = [dict(x) for x in tracker_candidates]
+        tracked = self.tracker.update(tracker_candidates, now)
         self.last_tracked_candidates = [dict(x) for x in tracked]
         objs = [DetectedObject(i["id"], i["x"], i["y"], i["z"], vx=i["vx"], vy=i["vy"],
                                object_type="unknown", confidence=i["confidence"],
@@ -631,7 +641,7 @@ class SimpleFusion(object):
                         if not x.get("candidate_score_bypass", False)]
         sparse_roi = sum(1 for x in accepted if x.get("sparse_rescued", False))
         sparse_score = sum(1 for x in scored if x.get("sparse_rescued", False))
-        sparse_dynamic = sum(1 for x in admitted if x.get("sparse_rescued", False))
+        sparse_dynamic = sum(1 for x in tracker_candidates if x.get("sparse_rescued", False))
         ts = dict(getattr(self.tracker, "last_stats", {}) or {})
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
@@ -649,7 +659,7 @@ class SimpleFusion(object):
             "candidate_score_avg": (sum(score_values) / len(score_values) if score_values else None),
             "recovery_quality_pass": len(self.last_recovery_quality_candidates),
             "recovery_quality_rejected": len(self.last_recovery_quality_rejections),
-            "background_candidates": len(admitted),
+            "background_candidates": len(tracker_candidates),
             "background_pre_admission_candidates": len(dyn),
             "background_rejected": max(0, len(roi) - len(dyn)),
             "background_ready": background_ready, "background_remaining": background_remaining,
@@ -662,6 +672,8 @@ class SimpleFusion(object):
             "far_admission_sensor_bypass": int(admission_stats.get("sensor_bypass", 0)),
             "far_admission_strong_bypass": int(admission_stats.get("strong_bypass", 0)),
             "far_admission_track_bypass": int(admission_stats.get("track_bypass", 0)),
+            "far_admission_shadow_mode": admission_shadow,
+            "far_admission_tracker_input": len(tracker_candidates),
             "range_adaptive_clustering": bool(c.get("range_adaptive_clustering", False)),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "radar_world_points": radar_world_count, "radar_matched_objects": radar_matched,
