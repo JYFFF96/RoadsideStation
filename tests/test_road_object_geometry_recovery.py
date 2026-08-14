@@ -1,6 +1,9 @@
 from __future__ import print_function
 
+import os
 import unittest
+
+import yaml
 
 from roadside.road_object_geometry_recovery import RoadObjectGeometryRecovery
 from roadside.fusion import SimpleFusion
@@ -408,6 +411,31 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(3,sum(value["candidates"] for value in report["frame"].values()))
         report=evaluator.analyze_road_object_hybrid_rescue_profile([gated,near,far,false])
         self.assertEqual(4,report["run"]["far_ranked"]["candidates"])
+
+    def test_rescue_profiler_is_enabled_in_evaluation_config(self):
+        path=os.path.join(os.path.dirname(__file__),"..","config","roadside.yaml")
+        with open(path,"r") as stream:config=yaml.safe_load(stream)
+        self.assertTrue(config["evaluation"]["road_object_hybrid_rescue_feature_profiling"])
+        self.assertNotIn("road_object_hybrid_rescue_feature_profiling",config["fusion"])
+
+    def test_truth_lifecycle_distinguishes_boundary_exit_jump_and_disappearance(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "radius":80.0,"truth_lifecycle_diagnostics":True,
+            "truth_lifecycle_boundary_margin":10.0,
+            "truth_lifecycle_teleport_distance":8.0})
+        def actor(actor_id,x,role="rsu_test_walker"):
+            return {"actor_id":actor_id,"role":role,"type_id":"walker.pedestrian.0001",
+                    "x":float(x),"y":0.0,"range":abs(float(x))}
+        first=evaluator.analyze_truth_lifecycle([actor(1,10),actor(2,75)])
+        self.assertEqual(2,first["counts"]["entered"])
+        second=evaluator.analyze_truth_lifecycle([actor(1,20),actor(3,30)])
+        self.assertEqual(1,second["counts"]["entered"])
+        self.assertEqual(1,second["counts"]["boundary_exit"])
+        self.assertEqual(1,second["counts"]["teleport"])
+        third=evaluator.analyze_truth_lifecycle([actor(3,31)])
+        self.assertEqual(1,third["counts"]["unexpected_exit"])
+        self.assertEqual(1,third["totals"]["boundary_exit"])
+        self.assertEqual(1,third["totals"]["unexpected_exit"])
 
     def test_benchmark_session_resets_pre_spawn_cumulative_metrics(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{

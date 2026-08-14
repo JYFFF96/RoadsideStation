@@ -200,6 +200,12 @@ rescues into truth classes and false positives, including point, temporal,
 shape, score and range distributions. This remains evaluation-only evidence
 for tuning the two rescue rules independently.
 
+V0.6.12.8.2.2.13.1 fixes the Rescue profiler activation in the evaluation
+configuration and adds benchmark truth-lifecycle diagnostics. Tagged actors are
+reported when they enter, cross the evaluation boundary, disappear while still
+well inside it, or move by a teleport-sized step. These diagnostics remain
+CARLA evaluation-only and never affect perception or tracking.
+
 ## Current scope
 
 - Fixed roadside RGB camera

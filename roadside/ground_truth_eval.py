@@ -32,6 +32,9 @@ class GroundTruthEvaluator(object):
         self._road_object_benchmark_ids = set()
         self._road_object_benchmark_active = False
         self._road_object_benchmark_generation = 0
+        self._truth_lifecycle_prev = {}
+        self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
+                                        "unexpected_exit":0,"teleport":0}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -48,6 +51,9 @@ class GroundTruthEvaluator(object):
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
+        self._truth_lifecycle_prev = {}
+        self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
+                                        "unexpected_exit":0,"teleport":0}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -112,6 +118,39 @@ class GroundTruthEvaluator(object):
                             "range":float(distance)})
             except Exception:continue
         return out
+
+    def analyze_truth_lifecycle(self, truth=None):
+        """Describe tagged CARLA truth churn without feeding perception."""
+        if not self.config.get("truth_lifecycle_diagnostics",False):return {"enabled":False}
+        tagged=[dict(item) for item in (self.truth_objects() if truth is None else truth)
+                if str(item.get("role","" )).startswith("rsu_test_") and
+                item.get("actor_id") is not None]
+        current=dict((int(item["actor_id"]),item) for item in tagged)
+        previous=self._truth_lifecycle_prev;entered=[];boundary=[];unexpected=[];teleports=[]
+        margin=max(0.0,float(self.config.get("truth_lifecycle_boundary_margin",10.0)))
+        boundary_range=max(0.0,self.radius-margin)
+        jump_gate=max(0.0,float(self.config.get("truth_lifecycle_teleport_distance",8.0)))
+        for actor_id,item in current.items():
+            old=previous.get(actor_id)
+            if old is None:entered.append(item);continue
+            jump=math.hypot(float(item.get("x",0.0))-float(old.get("x",0.0)),
+                            float(item.get("y",0.0))-float(old.get("y",0.0)))
+            if jump>=jump_gate:
+                event=dict(item);event["jump_distance"]=jump;event["previous_range"]=old.get("range")
+                teleports.append(event)
+        for actor_id,item in previous.items():
+            if actor_id in current:continue
+            if float(item.get("range",0.0))>=boundary_range:boundary.append(item)
+            else:unexpected.append(item)
+        counts={"entered":len(entered),"boundary_exit":len(boundary),
+                "unexpected_exit":len(unexpected),"teleport":len(teleports)}
+        for name,value in counts.items():self._truth_lifecycle_totals[name]+=value
+        self._truth_lifecycle_prev=current
+        return {"enabled":True,"active":len(current),"entered":entered,
+                "boundary_exit":boundary,"unexpected_exit":unexpected,
+                "teleport":teleports,"counts":counts,
+                "totals":dict(self._truth_lifecycle_totals),
+                "boundary_range":boundary_range,"teleport_distance":jump_gate}
 
     def truth_vehicles(self):
         """Compatibility view for vehicle-specific legacy diagnostics."""
