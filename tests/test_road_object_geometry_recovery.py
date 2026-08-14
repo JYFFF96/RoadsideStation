@@ -103,6 +103,23 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual("low",selected[0]["id"])
         self.assertGreater(low["adaptive_rank_score"],tall["adaptive_rank_score"])
 
+    def test_adaptive_stratified_ranking_reserves_elevated_candidates(self):
+        recovery=RoadObjectGeometryRecovery();config={
+            "road_object_recovery_adaptive_stratified_shadow":True,
+            "road_object_recovery_min_range":5.0,
+            "road_object_recovery_balanced_bands":[{"max_range":35.0,"quota":4}],
+            "road_object_adaptive_stratified_height":.30,
+            "road_object_adaptive_stratified_elevated_quota":2}
+        items=[]
+        for index,height in enumerate([.05,.08,.12,.70,.80,.90]):
+            items.append({"id":index,"x":30.0+index*.01,"y":0.0,"point_count":5,
+                          "current_point_count":2,"support_frames":4,
+                          "extent":[.5,.2,height]})
+        selected=recovery._adaptive_stratified_cap(items,4,config)
+        heights=[item["extent"][2] for item in selected]
+        self.assertEqual(2,sum(1 for value in heights if value<=.30))
+        self.assertEqual(2,sum(1 for value in heights if value>.30))
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -240,6 +257,10 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         evaluator._adaptive_temporal_samples["false"].append({"point_count":5})
         evaluator._road_object_cap_totals["baseline"]["candidates"]=7
         self.assertFalse(evaluator._sync_road_object_benchmark_session([])["reset"])
+        walkers=[{"actor_id":10,"role":"rsu_test_walker"}]
+        pending=evaluator._sync_road_object_benchmark_session(walkers)
+        self.assertTrue(pending["pending"])
+        self.assertFalse(pending["reset"])
         first=[{"actor_id":42,"role":"rsu_test_obstacle"}]
         session=evaluator._sync_road_object_benchmark_session(first)
         self.assertTrue(session["reset"])

@@ -111,6 +111,10 @@ fusion:
   road_object_adaptive_rank_mid_height: 0.75
   road_object_adaptive_rank_target_points: 5.0
   road_object_adaptive_rank_full_support_frames: 4
+  # V0.6.12.8.2.2.8: reserve both low and elevated candidates per range band.
+  road_object_recovery_adaptive_stratified_shadow: true
+  road_object_adaptive_stratified_height: 0.30
+  road_object_adaptive_stratified_elevated_quota: 2
 
   range_adaptive_clustering: true
   range_bands:

@@ -162,6 +162,13 @@ samples, actor/stage coverage and cap-comparison totals are reset before that
 frame is recorded. This makes `main.py`-first and target-spawner-first launch
 orders comparable without changing perception, recovery or ranking behavior.
 
+V0.6.12.8.2.2.8 adds a label-free height-stratified Adaptive ranking in Shadow.
+Each sensor-range band reserves slots for both low geometry and elevated
+geometry before refilling from the scalar score. This tests whether the extra
+low-obstacle recall from V0.6.12.8.2.2.6 can be retained without displacing as
+many pedestrian candidates. Benchmark activation now waits for tagged obstacle
+actors, preventing a transient walker-only frame from creating a second reset.
+
 ## Current scope
 
 - Fixed roadside RGB camera

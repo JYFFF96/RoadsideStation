@@ -32,7 +32,9 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_components":0,"adaptive_shape_pass":0,
                 "adaptive_temporal_pass":0,"adaptive_dedupe":0,
                 "adaptive_built":0,"adaptive_band_counts":{},
-                "adaptive_ranked_built":0,"adaptive_ranked_band_counts":{}}
+                "adaptive_ranked_built":0,"adaptive_ranked_band_counts":{},
+                "adaptive_stratified_built":0,"adaptive_stratified_band_counts":{},
+                "adaptive_stratified_height_counts":{}}
 
     @staticmethod
     def _empty_stages():
@@ -40,7 +42,7 @@ class RoadObjectGeometryRecovery(object):
                 "output":[],"balanced_output":[],"adaptive_component":[],
                 "adaptive_shape":[],"adaptive_temporal":[],
                 "adaptive_dedupe_pass":[],"adaptive_output":[],
-                "adaptive_ranked_output":[]}
+                "adaptive_ranked_output":[],"adaptive_stratified_output":[]}
 
     def _clear_diagnostics(self):
         self.last_input_points=np.empty((0,3),dtype=np.float32)
@@ -111,6 +113,43 @@ class RoadObjectGeometryRecovery(object):
         return self._balanced_cap(ranked,limit,config) or ranked[:limit]
 
     @staticmethod
+    def _candidate_height(item):
+        try:return float((item.get("extent",[]) or [0.0,0.0,0.0])[2])
+        except (IndexError,TypeError,ValueError):return 9.0
+
+    def _adaptive_stratified_cap(self, items, limit, config):
+        """Reserve low/elevated geometry slots without using object labels."""
+        if not config.get("road_object_recovery_adaptive_stratified_shadow",False) or limit<=0:return []
+        for item in items:item["adaptive_rank_score"]=self._adaptive_rank_score(item,config)
+        ranked=sorted(items,key=lambda value:(value.get("adaptive_rank_score",0.0),
+                      value.get("support_frames",0),-abs(float(value.get("point_count",0))-5.0)),reverse=True)
+        threshold=float(config.get("road_object_adaptive_stratified_height",.30))
+        elevated_quota=max(0,int(config.get("road_object_adaptive_stratified_elevated_quota",2)))
+        bands=config.get("road_object_recovery_balanced_bands",[]) or []
+        parsed=[];lower=float(config.get("road_object_recovery_min_range",5.0))
+        for value in bands:
+            try:upper=float(value.get("max_range"));quota=max(0,int(value.get("quota",0)))
+            except (AttributeError,TypeError,ValueError):continue
+            if upper<=lower:continue
+            parsed.append((lower,upper,quota));lower=upper
+        selected=[];selected_ids=set()
+        for low,high,quota in parsed:
+            candidates=[item for item in ranked if low<=self._sensor_range(item)<high]
+            elevated=[item for item in candidates if self._candidate_height(item)>threshold]
+            low_items=[item for item in candidates if self._candidate_height(item)<=threshold]
+            low_quota=max(0,quota-min(quota,elevated_quota))
+            band_selected=0
+            for pool,count in ((low_items,low_quota),(elevated,min(quota,elevated_quota)),(candidates,quota)):
+                for item in pool:
+                    if len(selected)>=limit or count<=0 or band_selected>=quota:break
+                    if id(item) in selected_ids:continue
+                    selected.append(item);selected_ids.add(id(item));count-=1;band_selected+=1
+        for item in ranked:
+            if len(selected)>=limit:break
+            if id(item) not in selected_ids:selected.append(item);selected_ids.add(id(item))
+        return selected
+
+    @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
         """Return spatially unique points and the source-frame set per voxel."""
         cells={};voxel=max(.02,float(voxel))
@@ -148,7 +187,7 @@ class RoadObjectGeometryRecovery(object):
     def _adaptive_temporal_candidates(self, pts, existing_geometry, config, stats):
         bands=self._adaptive_bands(config)
         empty={"component":[],"shape":[],"temporal":[],"dedupe_pass":[],
-               "output":[],"ranked_output":[]}
+               "output":[],"ranked_output":[],"stratified_output":[]}
         if not bands:
             self.adaptive_point_history=[]
             return empty
@@ -198,6 +237,7 @@ class RoadObjectGeometryRecovery(object):
         limit=max(0,int(config.get("road_object_recovery_max_candidates",12)))
         output=self._balanced_cap(dedupe_pass,limit,config) or dedupe_pass[:limit]
         ranked_output=self._adaptive_ranked_cap(dedupe_pass,limit,config)
+        stratified_output=self._adaptive_stratified_cap(dedupe_pass,limit,config)
         stats["adaptive_built"]=len(output);counts={}
         for low,high,_,_,_ in bands:
             label="%.0f-%.0fm"%(low,high)
@@ -208,10 +248,20 @@ class RoadObjectGeometryRecovery(object):
             label="%.0f-%.0fm"%(low,high)
             ranked_counts[label]=sum(1 for item in ranked_output if low<=self._sensor_range(item)<high)
         stats["adaptive_ranked_band_counts"]=ranked_counts
+        stats["adaptive_stratified_built"]=len(stratified_output);stratified_counts={}
+        for low,high,_,_,_ in bands:
+            label="%.0f-%.0fm"%(low,high)
+            stratified_counts[label]=sum(1 for item in stratified_output if low<=self._sensor_range(item)<high)
+        stats["adaptive_stratified_band_counts"]=stratified_counts
+        height_threshold=float(config.get("road_object_adaptive_stratified_height",.30))
+        stats["adaptive_stratified_height_counts"]={
+            "low":sum(1 for item in stratified_output if self._candidate_height(item)<=height_threshold),
+            "elevated":sum(1 for item in stratified_output if self._candidate_height(item)>height_threshold)}
         self.adaptive_point_history.append(pts.copy())
         self.adaptive_point_history=self.adaptive_point_history[-keep:] if keep else []
         return {"component":components,"shape":shapes,"temporal":stable,
-                "dedupe_pass":dedupe_pass,"output":output,"ranked_output":ranked_output}
+                "dedupe_pass":dedupe_pass,"output":output,"ranked_output":ranked_output,
+                "stratified_output":stratified_output}
 
     def update(self, points, existing_geometry, ground_cut_local, config=None, frame_id=None):
         c=config or {};stats=self._empty_stats()
@@ -314,5 +364,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_temporal":[dict(x) for x in adaptive["temporal"]],
                                  "adaptive_dedupe_pass":[dict(x) for x in adaptive["dedupe_pass"]],
                                  "adaptive_output":[dict(x) for x in adaptive["output"]],
-                                 "adaptive_ranked_output":[dict(x) for x in adaptive["ranked_output"]]}
+                                 "adaptive_ranked_output":[dict(x) for x in adaptive["ranked_output"]],
+                                 "adaptive_stratified_output":[dict(x) for x in adaptive["stratified_output"]]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out
