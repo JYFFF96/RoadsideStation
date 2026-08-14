@@ -276,6 +276,32 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         report=evaluator.analyze_road_object_adaptive_profile([good,false])
         self.assertEqual(4,report["run"]["candidates"])
 
+    def test_hybrid_selection_profile_splits_sources_truth_and_fp(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_hybrid_feature_profiling":True})
+        truth=[{"actor_id":42,"type_id":"static.prop.box02","role":"rsu_test_obstacle",
+                "object_type":"unknown_obstacle","x":10.0,"y":0.0,"range":10.0},
+               {"actor_id":43,"type_id":"walker.pedestrian.0001","role":"rsu_test_walker",
+                "object_type":"person","x":30.0,"y":0.0,"range":30.0}]
+        evaluator.truth_objects=lambda:truth
+        evaluator._detected_with_range=lambda items:list(items)
+        near={"x":10.1,"y":0.0,"range":10.1,"point_count":12,
+              "extent":[.5,.3,.2],"adaptive_hybrid_source":"near_baseline"}
+        far={"x":30.1,"y":0.0,"range":30.1,"point_count":6,
+             "current_point_count":2,"temporal_point_count":4,"support_frames":3,
+             "adaptive_rank_score":.7,"extent":[.4,.2,.8],
+             "adaptive_hybrid_source":"far_ranked"}
+        false={"x":40.0,"y":5.0,"range":40.3,"point_count":8,
+               "adaptive_rank_score":.6,"extent":[1.0,.5,.6],
+               "adaptive_hybrid_source":"far_ranked"}
+        report=evaluator.analyze_road_object_hybrid_profile([near,far,false])
+        self.assertEqual(1,report["frame"]["near_baseline"]["matched"])
+        self.assertEqual(1,report["frame"]["far_ranked"]["matched"])
+        self.assertEqual(1,report["frame"]["far_ranked"]["fp"])
+        self.assertEqual(1,report["run"]["far_ranked"]["classes"]["person"]["samples"])
+        report=evaluator.analyze_road_object_hybrid_profile([near,far,false])
+        self.assertEqual(4,report["run"]["far_ranked"]["candidates"])
+
     def test_benchmark_session_resets_pre_spawn_cumulative_metrics(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
             "road_object_benchmark_session_isolation":True})

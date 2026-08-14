@@ -371,6 +371,8 @@ evaluation:
   road_object_benchmark_session_isolation: true
   # V0.6.12.8.2.2.5: profile Adaptive pre-cap truth/FP scalar features only.
   road_object_adaptive_feature_profiling: true
+  # V0.6.12.8.2.2.10: source/class feature profiles for selected Hybrid candidates.
+  road_object_hybrid_feature_profiling: true
   # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.
   far_admission_decision_diagnostics: true
   # V0.6.12.7.3: compare truth/FP score, geometry and source distributions.

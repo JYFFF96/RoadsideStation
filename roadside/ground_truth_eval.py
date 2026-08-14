@@ -24,6 +24,7 @@ class GroundTruthEvaluator(object):
         self._far_admission_totals = self._empty_admission_totals()
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
+        self._hybrid_selection_samples = {}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
@@ -40,6 +41,7 @@ class GroundTruthEvaluator(object):
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
+        self._hybrid_selection_samples = {}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
@@ -649,6 +651,36 @@ class GroundTruthEvaluator(object):
                 "frame":self._adaptive_temporal_summary(class_items,false_items),
                 "run":self._adaptive_temporal_summary(self._adaptive_temporal_samples["classes"],
                                                       self._adaptive_temporal_samples["false"])}
+
+    @classmethod
+    def _hybrid_selection_summary(cls, buckets):
+        result={}
+        for source,bucket in sorted((buckets or {}).items()):
+            result[source]=cls._adaptive_temporal_summary(bucket.get("classes",{}),
+                                                          bucket.get("false",[]))
+        return result
+
+    def analyze_road_object_hybrid_profile(self, candidates):
+        """Profile selected Hybrid sources; CARLA truth remains evaluation-only."""
+        if not self.config.get("road_object_hybrid_feature_profiling",False):return {"enabled":False}
+        truth=self.truth_objects();detected=self._detected_with_range(candidates);pairs=self._match(truth,detected)
+        used=set(di for _,di,_ in pairs);frame={}
+        for ti,di,_ in pairs:
+            item=detected[di];source=str(item.get("adaptive_hybrid_source","unknown"))
+            bucket=frame.setdefault(source,{"classes":{},"false":[]})
+            name=truth[ti].get("object_type","unknown_obstacle")
+            bucket["classes"].setdefault(name,[]).append(item)
+        for di,item in enumerate(detected):
+            if di in used:continue
+            source=str(item.get("adaptive_hybrid_source","unknown"))
+            frame.setdefault(source,{"classes":{},"false":[]})["false"].append(item)
+        for source,bucket in frame.items():
+            total=self._hybrid_selection_samples.setdefault(source,{"classes":{},"false":[]})
+            for name,items in bucket["classes"].items():
+                total["classes"].setdefault(name,[]).extend(items)
+            total["false"].extend(bucket["false"])
+        return {"enabled":True,"frame":self._hybrid_selection_summary(frame),
+                "run":self._hybrid_selection_summary(self._hybrid_selection_samples)}
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""

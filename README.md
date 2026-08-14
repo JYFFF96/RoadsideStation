@@ -175,6 +175,12 @@ candidates supply the 5-25m band while scalar-ranked Adaptive candidates supply
 pool. Baseline far candidates can refill unused capacity. The Hybrid list is
 evaluation-only and does not alter ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.10 profiles the selected Hybrid candidates by source. Frame and
+session reports split `near_baseline`, `far_ranked` and fallback candidates into
+truth classes and false positives, with score, point support, temporal support,
+height, footprint and range distributions. The profiler is evaluation-only and
+provides real-device-portable evidence for a later Hybrid admission gate.
+
 ## Current scope
 
 - Fixed roadside RGB camera
