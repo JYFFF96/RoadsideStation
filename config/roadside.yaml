@@ -135,6 +135,8 @@ fusion:
   road_object_hybrid_rescue_far_support_frames: 3
   road_object_hybrid_rescue_far_min_points: 4
   road_object_hybrid_rescue_far_current_points: 1
+  # V0.6.12.8.2.2.13: profile only candidates added by temporal rescue.
+  road_object_hybrid_rescue_feature_profiling: true
 
   range_adaptive_clustering: true
   range_bands:

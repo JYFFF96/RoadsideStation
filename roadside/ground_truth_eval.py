@@ -25,6 +25,7 @@ class GroundTruthEvaluator(object):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._hybrid_selection_samples = {}
+        self._hybrid_rescue_samples = {}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
@@ -43,6 +44,7 @@ class GroundTruthEvaluator(object):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._hybrid_selection_samples = {}
+        self._hybrid_rescue_samples = {}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
@@ -687,6 +689,30 @@ class GroundTruthEvaluator(object):
             total["false"].extend(bucket["false"])
         return {"enabled":True,"frame":self._hybrid_selection_summary(frame),
                 "run":self._hybrid_selection_summary(self._hybrid_selection_samples)}
+
+    def analyze_road_object_hybrid_rescue_profile(self, candidates):
+        """Profile only candidates added back by Hybrid temporal rescue."""
+        if not self.config.get("road_object_hybrid_rescue_feature_profiling",False):return {"enabled":False}
+        rescued=[item for item in candidates or []
+                 if item.get("adaptive_hybrid_temporal_rescue",False)]
+        truth=self.truth_objects();detected=self._detected_with_range(rescued)
+        pairs=self._match(truth,detected);used=set(di for _,di,_ in pairs);frame={}
+        for ti,di,_ in pairs:
+            item=detected[di];source=str(item.get("adaptive_hybrid_source","unknown"))
+            bucket=frame.setdefault(source,{"classes":{},"false":[]})
+            name=truth[ti].get("object_type","unknown_obstacle")
+            bucket["classes"].setdefault(name,[]).append(item)
+        for di,item in enumerate(detected):
+            if di in used:continue
+            source=str(item.get("adaptive_hybrid_source","unknown"))
+            frame.setdefault(source,{"classes":{},"false":[]})["false"].append(item)
+        for source,bucket in frame.items():
+            total=self._hybrid_rescue_samples.setdefault(source,{"classes":{},"false":[]})
+            for name,items in bucket["classes"].items():
+                total["classes"].setdefault(name,[]).extend(items)
+            total["false"].extend(bucket["false"])
+        return {"enabled":True,"frame":self._hybrid_selection_summary(frame),
+                "run":self._hybrid_selection_summary(self._hybrid_rescue_samples)}
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""

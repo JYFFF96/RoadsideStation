@@ -194,6 +194,12 @@ three-frame support with at least four accumulated and one current point. The
 rescued list is reported independently and still does not feed production ROI,
 Tracker or ObjectList.
 
+V0.6.12.8.2.2.13 profiles only the incremental candidates restored by that
+temporal rescue. Frame and session reports split Near Baseline and Far Ranked
+rescues into truth classes and false positives, including point, temporal,
+shape, score and range distributions. This remains evaluation-only evidence
+for tuning the two rescue rules independently.
+
 ## Current scope
 
 - Fixed roadside RGB camera
