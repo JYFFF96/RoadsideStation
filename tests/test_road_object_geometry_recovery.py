@@ -178,6 +178,50 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(1,reasons["near_points"])
         self.assertEqual(1,reasons["far_support"])
 
+    def test_hybrid_temporal_rescue_restores_persistent_sparse_rejects(self):
+        recovery=RoadObjectGeometryRecovery();config={
+            "road_object_recovery_adaptive_hybrid_gate_shadow":True,
+            "road_object_hybrid_gate_near_min_points":8,
+            "road_object_hybrid_gate_near_low_height":.45,
+            "road_object_hybrid_gate_near_min_short_side":.50,
+            "road_object_hybrid_gate_far_stable_frames":4,
+            "road_object_hybrid_gate_far_close_range":32.0,
+            "road_object_hybrid_gate_far_close_min_points":5,
+            "road_object_hybrid_gate_far_close_current_points":2,
+            "road_object_recovery_adaptive_hybrid_rescue_shadow":True,
+            "road_object_hybrid_rescue_near_temporal_hits":3,
+            "road_object_hybrid_rescue_near_min_points":5,
+            "road_object_hybrid_rescue_far_max_range":32.0,
+            "road_object_hybrid_rescue_far_support_frames":3,
+            "road_object_hybrid_rescue_far_min_points":4,
+            "road_object_hybrid_rescue_far_current_points":1}
+        items=[
+            {"id":"near_keep","x":15.0,"y":0.0,"point_count":8,
+             "road_object_temporal_hits":2,"extent":[.8,.6,.9],
+             "adaptive_hybrid_source":"near_baseline"},
+            {"id":"near_rescue","x":18.0,"y":0.0,"point_count":5,
+             "road_object_temporal_hits":3,"extent":[.4,.2,.9],
+             "adaptive_hybrid_source":"near_baseline"},
+            {"id":"near_reject","x":19.0,"y":0.0,"point_count":5,
+             "road_object_temporal_hits":2,"extent":[.4,.2,.9],
+             "adaptive_hybrid_source":"near_baseline"},
+            {"id":"far_keep","x":38.0,"y":0.0,"point_count":4,
+             "current_point_count":1,"support_frames":4,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"},
+            {"id":"far_rescue","x":30.0,"y":0.0,"point_count":4,
+             "current_point_count":1,"support_frames":3,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"},
+            {"id":"far_reject","x":38.0,"y":0.0,"point_count":4,
+             "current_point_count":1,"support_frames":3,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"}]
+        recovery._adaptive_hybrid_gate(items,config)
+        output,sources=recovery._adaptive_hybrid_temporal_rescue(items,config)
+        self.assertEqual(set(["near_keep","near_rescue","far_keep","far_rescue"]),
+                         set(item["id"] for item in output))
+        self.assertEqual({"near_baseline":1,"far_ranked":1},sources)
+        self.assertTrue(next(item for item in output if item["id"]=="near_rescue")
+                        ["adaptive_hybrid_temporal_rescue"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,

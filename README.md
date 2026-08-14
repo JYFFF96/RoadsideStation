@@ -187,6 +187,13 @@ complete short side. Far Ranked candidates require four-frame stability, or
 strong current support inside 32m. Logs compare the gated list with the full
 Hybrid list; neither list is connected to production ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.12 adds a second Shadow-only temporal rescue after the strict
+Hybrid gate. It restores Near Baseline rejects only after three-frame support
+with at least five points, and restores Far Ranked rejects inside 32m after
+three-frame support with at least four accumulated and one current point. The
+rescued list is reported independently and still does not feed production ROI,
+Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

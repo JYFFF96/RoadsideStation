@@ -38,7 +38,9 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_hybrid_built":0,"adaptive_hybrid_band_counts":{},
                 "adaptive_hybrid_source_counts":{},
                 "adaptive_hybrid_gate_kept":0,"adaptive_hybrid_gate_rejected":0,
-                "adaptive_hybrid_gate_reasons":{}}
+                "adaptive_hybrid_gate_reasons":{},
+                "adaptive_hybrid_rescue_kept":0,"adaptive_hybrid_rescued":0,
+                "adaptive_hybrid_rescue_sources":{}}
 
     @staticmethod
     def _empty_stages():
@@ -47,7 +49,9 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_shape":[],"adaptive_temporal":[],
                 "adaptive_dedupe_pass":[],"adaptive_output":[],
                 "adaptive_ranked_output":[],"adaptive_stratified_output":[],
-                "adaptive_hybrid_output":[],"adaptive_hybrid_gated_output":[]}
+                "adaptive_hybrid_output":[],"adaptive_hybrid_gated_output":[],
+                "adaptive_hybrid_rescued_output":[]}
+
 
     def _clear_diagnostics(self):
         self.last_input_points=np.empty((0,3),dtype=np.float32)
@@ -178,7 +182,7 @@ class RoadObjectGeometryRecovery(object):
         if not config.get("road_object_recovery_adaptive_hybrid_gate_shadow",False):return [],{}
         kept=[];reasons={}
         for original in items:
-            item=dict(original);source=str(item.get("adaptive_hybrid_source","unknown"));failed=[]
+            item=original;source=str(item.get("adaptive_hybrid_source","unknown"));failed=[]
             points=float(item.get("point_count",0) or 0);height=self._candidate_height(item)
             extent=list(item.get("extent",[]) or [])
             try:short_side=min(float(extent[0]),float(extent[1]))
@@ -202,6 +206,30 @@ class RoadObjectGeometryRecovery(object):
                 for reason in failed:reasons[reason]=reasons.get(reason,0)+1
             else:kept.append(item)
         return kept,reasons
+
+    def _adaptive_hybrid_temporal_rescue(self, items, config):
+        """Recover persistent sparse candidates rejected by the strict Shadow gate."""
+        if not config.get("road_object_recovery_adaptive_hybrid_rescue_shadow",False):return [],{}
+        output=[];sources={}
+        for item in items:
+            if item.get("adaptive_hybrid_gate_keep",False):output.append(item);continue
+            source=str(item.get("adaptive_hybrid_source","unknown"));rescue=False
+            points=float(item.get("point_count",0) or 0)
+            if source=="near_baseline":
+                hits=float(item.get("road_object_temporal_hits",0) or 0)
+                rescue=(hits>=float(config.get("road_object_hybrid_rescue_near_temporal_hits",3)) and
+                        points>=float(config.get("road_object_hybrid_rescue_near_min_points",5)))
+            else:
+                frames=float(item.get("support_frames",0) or 0)
+                current=float(item.get("current_point_count",0) or 0);distance=self._sensor_range(item)
+                rescue=(distance<=float(config.get("road_object_hybrid_rescue_far_max_range",32.0)) and
+                        frames>=float(config.get("road_object_hybrid_rescue_far_support_frames",3)) and
+                        points>=float(config.get("road_object_hybrid_rescue_far_min_points",4)) and
+                        current>=float(config.get("road_object_hybrid_rescue_far_current_points",1)))
+            if rescue:
+                item["adaptive_hybrid_temporal_rescue"]=True;output.append(item)
+                sources[source]=sources.get(source,0)+1
+        return output,sources
 
     @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
@@ -409,6 +437,7 @@ class RoadObjectGeometryRecovery(object):
         adaptive=self._adaptive_temporal_candidates(pts,existing_geometry,c,stats)
         hybrid=self._adaptive_hybrid_cap(dedupe_pass,adaptive["dedupe_pass"],limit,c)
         hybrid_gated,hybrid_gate_reasons=self._adaptive_hybrid_gate(hybrid,c)
+        hybrid_rescued,hybrid_rescue_sources=self._adaptive_hybrid_temporal_rescue(hybrid,c)
         stats["adaptive_hybrid_built"]=len(hybrid);hybrid_counts={};hybrid_lower=min_range
         for value in c.get("road_object_recovery_balanced_bands",[]) or []:
             try:hybrid_upper=float(value.get("max_range"))
@@ -424,6 +453,9 @@ class RoadObjectGeometryRecovery(object):
         stats["adaptive_hybrid_gate_kept"]=len(hybrid_gated)
         stats["adaptive_hybrid_gate_rejected"]=max(0,len(hybrid)-len(hybrid_gated))
         stats["adaptive_hybrid_gate_reasons"]=hybrid_gate_reasons
+        stats["adaptive_hybrid_rescue_kept"]=len(hybrid_rescued)
+        stats["adaptive_hybrid_rescued"]=max(0,len(hybrid_rescued)-len(hybrid_gated))
+        stats["adaptive_hybrid_rescue_sources"]=hybrid_rescue_sources
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
@@ -438,5 +470,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_ranked_output":[dict(x) for x in adaptive["ranked_output"]],
                                  "adaptive_stratified_output":[dict(x) for x in adaptive["stratified_output"]],
                                  "adaptive_hybrid_output":[dict(x) for x in hybrid],
-                                 "adaptive_hybrid_gated_output":[dict(x) for x in hybrid_gated]}
+                                 "adaptive_hybrid_gated_output":[dict(x) for x in hybrid_gated],
+                                 "adaptive_hybrid_rescued_output":[dict(x) for x in hybrid_rescued]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out

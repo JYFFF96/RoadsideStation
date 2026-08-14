@@ -37,7 +37,7 @@ class GroundTruthEvaluator(object):
         return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
                     for name in ("baseline","balanced","adaptive","adaptive_ranked",
                                  "adaptive_stratified","adaptive_hybrid",
-                                 "adaptive_hybrid_gated"))
+                                 "adaptive_hybrid_gated","adaptive_hybrid_rescued"))
 
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
@@ -533,7 +533,7 @@ class GroundTruthEvaluator(object):
                      "adaptive_component","adaptive_shape","adaptive_temporal",
                      "adaptive_dedupe_pass","adaptive_output","adaptive_ranked_output",
                      "adaptive_stratified_output","adaptive_hybrid_output",
-                     "adaptive_hybrid_gated_output")
+                     "adaptive_hybrid_gated_output","adaptive_hybrid_rescued_output")
         for gt in truth:
             if gt.get("object_type")!="unknown_obstacle" or gt.get("role")!="rsu_test_obstacle":continue
             actor_id=int(gt.get("actor_id",0));bucket=self._road_object_stage_coverage.setdefault(actor_id,{
@@ -572,7 +572,8 @@ class GroundTruthEvaluator(object):
                                            adaptive_candidates=None,adaptive_ranked_candidates=None,
                                            adaptive_stratified_candidates=None,
                                            adaptive_hybrid_candidates=None,
-                                           adaptive_hybrid_gated_candidates=None):
+                                           adaptive_hybrid_gated_candidates=None,
+                                           adaptive_hybrid_rescued_candidates=None):
         """Compare baseline, balanced and adaptive Shadow outputs in evaluation."""
         truth=self.truth_objects();result={}
         variants=(("baseline",baseline_candidates),("balanced",balanced_candidates))
@@ -581,6 +582,7 @@ class GroundTruthEvaluator(object):
         if adaptive_stratified_candidates is not None:variants+=(("adaptive_stratified",adaptive_stratified_candidates),)
         if adaptive_hybrid_candidates is not None:variants+=(("adaptive_hybrid",adaptive_hybrid_candidates),)
         if adaptive_hybrid_gated_candidates is not None:variants+=(("adaptive_hybrid_gated",adaptive_hybrid_gated_candidates),)
+        if adaptive_hybrid_rescued_candidates is not None:variants+=(("adaptive_hybrid_rescued",adaptive_hybrid_rescued_candidates),)
         for name,candidates in variants:
             detected=self._detected_with_range(candidates);pairs=self._match(truth,detected);classes={}
             for ti,_,_ in pairs:

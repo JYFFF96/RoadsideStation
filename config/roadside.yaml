@@ -127,6 +127,14 @@ fusion:
   road_object_hybrid_gate_far_close_range: 32.0
   road_object_hybrid_gate_far_close_min_points: 5
   road_object_hybrid_gate_far_close_current_points: 2
+  # V0.6.12.8.2.2.12: recover persistent sparse rejects in a second Shadow path.
+  road_object_recovery_adaptive_hybrid_rescue_shadow: true
+  road_object_hybrid_rescue_near_temporal_hits: 3
+  road_object_hybrid_rescue_near_min_points: 5
+  road_object_hybrid_rescue_far_max_range: 32.0
+  road_object_hybrid_rescue_far_support_frames: 3
+  road_object_hybrid_rescue_far_min_points: 4
+  road_object_hybrid_rescue_far_current_points: 1
 
   range_adaptive_clustering: true
   range_bands:
