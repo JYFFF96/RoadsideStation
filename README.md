@@ -219,6 +219,12 @@ rescues must be within 28m of the sensor. The resulting complete candidate list
 is evaluated beside the ungated Rescue list and remains disconnected from ROI,
 Tracker and ObjectList.
 
+V0.6.12.8.2.2.16 introduces a named Selected output policy in Shadow. The
+policy currently resolves to the Hybrid Geometry-Gated list and is reported as
+a separate stage and cumulative comparison. The recovery function still
+returns its legacy baseline and global Shadow remains enabled, so selecting a
+policy cannot yet change ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

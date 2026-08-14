@@ -43,7 +43,8 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_hybrid_rescue_sources":{},
                 "adaptive_hybrid_geometry_gate_kept":0,
                 "adaptive_hybrid_geometry_gate_rejected":0,
-                "adaptive_hybrid_geometry_gate_reasons":{}}
+                "adaptive_hybrid_geometry_gate_reasons":{},
+                "selected_output_built":0,"selected_output_policy":"disabled"}
 
     @staticmethod
     def _empty_stages():
@@ -54,7 +55,7 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_ranked_output":[],"adaptive_stratified_output":[],
                 "adaptive_hybrid_output":[],"adaptive_hybrid_gated_output":[],
                 "adaptive_hybrid_rescued_output":[],
-                "adaptive_hybrid_geometry_gated_output":[]}
+                "adaptive_hybrid_geometry_gated_output":[],"selected_output":[]}
 
 
     def _clear_diagnostics(self):
@@ -257,6 +258,19 @@ class RoadObjectGeometryRecovery(object):
             if keep:output.append(item)
             else:reasons[reason]=reasons.get(reason,0)+1
         return output,reasons
+
+    @staticmethod
+    def _selected_shadow_output(stages, config):
+        """Resolve a named future-output policy while production stays Shadow."""
+        if not config.get("road_object_recovery_selected_output_shadow",False):return [],"disabled"
+        policy=str(config.get("road_object_recovery_selected_output_policy",
+                              "adaptive_hybrid_geometry_gated"))
+        choices={"baseline":stages.get("baseline",[]),
+                 "adaptive_hybrid_gated":stages.get("adaptive_hybrid_gated",[]),
+                 "adaptive_hybrid_rescued":stages.get("adaptive_hybrid_rescued",[]),
+                 "adaptive_hybrid_geometry_gated":stages.get("adaptive_hybrid_geometry_gated",[])}
+        if policy not in choices:policy="baseline"
+        return list(choices[policy]),policy
 
     @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
@@ -466,6 +480,10 @@ class RoadObjectGeometryRecovery(object):
         hybrid_gated,hybrid_gate_reasons=self._adaptive_hybrid_gate(hybrid,c)
         hybrid_rescued,hybrid_rescue_sources=self._adaptive_hybrid_temporal_rescue(hybrid,c)
         hybrid_geometry_gated,hybrid_geometry_gate_reasons=self._adaptive_hybrid_rescue_geometry_gate(hybrid_rescued,c)
+        selected_output,selected_policy=self._selected_shadow_output({
+            "baseline":out,"adaptive_hybrid_gated":hybrid_gated,
+            "adaptive_hybrid_rescued":hybrid_rescued,
+            "adaptive_hybrid_geometry_gated":hybrid_geometry_gated},c)
         stats["adaptive_hybrid_built"]=len(hybrid);hybrid_counts={};hybrid_lower=min_range
         for value in c.get("road_object_recovery_balanced_bands",[]) or []:
             try:hybrid_upper=float(value.get("max_range"))
@@ -487,6 +505,7 @@ class RoadObjectGeometryRecovery(object):
         stats["adaptive_hybrid_geometry_gate_kept"]=len(hybrid_geometry_gated)
         stats["adaptive_hybrid_geometry_gate_rejected"]=max(0,len(hybrid_rescued)-len(hybrid_geometry_gated))
         stats["adaptive_hybrid_geometry_gate_reasons"]=hybrid_geometry_gate_reasons
+        stats["selected_output_built"]=len(selected_output);stats["selected_output_policy"]=selected_policy
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
@@ -503,5 +522,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_hybrid_output":[dict(x) for x in hybrid],
                                  "adaptive_hybrid_gated_output":[dict(x) for x in hybrid_gated],
                                  "adaptive_hybrid_rescued_output":[dict(x) for x in hybrid_rescued],
-                                 "adaptive_hybrid_geometry_gated_output":[dict(x) for x in hybrid_geometry_gated]}
+                                 "adaptive_hybrid_geometry_gated_output":[dict(x) for x in hybrid_geometry_gated],
+                                 "selected_output":[dict(x) for x in selected_output]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out

@@ -42,7 +42,7 @@ class GroundTruthEvaluator(object):
                     for name in ("baseline","balanced","adaptive","adaptive_ranked",
                                  "adaptive_stratified","adaptive_hybrid",
                                  "adaptive_hybrid_gated","adaptive_hybrid_rescued",
-                                 "adaptive_hybrid_geometry_gated"))
+                                 "adaptive_hybrid_geometry_gated","selected"))
 
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
@@ -576,7 +576,7 @@ class GroundTruthEvaluator(object):
                      "adaptive_dedupe_pass","adaptive_output","adaptive_ranked_output",
                      "adaptive_stratified_output","adaptive_hybrid_output",
                      "adaptive_hybrid_gated_output","adaptive_hybrid_rescued_output",
-                     "adaptive_hybrid_geometry_gated_output")
+                     "adaptive_hybrid_geometry_gated_output","selected_output")
         for gt in truth:
             if gt.get("object_type")!="unknown_obstacle" or gt.get("role")!="rsu_test_obstacle":continue
             actor_id=int(gt.get("actor_id",0));bucket=self._road_object_stage_coverage.setdefault(actor_id,{
@@ -617,7 +617,8 @@ class GroundTruthEvaluator(object):
                                            adaptive_hybrid_candidates=None,
                                            adaptive_hybrid_gated_candidates=None,
                                            adaptive_hybrid_rescued_candidates=None,
-                                           adaptive_hybrid_geometry_gated_candidates=None):
+                                           adaptive_hybrid_geometry_gated_candidates=None,
+                                           selected_candidates=None):
         """Compare baseline, balanced and adaptive Shadow outputs in evaluation."""
         truth=self.truth_objects();result={}
         variants=(("baseline",baseline_candidates),("balanced",balanced_candidates))
@@ -628,6 +629,7 @@ class GroundTruthEvaluator(object):
         if adaptive_hybrid_gated_candidates is not None:variants+=(("adaptive_hybrid_gated",adaptive_hybrid_gated_candidates),)
         if adaptive_hybrid_rescued_candidates is not None:variants+=(("adaptive_hybrid_rescued",adaptive_hybrid_rescued_candidates),)
         if adaptive_hybrid_geometry_gated_candidates is not None:variants+=(("adaptive_hybrid_geometry_gated",adaptive_hybrid_geometry_gated_candidates),)
+        if selected_candidates is not None:variants+=(("selected",selected_candidates),)
         for name,candidates in variants:
             detected=self._detected_with_range(candidates);pairs=self._match(truth,detected);classes={}
             for ti,_,_ in pairs:

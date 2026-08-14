@@ -85,7 +85,7 @@ def spawn_obstacles(world, world_map, center, count, rng):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.15 deterministic walkers and road obstacles")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.16 deterministic walkers and road obstacles")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
@@ -95,7 +95,7 @@ def main():
     world,world_map,center=junction_center(client,config)
     walkers=spawn_walkers(world,world_map,center,max(0,args.walkers),rng)
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
-    print("V0.6.12.8.2.2.15 targets active: seed=%d walkers=%d road_obstacles=%d"%(args.seed,len(walkers),len(obstacles)))
+    print("V0.6.12.8.2.2.16 targets active: seed=%d walkers=%d road_obstacles=%d"%(args.seed,len(walkers),len(obstacles)))
     for label,items in (("walker",walkers),("obstacle",obstacles)):
         for actor in items:
             loc=actor.get_location();print("  TARGET %s id=%d type=%s pos=(%.2f,%.2f,%.2f) range=%.2fm"%(label,actor.id,actor.type_id,loc.x,loc.y,loc.z,distance(loc,center)))
@@ -107,7 +107,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.15 test targets removed.")
+        print("V0.6.12.8.2.2.16 test targets removed.")
 
 
 if __name__=="__main__":main()

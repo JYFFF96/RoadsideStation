@@ -267,6 +267,25 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
                          set(item["id"] for item in output))
         self.assertEqual({"near_area":1,"far_range":1},reasons)
 
+    def test_selected_shadow_output_resolves_named_policy_without_enforcement(self):
+        stages={"baseline":[{"id":"baseline"}],
+                "adaptive_hybrid_gated":[{"id":"gated"}],
+                "adaptive_hybrid_rescued":[{"id":"rescued"}],
+                "adaptive_hybrid_geometry_gated":[{"id":"selected"}]}
+        output,policy=RoadObjectGeometryRecovery._selected_shadow_output(stages,{
+            "road_object_recovery_selected_output_shadow":True,
+            "road_object_recovery_selected_output_policy":"adaptive_hybrid_geometry_gated"})
+        self.assertEqual("adaptive_hybrid_geometry_gated",policy)
+        self.assertEqual("selected",output[0]["id"])
+        fallback,policy=RoadObjectGeometryRecovery._selected_shadow_output(stages,{
+            "road_object_recovery_selected_output_shadow":True,
+            "road_object_recovery_selected_output_policy":"not-a-policy"})
+        self.assertEqual("baseline",policy)
+        self.assertEqual("baseline",fallback[0]["id"])
+        disabled,policy=RoadObjectGeometryRecovery._selected_shadow_output(stages,{})
+        self.assertEqual([],disabled)
+        self.assertEqual("disabled",policy)
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,

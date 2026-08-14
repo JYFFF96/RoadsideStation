@@ -750,6 +750,8 @@ class SimpleFusion(object):
             "road_object_recovery_adaptive_hybrid_geometry_gate_kept": int(road_stats.get("adaptive_hybrid_geometry_gate_kept",0)),
             "road_object_recovery_adaptive_hybrid_geometry_gate_rejected": int(road_stats.get("adaptive_hybrid_geometry_gate_rejected",0)),
             "road_object_recovery_adaptive_hybrid_geometry_gate_reasons": dict(road_stats.get("adaptive_hybrid_geometry_gate_reasons",{}) or {}),
+            "road_object_recovery_selected_output_built": int(road_stats.get("selected_output_built",0)),
+            "road_object_recovery_selected_output_policy": str(road_stats.get("selected_output_policy","disabled")),
             "road_object_recovery_shadow_mode": road_object_shadow,
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),
