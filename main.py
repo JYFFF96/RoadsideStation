@@ -43,9 +43,25 @@ def _num(v):return "-" if v is None else "%.2f"%float(v)
 
 def _print_traffic_status(station,config):
  tc=config.get("traffic",{});mode=tc.get("mode","external");source=tc.get("source","carla_generate_traffic")
- try:vehicles=len(station.world.get_actors().filter("vehicle.*"));walkers=len(station.world.get_actors().filter("walker.pedestrian.*"))
- except Exception:vehicles=0;walkers=0
+ try:
+  vehicle_actors=list(station.world.get_actors().filter("vehicle.*"));walker_actors=list(station.world.get_actors().filter("walker.pedestrian.*"));vehicles=len(vehicle_actors);walkers=len(walker_actors)
+ except Exception:vehicle_actors=[];walker_actors=[];vehicles=0;walkers=0
  print("Traffic mode: %s (source=%s)"%(mode,source));print("Attached to existing CARLA traffic: %d vehicles, %d walkers"%(vehicles,walkers))
+ center=getattr(station,"junction_center",None)
+ if center is not None:
+  def bins(actors):
+   out=[0,0,0]
+   for actor in actors:
+    try:loc=actor.get_location();d=math.hypot(float(loc.x)-float(center.x),float(loc.y)-float(center.y))
+    except Exception:continue
+    if d<=30.0:out[0]+=1
+    elif d<=50.0:out[1]+=1
+    elif d<=80.0:out[2]+=1
+   return out
+  vb=bins(vehicle_actors);wb=bins(walker_actors);near=sum(vb)+sum(wb)
+  print("Traffic near RSU | 00-30m V:%d P:%d | 30-50m V:%d P:%d | 50-80m V:%d P:%d | total:%d"%(vb[0],wb[0],vb[1],wb[1],vb[2],wb[2],near))
+  if near<int(tc.get("nearby_participant_warning_threshold",10)):
+   print("WARNING: too few traffic participants within 80m. Start tools/spawn_rsu_traffic.py and tools/spawn_multiclass_targets.py before main.py.")
  if mode=="external" and vehicles==0:print("NOTE: no vehicles are present. Start a traffic generator in another terminal.")
 
 def _print_stage(name,m):
@@ -66,6 +82,15 @@ def _print_detection_drop(dd):
  print("  [DETECTION DROP] Truth:%d Pass:%d NoGeometry:%d ROIReject:%d ROILost:%d ScoreReject:%d ScoreLost:%d DynamicDrop:%d"%(dd.get("truth",0),dd.get("pass",0),dd.get("no_geometry_candidate",0),dd.get("roi_reject",0),dd.get("roi_lost",0),dd.get("score_reject",0),dd.get("score_lost",0),dd.get("dynamic_drop",0)))
  for b in dd.get("range_bins",[]):
   print("    [%02.0f-%02.0fm] Truth:%d Pass:%d NoGeometry:%d ROIReject:%d ScoreReject:%d DynamicDrop:%d"%(b.get("min_range",0.0),b.get("max_range",0.0),b.get("truth",0),b.get("pass",0),b.get("no_geometry_candidate",0),b.get("roi_reject",0)+b.get("roi_lost",0),b.get("score_reject",0)+b.get("score_lost",0),b.get("dynamic_drop",0)))
+ for name,b in sorted((dd.get("class_counts",{}) or {}).items()):
+  print("    [MULTI-CLASS DROP %s] T:%d Pass:%d NoG:%d ROI:%d Score:%d Dynamic:%d"%(name,b.get("truth",0),b.get("pass",0),b.get("no_geometry_candidate",0),b.get("roi_reject",0)+b.get("roi_lost",0),b.get("score_reject",0)+b.get("score_lost",0),b.get("dynamic_drop",0)))
+
+def _print_geometry_attribution(a):
+ for name,b in sorted((a.get("classes",{}) or {}).items()):
+  p=b.get("profile",{}) or {};pts=p.get("points",{}) or {};length=p.get("length",{}) or {};width=p.get("width",{}) or {};height=p.get("height",{}) or {};src=p.get("sources",{}) or {}
+  print("  [MULTI-CLASS GEOMETRY %s] T:%d G:%d NoG:%d R:%s Pts(avg/min/max):%s/%s/%s LWH(avg):%s/%s/%s Modes:%s Src(C/S/R/T/F):%d/%d/%d/%d/%d"%(name,b.get("truth",0),b.get("matched",0),b.get("no_geometry",0),_pct(b.get("recall")),_num(pts.get("mean")),_num(pts.get("min")),_num(pts.get("max")),_num(length.get("mean")),_num(width.get("mean")),_num(height.get("mean")),p.get("cluster_modes",{}),src.get("compact",0),src.get("sparse",0),src.get("recovery",0),src.get("temporal",0),src.get("far_builder",0)))
+ fp=a.get("false_profile",{}) or {};points=fp.get("points",{}) or {}
+ print("  [GEOMETRY UNATTRIBUTED] FP:%d Pts(avg):%s Modes:%s"%(a.get("false_positive",0),_num(points.get("mean")),fp.get("cluster_modes",{})))
 
 def _print_far_admission_eval(a):
  print("  [FAR ADMISSION EVAL] Frames:%d WouldHold:%d WouldHoldTruth:%d WouldHoldFP:%d WouldConfirm:%d WouldConfirmTruth:%d WouldConfirmFP:%d Expired:%d ExpiredTruth:%d ExpiredFP:%d"%(a.get("frames",0),a.get("would_hold",0),a.get("would_hold_truth",0),a.get("would_hold_fp",0),a.get("would_confirm",0),a.get("would_confirm_truth",0),a.get("would_confirm_fp",0),a.get("expired",0),a.get("expired_truth",0),a.get("expired_fp",0)))
@@ -115,7 +140,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8 Multi-Class Road Object Baseline starting...")
+ print("RoadsideStation V0.6.12.8.1 Multi-Class Geometry Attribution starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -213,11 +238,11 @@ def main():
      print("  %-12s type=%-7s state=%-9s q=%.2f sensors=%-3s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,q,sensors,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
    if evaluator is not None and now-last_eval>=eval_interval:
-    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
+    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
-    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_detection_drop(dd)
+    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
      admission_report=evaluator.report_far_admission_decisions(reset=True)
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)

@@ -351,6 +351,55 @@ class GroundTruthEvaluator(object):
     def _empty_drop_counts():
         return {"truth":0,"pass":0,"no_geometry_candidate":0,"roi_reject":0,"roi_lost":0,"score_reject":0,"score_lost":0,"dynamic_drop":0}
 
+    @staticmethod
+    def _geometry_profile(items):
+        points=[];lengths=[];widths=[];heights=[];modes={}
+        flags={"compact":0,"sparse":0,"recovery":0,"temporal":0,"far_builder":0}
+        for item in items or []:
+            value=item.get("current_point_count",item.get("point_count"))
+            try:points.append(float(value))
+            except (TypeError,ValueError):pass
+            extent=list(item.get("extent",[]) or [])
+            for values,index in ((lengths,0),(widths,1),(heights,2)):
+                try:values.append(float(extent[index]))
+                except (IndexError,TypeError,ValueError):pass
+            mode=str(item.get("cluster_mode","unknown"))
+            modes[mode]=int(modes.get(mode,0))+1
+            if item.get("multiclass_compact_geometry",False):flags["compact"]+=1
+            if item.get("sparse_rescued",False):flags["sparse"]+=1
+            if item.get("far_geometry_recovered",False):flags["recovery"]+=1
+            if item.get("far_geometry_temporal_supported",False):flags["temporal"]+=1
+            if mode=="far_geometry_builder":flags["far_builder"]+=1
+        def summary(values):
+            return {"samples":len(values),"mean":(sum(values)/len(values) if values else None),
+                    "min":(min(values) if values else None),"max":(max(values) if values else None)}
+        return {"points":summary(points),"length":summary(lengths),"width":summary(widths),
+                "height":summary(heights),"cluster_modes":modes,"sources":flags}
+
+    def analyze_geometry_attribution(self, geometry_candidates):
+        """Attribute Geometry-stage candidates to CARLA road-object classes.
+
+        This is evaluation-only. It explains which class obtained geometry and
+        what that geometry looked like; labels are never returned to perception.
+        """
+        truth=self.truth_objects();detected=self._detected_with_range(geometry_candidates)
+        pairs=self._match(truth,detected);by_truth=dict((ti,di) for ti,di,_ in pairs)
+        used=set(di for _,di,_ in pairs);classes={}
+        for ti,gt in enumerate(truth):
+            name=gt.get("object_type","unknown_obstacle")
+            bucket=classes.setdefault(name,{"truth":0,"matched":0,"no_geometry":0,"items":[]})
+            bucket["truth"]+=1
+            if ti in by_truth:
+                bucket["matched"]+=1;bucket["items"].append(detected[by_truth[ti]])
+            else:bucket["no_geometry"]+=1
+        for bucket in classes.values():
+            bucket["recall"]=(float(bucket["matched"])/bucket["truth"] if bucket["truth"] else None)
+            bucket["profile"]=self._geometry_profile(bucket.pop("items"))
+        false_items=[item for index,item in enumerate(detected) if index not in used]
+        return {"truth":len(truth),"geometry":len(detected),"matched":len(pairs),
+                "false_positive":len(false_items),"classes":classes,
+                "false_profile":self._geometry_profile(false_items)}
+
     def analyze_detection_drop_reasons(self, geometry_candidates, roi_candidates, scored_candidates,
                                        dynamic_candidates, roi_rejections=None, score_rejections=None):
         """V0.6.8 evaluation-only stage drop diagnosis.
@@ -370,7 +419,7 @@ class GroundTruthEvaluator(object):
         dyn=self._detected_with_range(dynamic_candidates)
         roi_rej=self._detected_with_range(roi_rejections)
         score_rej=self._detected_with_range(score_rejections)
-        total=self._empty_drop_counts();bins=[];lower=0.0
+        total=self._empty_drop_counts();bins=[];lower=0.0;classes={}
         for upper in self.range_bins:
             c=self._empty_drop_counts();c["min_range"]=lower;c["max_range"]=upper;bins.append(c);lower=upper
         details=[]
@@ -381,14 +430,18 @@ class GroundTruthEvaluator(object):
             elif not self._has_match(gt,dyn):reason="dynamic_drop"
             else:reason="pass"
             total["truth"]+=1;total[reason]+=1
+            name=gt.get("object_type","unknown_obstacle")
+            class_counts=classes.setdefault(name,self._empty_drop_counts())
+            class_counts["truth"]+=1;class_counts[reason]+=1
             rng=float(gt.get("range",0.0));lower=0.0
             for b in bins:
                 upper=float(b["max_range"])
                 if (lower<=rng<upper) or (upper==self.range_bins[-1] and lower<=rng<=upper):
                     b["truth"]+=1;b[reason]+=1;break
                 lower=upper
-            details.append({"actor_id":gt.get("actor_id"),"range":rng,"reason":reason})
-        total["range_bins"]=bins;total["details"]=details
+            details.append({"actor_id":gt.get("actor_id"),"object_type":name,
+                            "range":rng,"reason":reason})
+        total["range_bins"]=bins;total["class_counts"]=classes;total["details"]=details
         return total
 
     def analyze_roi_false_rejections(self, accepted_candidates, rejected_candidates, min_range=30.0, max_range=50.0):

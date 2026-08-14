@@ -3,12 +3,14 @@ carla:
   port: 2000
   timeout: 60.0
   map: Town05_Opt
-  load_world_on_start: true
+  # Keep traffic created before main.py. Loading a world destroys all actors.
+  load_world_on_start: false
   synchronous_mode: false
 
 traffic:
   mode: external
   source: carla_generate_traffic
+  nearby_participant_warning_threshold: 10
 
 environment:
   unload_foliage: true

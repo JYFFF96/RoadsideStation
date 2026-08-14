@@ -75,16 +75,16 @@ def spawn_obstacles(world, world_map, center, count):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8 crosswalk walkers and lane obstacles")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.1 crosswalk walkers and lane obstacles")
     parser.add_argument("--config",default="config/roadside.yaml")
-    parser.add_argument("--walkers",type=int,default=6)
-    parser.add_argument("--obstacles",type=int,default=3)
+    parser.add_argument("--walkers",type=int,default=12)
+    parser.add_argument("--obstacles",type=int,default=6)
     args=parser.parse_args();config=load_config(args.config);cc=config.get("carla",{})
     client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
     world,world_map,center=junction_center(client,config)
     walkers=spawn_walkers(world,world_map,center,max(0,args.walkers))
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles));actors=walkers+obstacles
-    print("V0.6.12.8 targets active: walkers=%d road_obstacles=%d"%(len(walkers),len(obstacles)))
+    print("V0.6.12.8.1 targets active: walkers=%d road_obstacles=%d"%(len(walkers),len(obstacles)))
     print("Keep this process running; Ctrl+C removes only these test targets.")
     try:
         while True:time.sleep(1.0)
@@ -93,7 +93,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8 test targets removed.")
+        print("V0.6.12.8.1 test targets removed.")
 
 
 if __name__=="__main__":main()

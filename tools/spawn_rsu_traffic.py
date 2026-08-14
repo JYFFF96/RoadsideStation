@@ -81,6 +81,33 @@ def _distance2d(a, b):
     return math.hypot(float(a.x) - float(b.x), float(a.y) - float(b.y))
 
 
+def _balanced_spawn_order(spawns, center, rng):
+    """Round-robin CARLA map spawns across the RSU evaluation bands."""
+    buckets = [[], [], [], []]
+    for sp in spawns:
+        distance = _distance2d(sp.location, center)
+        index = 0 if distance <= 30.0 else 1 if distance <= 50.0 else 2 if distance <= 80.0 else 3
+        buckets[index].append(sp)
+    for bucket in buckets:
+        rng.shuffle(bucket)
+    ordered = []
+    while any(buckets):
+        for bucket in buckets:
+            if bucket:
+                ordered.append(bucket.pop())
+    return ordered
+
+
+def _range_counts(actors, center):
+    counts = [0, 0, 0]
+    for actor in actors:
+        distance = _distance2d(actor.get_location(), center)
+        if distance <= 30.0:counts[0] += 1
+        elif distance <= 50.0:counts[1] += 1
+        elif distance <= 80.0:counts[2] += 1
+    return counts
+
+
 def _safe_blueprints(world):
     out = []
     for bp in world.get_blueprint_library().filter("vehicle.*"):
@@ -120,15 +147,17 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
-    ap = argparse.ArgumentParser(description="V0.4.9 strict-local RSU traffic with recycle")
+    ap = argparse.ArgumentParser(description="V0.6.12.8.1 balanced local RSU traffic")
     ap.add_argument("--config", default="config/roadside.yaml")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
-    ap.add_argument("--vehicles", "-n", type=int, default=30)
+    ap.add_argument("--vehicles", "-n", type=int, default=45)
     ap.add_argument("--spawn-radius", type=float, default=130.0)
     ap.add_argument("--recycle-radius", type=float, default=170.0,
                     help="destroy owned vehicles after they leave this radius")
+    ap.add_argument("--recycle", action="store_true",
+                    help="opt-in legacy destroy/respawn behavior")
     ap.add_argument("--report-radius", type=float, default=80.0)
     ap.add_argument("--following-distance", type=float, default=5.0)
     ap.add_argument("--speed-diff", type=float, default=30.0)
@@ -146,11 +175,12 @@ def main():
         world = client.get_world()
         world_map = world.get_map()
         center = _resolve_rsu_center(world_map, cfg)
-        print("RoadsideStation V0.4.9 - STRICT LOCAL + RECYCLE")
+        print("RoadsideStation V0.6.12.8.1 - BALANCED LOCAL TRAFFIC")
         print("Map: %s" % world_map.name.split("/")[-1])
         print("Driving: CARLA Traffic Manager autopilot only")
-        print("Spawn radius=%.0fm, recycle radius=%.0fm, report radius=%.0fm" %
-              (args.spawn_radius, args.recycle_radius, args.report_radius))
+        print("Spawn radius=%.0fm, report radius=%.0fm, recycle=%s" %
+              (args.spawn_radius, args.report_radius,
+               ("ON >%.0fm" % args.recycle_radius) if args.recycle else "OFF"))
         print("No custom path / waypoint routing / steering override.")
 
         if not args.keep_existing:
@@ -172,6 +202,7 @@ def main():
         blueprints = _safe_blueprints(world)
         all_spawns = list(world_map.get_spawn_points())
         local_spawns = [sp for sp in all_spawns if _distance2d(sp.location, center) <= args.spawn_radius]
+        local_spawns = _balanced_spawn_order(local_spawns, center, rng)
         if not blueprints:
             raise RuntimeError("No safe vehicle blueprints found")
         if not local_spawns:
@@ -183,11 +214,14 @@ def main():
             print("Requested %d, local region supports at most %d simultaneous spawn slots." %
                   (args.vehicles, target))
 
+        spawn_cursor = [0]
+
         def spawn_one():
             occupied = [a.get_location() for a in world.get_actors().filter("vehicle.*")]
-            candidates = list(local_spawns)
-            rng.shuffle(candidates)
-            for sp in candidates:
+            total = len(local_spawns)
+            for offset in range(total):
+                index = (spawn_cursor[0] + offset) % total
+                sp = local_spawns[index]
                 if any(_distance2d(sp.location, p) < 9.0 for p in occupied):
                     continue
                 bp = _prepare(rng.choice(blueprints), rng)
@@ -199,6 +233,7 @@ def main():
                     continue
                 actor.set_autopilot(True, tm.get_port())
                 vehicles.add(actor.id)
+                spawn_cursor[0] = (index + 1) % total
                 return actor.id
             return None
 
@@ -208,7 +243,8 @@ def main():
             if spawn_one() is None:
                 time.sleep(0.05)
         print("Initial spawned: %d/%d" % (len(vehicles), target))
-        print("Recycle: ON. Vehicles outside %.0fm are destroyed and respawned from strict-local points." % args.recycle_radius)
+        print("Initial spawn order is balanced across 00-30m, 30-50m, 50-80m and outer feeder roads.")
+        print("Recycle: %s." % ("ON (legacy opt-in)" if args.recycle else "OFF"))
         print("Press Ctrl+C to stop and remove these vehicles.")
 
         last_report = 0.0
@@ -221,7 +257,7 @@ def main():
                 a = actors.get(aid)
                 if a is None:
                     gone.append(aid)
-                elif _distance2d(a.get_location(), center) > args.recycle_radius:
+                elif args.recycle and _distance2d(a.get_location(), center) > args.recycle_radius:
                     outside.append(aid)
             for aid in gone:
                 vehicles.discard(aid)
@@ -244,16 +280,20 @@ def main():
                 current = {a.id: a for a in world.get_actors().filter("vehicle.*")}
                 within = 0
                 farthest = 0.0
+                alive = []
                 for aid in vehicles:
                     a = current.get(aid)
                     if a is None:
                         continue
+                    alive.append(a)
                     d = _distance2d(a.get_location(), center)
                     farthest = max(farthest, d)
                     if d <= args.report_radius:
                         within += 1
-                print("Traffic | alive:%d/%d | within %.0fm:%d | farthest:%.1fm | recycled:%d respawned:%d" %
-                      (len(vehicles), target, args.report_radius, within, farthest, len(outside), spawned))
+                counts = _range_counts(alive, center)
+                print("Traffic | alive:%d/%d | 00-30m:%d 30-50m:%d 50-80m:%d | within %.0fm:%d | farthest:%.1fm | recycled:%d respawned:%d" %
+                      (len(vehicles), target, counts[0], counts[1], counts[2],
+                       args.report_radius, within, farthest, len(outside), spawned))
                 last_report = now
             time.sleep(0.2)
 

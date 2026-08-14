@@ -81,5 +81,37 @@ class MultiClassBaselineTest(unittest.TestCase):
         self.assertTrue(item["multiclass_compact_geometry"])
         self.assertGreaterEqual(score,.46)
 
+    def test_geometry_attribution_profiles_each_class_and_false_positive(self):
+        world=_World([
+            _Actor(1,"vehicle.tesla.model3",20.0,0.0,[4.5,1.8,1.5],"autopilot"),
+            _Actor(2,"walker.pedestrian.0001",25.0,0.0,[.5,.5,1.8]),
+        ])
+        evaluator=GroundTruthEvaluator(world,lambda:_Vector(),{
+            "radius":80.0,"match_distance":2.0,"include_roles":["autopilot"],
+            "include_walkers":True})
+        report=evaluator.analyze_geometry_attribution([
+            {"x":25.1,"y":0.0,"point_count":4,"extent":[.6,.4,1.7],
+             "cluster_mode":"3d","multiclass_compact_geometry":True},
+            {"x":60.0,"y":10.0,"point_count":3,"extent":[.2,.2,1.2],
+             "cluster_mode":"bev_multiscale"},
+        ])
+        self.assertEqual(1,report["classes"]["person"]["matched"])
+        self.assertEqual(1,report["classes"]["car"]["no_geometry"])
+        self.assertEqual(1,report["false_positive"])
+        self.assertEqual(1,report["classes"]["person"]["profile"]["sources"]["compact"])
+
+    def test_detection_drop_reasons_are_split_by_class(self):
+        world=_World([
+            _Actor(1,"vehicle.tesla.model3",20.0,0.0,[4.5,1.8,1.5],"autopilot"),
+            _Actor(2,"walker.pedestrian.0001",25.0,0.0,[.5,.5,1.8]),
+        ])
+        evaluator=GroundTruthEvaluator(world,lambda:_Vector(),{
+            "radius":80.0,"match_distance":2.0,"include_roles":["autopilot"],
+            "include_walkers":True})
+        person={"x":25.1,"y":0.0}
+        report=evaluator.analyze_detection_drop_reasons([person],[person],[person],[person])
+        self.assertEqual(1,report["class_counts"]["person"]["pass"])
+        self.assertEqual(1,report["class_counts"]["car"]["no_geometry_candidate"])
+
 
 if __name__=="__main__":unittest.main()
