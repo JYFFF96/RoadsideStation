@@ -225,6 +225,14 @@ a separate stage and cumulative comparison. The recovery function still
 returns its legacy baseline and global Shadow remains enabled, so selecting a
 policy cannot yet change ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.16.1 stabilizes the deterministic pedestrian benchmark after a
+run recorded four different test walkers moving 9.68m to 20.83m between truth
+samples. Walkers now use balanced approach points, distinct opposite-side
+destinations, CARLA AI walker controllers and staggered launches. If an AI
+controller is unavailable, the tool falls back to the same staggered crossing
+directions with manual WalkerControl. This changes only the test-target
+generator; the Selected perception policy remains Shadow-only.
+
 ## Current scope
 
 - Fixed roadside RGB camera
