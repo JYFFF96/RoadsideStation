@@ -4,6 +4,7 @@ import unittest
 
 from roadside.road_object_geometry_recovery import RoadObjectGeometryRecovery
 from roadside.fusion import SimpleFusion
+from roadside.ground_truth_eval import GroundTruthEvaluator
 
 
 class RoadObjectGeometryRecoveryTest(unittest.TestCase):
@@ -60,6 +61,33 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
                              for x in fusion.last_geometry_world))
         self.assertFalse(any(x.get("cluster_mode")=="road_object_low"
                              for x in fusion.last_dynamic_candidates))
+
+    def test_precision_profile_uses_percentiles_and_normalized_sides(self):
+        items=[{"point_count":5,"extent":[.8,.2,.1],"range":10.0},
+               {"point_count":15,"extent":[.3,1.2,.5],"range":30.0}]
+        profile=GroundTruthEvaluator._geometry_profile(items)
+        self.assertEqual(10.0,profile["points"]["p50"])
+        self.assertEqual(1.0,profile["long_side"]["p50"])
+        self.assertEqual(.25,profile["short_side"]["p50"])
+        self.assertEqual(.3,profile["height"]["p50"])
+
+    def test_precision_gate_is_shadow_only_and_accumulates_samples(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_precision_gate_shadow":True,
+            "road_object_gate_min_points":10,
+            "road_object_gate_max_height":.45,
+            "road_object_gate_max_range":25.0})
+        truth=[{"object_type":"unknown_obstacle","x":10.0,"y":0.0}]
+        evaluator.truth_objects=lambda:truth
+        evaluator._detected_with_range=lambda items:list(items)
+        good={"x":10.0,"y":0.0,"point_count":12,"extent":[.6,.3,.2],"range":10.0}
+        false={"x":30.0,"y":0.0,"point_count":6,"extent":[.4,.4,.9],"range":30.0}
+        report=evaluator.analyze_road_object_recovery([good,false])
+        self.assertEqual(1,report["precision_gate_shadow"]["truth"]["kept"])
+        self.assertEqual(1,report["precision_gate_shadow"]["fp"]["rejected"])
+        report=evaluator.analyze_road_object_recovery([good,false])
+        self.assertEqual(2,report["cumulative"]["classes"]["unknown_obstacle"]["matched_samples"])
+        self.assertEqual(2,report["cumulative"]["precision_gate_shadow"]["fp"]["rejected"])
 
 
 if __name__=="__main__":unittest.main()

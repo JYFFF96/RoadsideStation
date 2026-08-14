@@ -22,6 +22,7 @@ class GroundTruthEvaluator(object):
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
         self._far_admission_totals = self._empty_admission_totals()
+        self._road_object_samples = {"classes": {}, "false": []}
 
     def _parse_bins(self, values):
         bins = []
@@ -64,6 +65,11 @@ class GroundTruthEvaluator(object):
     def truth_vehicles(self):
         """Compatibility view for vehicle-specific legacy diagnostics."""
         return [x for x in self.truth_objects() if x.get("object_group") == "vehicle"]
+
+    def test_targets(self):
+        """Return explicitly tagged benchmark actors for a self-contained run log."""
+        return [item for item in self.truth_objects()
+                if str(item.get("role","")).startswith("rsu_test_")]
 
     def _detected_with_range(self, detected):
         center = self._center();out = []
@@ -351,9 +357,9 @@ class GroundTruthEvaluator(object):
     def _empty_drop_counts():
         return {"truth":0,"pass":0,"no_geometry_candidate":0,"roi_reject":0,"roi_lost":0,"score_reject":0,"score_lost":0,"dynamic_drop":0}
 
-    @staticmethod
-    def _geometry_profile(items):
-        points=[];lengths=[];widths=[];heights=[];ranges=[];modes={}
+    @classmethod
+    def _geometry_profile(cls, items):
+        points=[];lengths=[];widths=[];heights=[];ranges=[];long_sides=[];short_sides=[];modes={}
         flags={"compact":0,"sparse":0,"recovery":0,"temporal":0,"far_builder":0,
                "road_object":0}
         for item in items or []:
@@ -366,6 +372,10 @@ class GroundTruthEvaluator(object):
             for values,index in ((lengths,0),(widths,1),(heights,2)):
                 try:values.append(float(extent[index]))
                 except (IndexError,TypeError,ValueError):pass
+            try:
+                side_x=float(extent[0]);side_y=float(extent[1])
+                long_sides.append(max(side_x,side_y));short_sides.append(min(side_x,side_y))
+            except (IndexError,TypeError,ValueError):pass
             mode=str(item.get("cluster_mode","unknown"))
             modes[mode]=int(modes.get(mode,0))+1
             if item.get("multiclass_compact_geometry",False):flags["compact"]+=1
@@ -376,10 +386,68 @@ class GroundTruthEvaluator(object):
             if item.get("road_object_recovered",False):flags["road_object"]+=1
         def summary(values):
             return {"samples":len(values),"mean":(sum(values)/len(values) if values else None),
-                    "min":(min(values) if values else None),"max":(max(values) if values else None)}
+                    "min":(min(values) if values else None),
+                    "p10":cls._percentile(values,.10),"p50":cls._percentile(values,.50),
+                    "p90":cls._percentile(values,.90),"max":(max(values) if values else None)}
         return {"points":summary(points),"length":summary(lengths),"width":summary(widths),
+                "long_side":summary(long_sides),"short_side":summary(short_sides),
                 "height":summary(heights),"range":summary(ranges),
                 "cluster_modes":modes,"sources":flags}
+
+    def _road_object_gate_pass(self, item):
+        """Evaluation-only scalar gate. No truth labels are read here."""
+        try:
+            points=float(item.get("current_point_count",item.get("point_count",0)))
+            height=float((item.get("extent",[]) or [0.0,0.0,0.0])[2])
+            distance=float(item.get("range",0.0))
+        except (IndexError,TypeError,ValueError):return False
+        return (points>=float(self.config.get("road_object_gate_min_points",10)) and
+                height<=float(self.config.get("road_object_gate_max_height",.45)) and
+                distance<=float(self.config.get("road_object_gate_max_range",25.0)))
+
+    def _road_object_gate_profile(self, class_items, false_items):
+        classes={};truth_total=0;truth_kept=0
+        for name,items in (class_items or {}).items():
+            kept=sum(1 for item in items if self._road_object_gate_pass(item));total=len(items)
+            classes[name]={"total":total,"kept":kept,"rejected":total-kept}
+            truth_total+=total;truth_kept+=kept
+        fp_total=len(false_items or []);fp_kept=sum(1 for item in false_items or [] if self._road_object_gate_pass(item))
+        return {"enabled":bool(self.config.get("road_object_precision_gate_shadow",False)),
+                "candidates":truth_total+fp_total,"kept":truth_kept+fp_kept,
+                "rejected":truth_total+fp_total-truth_kept-fp_kept,
+                "truth":{"total":truth_total,"kept":truth_kept,"rejected":truth_total-truth_kept},
+                "fp":{"total":fp_total,"kept":fp_kept,"rejected":fp_total-fp_kept},
+                "classes":classes}
+
+    def analyze_road_object_recovery(self, geometry_candidates):
+        """Profile recovery candidates and simulate the precision gate in Shadow."""
+        truth=self.truth_objects();detected=self._detected_with_range(geometry_candidates)
+        pairs=self._match(truth,detected);used=set(di for _,di,_ in pairs);class_items={}
+        for ti,di,_ in pairs:
+            name=truth[ti].get("object_type","unknown_obstacle")
+            class_items.setdefault(name,[]).append(detected[di])
+        false_items=[item for index,item in enumerate(detected) if index not in used]
+        classes={}
+        truth_counts={}
+        for item in truth:
+            name=item.get("object_type","unknown_obstacle");truth_counts[name]=truth_counts.get(name,0)+1
+        for name,total in truth_counts.items():
+            items=class_items.get(name,[]);matched=len(items)
+            classes[name]={"truth":total,"matched":matched,"no_geometry":total-matched,
+                           "recall":(float(matched)/total if total else None),
+                           "profile":self._geometry_profile(items)}
+        for name,items in class_items.items():self._road_object_samples["classes"].setdefault(name,[]).extend(items)
+        self._road_object_samples["false"].extend(false_items)
+        cumulative_classes=dict((name,{"matched_samples":len(items),"profile":self._geometry_profile(items)})
+                                for name,items in self._road_object_samples["classes"].items())
+        cumulative_items=self._road_object_samples["classes"]
+        return {"truth":len(truth),"geometry":len(detected),"matched":len(pairs),
+                "false_positive":len(false_items),"classes":classes,
+                "false_profile":self._geometry_profile(false_items),
+                "precision_gate_shadow":self._road_object_gate_profile(class_items,false_items),
+                "cumulative":{"classes":cumulative_classes,
+                              "false_profile":self._geometry_profile(self._road_object_samples["false"]),
+                              "precision_gate_shadow":self._road_object_gate_profile(cumulative_items,self._road_object_samples["false"])}}
 
     def analyze_geometry_attribution(self, geometry_candidates):
         """Attribute Geometry-stage candidates to CARLA road-object classes.

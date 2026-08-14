@@ -111,6 +111,14 @@ The target generator defaults to seed 42 and prints every spawned blueprint,
 position and RSU range so comparison runs use the same scenario. Shadow logs
 separate matched classes from false positives with point, size and range means.
 
+V0.6.12.8.2.2 adds an evaluation-only precision-gate simulation. It reports
+candidate point, height, normalized long/short side and range p10/p50/p90
+distributions for each matched class and false positives, both per frame and
+cumulatively. The provisional gate (points >= 10, height <= 0.45m, range <=
+25m) reports truth keep and false-positive rejection without changing the
+perception path. Benchmark actors are tagged so main.py records their exact
+type, position and range in the same log.
+
 ## Current scope
 
 - Fixed roadside RGB camera

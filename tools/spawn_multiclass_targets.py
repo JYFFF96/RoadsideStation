@@ -46,6 +46,7 @@ def spawn_walkers(world, world_map, center, count, rng):
         if len(actors) >= count:break
         bp = rng.choice(blueprints)
         if bp.has_attribute("is_invincible"):bp.set_attribute("is_invincible", "false")
+        if bp.has_attribute("role_name"):bp.set_attribute("role_name","rsu_test_walker")
         transform = carla.Transform(carla.Location(x=loc.x, y=loc.y, z=loc.z + 0.35))
         actor = world.try_spawn_actor(bp, transform)
         if actor is None:continue
@@ -76,6 +77,7 @@ def spawn_obstacles(world, world_map, center, count, rng):
     for wp in points:
         if len(actors)>=count:break
         bp=rng.choice(blueprints);transform=wp.transform
+        if bp.has_attribute("role_name"):bp.set_attribute("role_name","rsu_test_obstacle")
         transform.location.z+=0.20
         actor=world.try_spawn_actor(bp,transform)
         if actor is not None:actors.append(actor)
@@ -83,7 +85,7 @@ def spawn_obstacles(world, world_map, center, count, rng):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.1 deterministic walkers and road obstacles")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2 deterministic walkers and road obstacles")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
@@ -93,7 +95,7 @@ def main():
     world,world_map,center=junction_center(client,config)
     walkers=spawn_walkers(world,world_map,center,max(0,args.walkers),rng)
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
-    print("V0.6.12.8.2.1 targets active: seed=%d walkers=%d road_obstacles=%d"%(args.seed,len(walkers),len(obstacles)))
+    print("V0.6.12.8.2.2 targets active: seed=%d walkers=%d road_obstacles=%d"%(args.seed,len(walkers),len(obstacles)))
     for label,items in (("walker",walkers),("obstacle",obstacles)):
         for actor in items:
             loc=actor.get_location();print("  TARGET %s id=%d type=%s pos=(%.2f,%.2f,%.2f) range=%.2fm"%(label,actor.id,actor.type_id,loc.x,loc.y,loc.z,distance(loc,center)))
@@ -105,7 +107,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.1 test targets removed.")
+        print("V0.6.12.8.2.2 test targets removed.")
 
 
 if __name__=="__main__":main()
