@@ -70,6 +70,7 @@ class GroundTruthEvaluator(object):
                 for name in ("hold", "confirm", "expired", "existing_track", "sensor")),
             "pending_origins": {},
             "actor_classes": dict((name, {}) for name in ("hold", "confirm", "expired")),
+            "outcome_samples": dict((name, {}) for name in ("confirm", "expired")),
             "transitions": dict(
                 (name, {"total": 0, "origin_truth": 0, "origin_fp": 0,
                         "origin_unknown": 0, "current_truth": 0,
@@ -636,7 +637,8 @@ class GroundTruthEvaluator(object):
                     if key not in totals["pending_origins"]:
                         totals["pending_origins"][key] = {
                             "label": "truth" if truth_index is not None else "fp",
-                            "actor_id": actor_id, "object_type": object_type}
+                            "actor_id": actor_id, "object_type": object_type,
+                            "candidate": dict(item)}
                     continue
                 if name not in ("confirm", "expired"):
                     continue
@@ -645,6 +647,11 @@ class GroundTruthEvaluator(object):
                 origin = totals["pending_origins"].pop(key, None)
                 origin_label = origin.get("label") if origin is not None else "unknown"
                 transition["origin_" + origin_label] += 1
+                if origin is not None:
+                    sample_name = (str(origin.get("object_type", "unknown_obstacle"))
+                                   if origin_label == "truth" else "false_positive")
+                    totals["outcome_samples"][name].setdefault(
+                        sample_name, []).append(dict(origin.get("candidate", {})))
                 current_label = "truth" if truth_index is not None else "fp"
                 transition["current_" + current_label] += 1
                 same_actor = (origin is not None and origin_label == "truth" and
@@ -699,14 +706,47 @@ class GroundTruthEvaluator(object):
         outcomes["ever_confirmed"] = len(held & confirmed)
         outcomes["confirmation_coverage"] = (
             float(len(held & confirmed)) / len(held) if held else None)
+        outcome_features = {}
+        for decision, buckets in self._selected_track_admission_totals["outcome_samples"].items():
+            outcome_features[decision] = dict(
+                (name, self._selected_outcome_feature_profile(items))
+                for name, items in sorted(buckets.items()))
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
                 "frame": dict(self._selected_track_admission_frame), "run": run,
                 "coverage": coverage,
                 "actor_outcomes": outcomes,
+                "outcome_features": outcome_features,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
+
+    @classmethod
+    def _selected_outcome_feature_profile(cls, items):
+        items = list(items or [])
+        profile = cls._geometry_profile(items)
+        scores = []
+        paths = {"near": 0, "far": 0, "strict": 0, "rescue": 0}
+        for item in items:
+            value = item.get("selected_admission_shadow_score",
+                             item.get("candidate_score"))
+            try:scores.append(float(value))
+            except (TypeError, ValueError):pass
+            source = str(item.get("adaptive_hybrid_source", ""))
+            if source == "near_baseline":paths["near"] += 1
+            elif source == "far_ranked":paths["far"] += 1
+            if item.get("adaptive_hybrid_temporal_rescue", False):
+                paths["rescue"] += 1
+            else:
+                paths["strict"] += 1
+        profile["scores"] = {
+            "samples": len(scores), "mean": (sum(scores) / len(scores) if scores else None),
+            "min": (min(scores) if scores else None),
+            "p10": cls._percentile(scores, .10), "p50": cls._percentile(scores, .50),
+            "p90": cls._percentile(scores, .90), "max": (max(scores) if scores else None)}
+        profile["paths"] = paths
+        profile["samples"] = len(items)
+        return profile
 
     def report_far_admission_decisions(self, reset=True):
         totals = self._far_admission_totals

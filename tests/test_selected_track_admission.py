@@ -95,8 +95,15 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         evaluator.truth_objects = lambda: [
             {"actor_id": 7, "x": 10.0, "y": 0.0,
              "object_type": "person"}]
-        truth_hold = self._selected();truth_hold["selected_track_admission_pending_id"] = 11
-        fp_hold = self._selected(30.0);fp_hold["selected_track_admission_pending_id"] = 12
+        truth_hold = self._selected();truth_hold.update({
+            "selected_track_admission_pending_id": 11,
+            "adaptive_hybrid_source": "near_baseline",
+            "adaptive_hybrid_temporal_rescue": True,
+            "extent": [0.5, 0.3, 1.5], "point_count": 6})
+        fp_hold = self._selected(30.0);fp_hold.update({
+            "selected_track_admission_pending_id": 12,
+            "adaptive_hybrid_source": "far_ranked",
+            "extent": [0.8, 0.4, 0.1], "point_count": 3})
         evaluator.observe_selected_track_admission(
             [truth_hold, fp_hold], [], [], frame_id=20)
         truth_confirm = dict(truth_hold);truth_confirm["selected_track_admission_reason"] = "repeat"
@@ -116,6 +123,14 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(1, report["actor_outcomes"]["confirm_only"]["actors"])
         self.assertEqual(0, report["actor_outcomes"]["expired_only"]["actors"])
         self.assertEqual(1.0, report["actor_outcomes"]["confirmation_coverage"])
+        person_profile = report["outcome_features"]["confirm"]["person"]
+        fp_profile = report["outcome_features"]["confirm"]["false_positive"]
+        self.assertEqual(1, person_profile["samples"])
+        self.assertEqual(0.35, person_profile["scores"]["p50"])
+        self.assertEqual({"near": 1, "far": 0, "strict": 0, "rescue": 1},
+                         person_profile["paths"])
+        self.assertEqual({"near": 0, "far": 1, "strict": 1, "rescue": 0},
+                         fp_profile["paths"])
 
     def test_selected_only_shadow_track_is_not_existing_track_support(self):
         fusion = self._fusion(True)

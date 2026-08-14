@@ -318,6 +318,15 @@ states. The evaluator also splits unique held actors into Confirm-Only,
 Expired-Only, Both and Unresolved outcomes with per-class counts and overall
 confirmation coverage. The gate remains non-enforcing.
 
+V0.6.12.8.2.2.26 profiles the original Hold measurement separately for
+Confirmed and Expired outcomes. Each terminal group is split into person,
+unknown obstacle and false-positive samples, with score, point count, height,
+range, cluster mode and Near/Far plus Strict/Rescue path distributions. The
+previous counterfactual run confirmed that a uniform two-frame gate would cover
+only about 61.5 percent of held actors and leave four pedestrians in the
+Expired-Only group, so this version searches for a portable sensor-only
+exception rule before any enforcement. CARLA truth remains evaluator-only.
+
 ## Current scope
 
 - Fixed roadside RGB camera
