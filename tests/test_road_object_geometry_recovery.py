@@ -238,26 +238,26 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
             "road_object_recovery_adaptive_hybrid_rescue_shadow":True,
             "road_object_hybrid_rescue_near_temporal_hits":3,
             "road_object_hybrid_rescue_near_min_points":5,
-            "road_object_hybrid_rescue_far_max_range":32.0,
+            "road_object_hybrid_rescue_far_max_range":35.0,
             "road_object_hybrid_rescue_far_support_frames":3,
             "road_object_hybrid_rescue_far_min_points":4,
             "road_object_hybrid_rescue_far_current_points":1,
             "road_object_recovery_adaptive_hybrid_geometry_gate_shadow":True,
-            "road_object_hybrid_geometry_gate_near_min_area":.04,
-            "road_object_hybrid_geometry_gate_far_max_range":28.0}
+            "road_object_hybrid_geometry_gate_near_min_area":.02,
+            "road_object_hybrid_geometry_gate_far_max_range":32.0}
         items=[
             {"id":"strict","x":15.0,"y":0.0,"point_count":8,
              "extent":[.8,.6,.9],"adaptive_hybrid_source":"near_baseline"},
             {"id":"near_pass","x":18.0,"y":0.0,"point_count":5,
-             "road_object_temporal_hits":3,"extent":[.4,.2,.9],
+             "road_object_temporal_hits":3,"extent":[.2,.15,.9],
              "adaptive_hybrid_source":"near_baseline"},
             {"id":"near_fail","x":18.0,"y":0.0,"point_count":5,
-             "road_object_temporal_hits":3,"extent":[.2,.1,.9],
+             "road_object_temporal_hits":3,"extent":[.1,.1,.9],
              "adaptive_hybrid_source":"near_baseline"},
-            {"id":"far_pass","x":27.0,"y":0.0,"point_count":4,
+            {"id":"far_pass","x":31.0,"y":0.0,"point_count":4,
              "current_point_count":1,"support_frames":3,"extent":[.4,.2,.1],
              "adaptive_hybrid_source":"far_ranked"},
-            {"id":"far_fail","x":30.0,"y":0.0,"point_count":4,
+            {"id":"far_fail","x":33.0,"y":0.0,"point_count":4,
              "current_point_count":1,"support_frames":3,"extent":[.4,.2,.1],
              "adaptive_hybrid_source":"far_ranked"}]
         recovery._adaptive_hybrid_gate(items,config)
@@ -486,6 +486,8 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         with open(path,"r") as stream:config=yaml.safe_load(stream)
         self.assertTrue(config["evaluation"]["road_object_hybrid_rescue_feature_profiling"])
         self.assertNotIn("road_object_hybrid_rescue_feature_profiling",config["fusion"])
+        self.assertEqual(.02,config["fusion"]["road_object_hybrid_geometry_gate_near_min_area"])
+        self.assertEqual(32.0,config["fusion"]["road_object_hybrid_geometry_gate_far_max_range"])
 
     def test_truth_lifecycle_distinguishes_boundary_exit_jump_and_disappearance(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{

@@ -248,10 +248,10 @@ class RoadObjectGeometryRecovery(object):
                 extent=list(item.get("extent",[]) or [])
                 try:area=max(0.0,float(extent[0]))*max(0.0,float(extent[1]))
                 except (IndexError,TypeError,ValueError):area=0.0
-                keep=area>=float(config.get("road_object_hybrid_geometry_gate_near_min_area",.04))
+                keep=area>=float(config.get("road_object_hybrid_geometry_gate_near_min_area",.02))
                 reason="near_area"
             else:
-                keep=self._sensor_range(item)<=float(config.get("road_object_hybrid_geometry_gate_far_max_range",28.0))
+                keep=self._sensor_range(item)<=float(config.get("road_object_hybrid_geometry_gate_far_max_range",32.0))
                 reason="far_range"
             item["adaptive_hybrid_geometry_gate_keep"]=keep
             item["adaptive_hybrid_geometry_gate_reason"]=(None if keep else reason)

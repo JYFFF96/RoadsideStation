@@ -240,6 +240,14 @@ benchmark run. The balanced approaches, distinct opposite-side directions and
 collision. AI mode is still available explicitly with `--walker-mode ai` for
 maps whose pedestrian navigation mesh supports the requested crossing.
 
+V0.6.12.8.2.2.17 retunes the selected Rescue geometry gate for moving
+multi-class traffic. The Near Baseline footprint threshold is reduced from
+0.04 to 0.02 square metres to preserve compact pedestrian returns, and the Far
+Ranked sensor limit is expanded from 28m to 32m. In the supporting run those
+rules would retain about 66 of 69 Full-Rescue truth matches while raising the
+estimated Selected precision from 23.3% to about 26.0%. The policy remains
+Shadow-only and does not yet feed ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

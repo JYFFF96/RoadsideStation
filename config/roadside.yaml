@@ -135,10 +135,10 @@ fusion:
   road_object_hybrid_rescue_far_support_frames: 3
   road_object_hybrid_rescue_far_min_points: 4
   road_object_hybrid_rescue_far_current_points: 1
-  # V0.6.12.8.2.2.15: selected source-aware geometry gate, Shadow only.
+  # V0.6.12.8.2.2.17: multi-class geometry gate selected from moving-walker evidence, Shadow only.
   road_object_recovery_adaptive_hybrid_geometry_gate_shadow: true
-  road_object_hybrid_geometry_gate_near_min_area: 0.04
-  road_object_hybrid_geometry_gate_far_max_range: 28.0
+  road_object_hybrid_geometry_gate_near_min_area: 0.02
+  road_object_hybrid_geometry_gate_far_max_range: 32.0
   # V0.6.12.8.2.2.16: name the future output branch without enforcing it.
   road_object_recovery_selected_output_shadow: true
   road_object_recovery_selected_output_policy: adaptive_hybrid_geometry_gated
