@@ -105,6 +105,12 @@ fusion:
   road_object_recovery_adaptive_temporal_bands:
     - {min_range: 25.0, max_range: 35.0, history_frames: 3, min_support_frames: 2, max_points: 48}
     - {min_range: 35.0, max_range: 45.0, history_frames: 4, min_support_frames: 3, max_points: 64}
+  # V0.6.12.8.2.2.6: scalar low-object priority ranking, still Shadow only.
+  road_object_recovery_adaptive_ranking_shadow: true
+  road_object_adaptive_rank_low_height: 0.30
+  road_object_adaptive_rank_mid_height: 0.75
+  road_object_adaptive_rank_target_points: 5.0
+  road_object_adaptive_rank_full_support_frames: 4
 
   range_adaptive_clustering: true
   range_bands:

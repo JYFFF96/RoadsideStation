@@ -732,6 +732,8 @@ class SimpleFusion(object):
             "road_object_recovery_adaptive_dedupe": int(road_stats.get("adaptive_dedupe",0)),
             "road_object_recovery_adaptive_built": int(road_stats.get("adaptive_built",0)),
             "road_object_recovery_adaptive_bands": dict(road_stats.get("adaptive_band_counts",{}) or {}),
+            "road_object_recovery_adaptive_ranked_built": int(road_stats.get("adaptive_ranked_built",0)),
+            "road_object_recovery_adaptive_ranked_bands": dict(road_stats.get("adaptive_ranked_band_counts",{}) or {}),
             "road_object_recovery_shadow_mode": road_object_shadow,
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),

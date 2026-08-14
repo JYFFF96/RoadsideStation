@@ -31,14 +31,16 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_history_frames":0,"adaptive_points":0,
                 "adaptive_components":0,"adaptive_shape_pass":0,
                 "adaptive_temporal_pass":0,"adaptive_dedupe":0,
-                "adaptive_built":0,"adaptive_band_counts":{}}
+                "adaptive_built":0,"adaptive_band_counts":{},
+                "adaptive_ranked_built":0,"adaptive_ranked_band_counts":{}}
 
     @staticmethod
     def _empty_stages():
         return {"component":[],"shape":[],"temporal":[],"dedupe_pass":[],
                 "output":[],"balanced_output":[],"adaptive_component":[],
                 "adaptive_shape":[],"adaptive_temporal":[],
-                "adaptive_dedupe_pass":[],"adaptive_output":[]}
+                "adaptive_dedupe_pass":[],"adaptive_output":[],
+                "adaptive_ranked_output":[]}
 
     def _clear_diagnostics(self):
         self.last_input_points=np.empty((0,3),dtype=np.float32)
@@ -88,6 +90,27 @@ class RoadObjectGeometryRecovery(object):
         return sorted(result,key=lambda item:item[0])
 
     @staticmethod
+    def _adaptive_rank_score(item, config):
+        try:height=float((item.get("extent",[]) or [0.0,0.0,0.0])[2])
+        except (IndexError,TypeError,ValueError):height=9.0
+        points=float(item.get("point_count",0) or 0);current=float(item.get("current_point_count",0) or 0)
+        frames=float(item.get("support_frames",0) or 0);target=float(config.get("road_object_adaptive_rank_target_points",5.0))
+        if height<=float(config.get("road_object_adaptive_rank_low_height",.30)):height_score=1.0
+        elif height<=float(config.get("road_object_adaptive_rank_mid_height",.75)):height_score=.55
+        else:height_score=.15
+        point_score=max(0.0,1.0-abs(points-target)/max(1.0,target+3.0))
+        current_score=max(0.0,1.0-abs(current-2.0)/4.0)
+        frame_score=min(1.0,frames/max(1.0,float(config.get("road_object_adaptive_rank_full_support_frames",4))))
+        return (.55*height_score+.20*point_score+.15*current_score+.10*frame_score)
+
+    def _adaptive_ranked_cap(self, items, limit, config):
+        if not config.get("road_object_recovery_adaptive_ranking_shadow",False):return []
+        for item in items:item["adaptive_rank_score"]=self._adaptive_rank_score(item,config)
+        ranked=sorted(items,key=lambda value:(value.get("adaptive_rank_score",0.0),
+                      value.get("support_frames",0),-abs(float(value.get("point_count",0))-5.0)),reverse=True)
+        return self._balanced_cap(ranked,limit,config) or ranked[:limit]
+
+    @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
         """Return spatially unique points and the source-frame set per voxel."""
         cells={};voxel=max(.02,float(voxel))
@@ -124,7 +147,8 @@ class RoadObjectGeometryRecovery(object):
 
     def _adaptive_temporal_candidates(self, pts, existing_geometry, config, stats):
         bands=self._adaptive_bands(config)
-        empty={"component":[],"shape":[],"temporal":[],"dedupe_pass":[],"output":[]}
+        empty={"component":[],"shape":[],"temporal":[],"dedupe_pass":[],
+               "output":[],"ranked_output":[]}
         if not bands:
             self.adaptive_point_history=[]
             return empty
@@ -173,15 +197,21 @@ class RoadObjectGeometryRecovery(object):
             dedupe_pass.append(item);occupied.append(item)
         limit=max(0,int(config.get("road_object_recovery_max_candidates",12)))
         output=self._balanced_cap(dedupe_pass,limit,config) or dedupe_pass[:limit]
+        ranked_output=self._adaptive_ranked_cap(dedupe_pass,limit,config)
         stats["adaptive_built"]=len(output);counts={}
         for low,high,_,_,_ in bands:
             label="%.0f-%.0fm"%(low,high)
             counts[label]=sum(1 for item in output if low<=self._sensor_range(item)<high)
         stats["adaptive_band_counts"]=counts
+        stats["adaptive_ranked_built"]=len(ranked_output);ranked_counts={}
+        for low,high,_,_,_ in bands:
+            label="%.0f-%.0fm"%(low,high)
+            ranked_counts[label]=sum(1 for item in ranked_output if low<=self._sensor_range(item)<high)
+        stats["adaptive_ranked_band_counts"]=ranked_counts
         self.adaptive_point_history.append(pts.copy())
         self.adaptive_point_history=self.adaptive_point_history[-keep:] if keep else []
         return {"component":components,"shape":shapes,"temporal":stable,
-                "dedupe_pass":dedupe_pass,"output":output}
+                "dedupe_pass":dedupe_pass,"output":output,"ranked_output":ranked_output}
 
     def update(self, points, existing_geometry, ground_cut_local, config=None, frame_id=None):
         c=config or {};stats=self._empty_stats()
@@ -283,5 +313,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_shape":[dict(x) for x in adaptive["shape"]],
                                  "adaptive_temporal":[dict(x) for x in adaptive["temporal"]],
                                  "adaptive_dedupe_pass":[dict(x) for x in adaptive["dedupe_pass"]],
-                                 "adaptive_output":[dict(x) for x in adaptive["output"]]}
+                                 "adaptive_output":[dict(x) for x in adaptive["output"]],
+                                 "adaptive_ranked_output":[dict(x) for x in adaptive["ranked_output"]]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out

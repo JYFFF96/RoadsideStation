@@ -150,6 +150,12 @@ report total/current/history point counts, support frames, height and evaluation
 range distributions. This identifies a scalar, real-device-portable ranking or
 gate without using CARLA labels in perception. The Adaptive path remains Shadow.
 
+V0.6.12.8.2.2.6 adds a parallel scalar ranking for Adaptive pre-cap candidates.
+Low road-object height receives the strongest priority, followed by proximity
+to the measured five-point support center, current-frame support and temporal
+persistence. Range-balanced quotas are retained. The ranked list is evaluated
+against the prior Adaptive list but remains isolated from production output.
+
 ## Current scope
 
 - Fixed roadside RGB camera

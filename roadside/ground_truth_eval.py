@@ -27,7 +27,7 @@ class GroundTruthEvaluator(object):
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
-                                            for name in ("baseline","balanced","adaptive"))
+                                            for name in ("baseline","balanced","adaptive","adaptive_ranked"))
 
     def _parse_bins(self, values):
         bins = []
@@ -487,7 +487,7 @@ class GroundTruthEvaluator(object):
         stage_gate=float(self.config.get("road_object_stage_match_distance",2.00))
         stage_names=("component","shape","temporal","dedupe_pass","output","balanced_output",
                      "adaptive_component","adaptive_shape","adaptive_temporal",
-                     "adaptive_dedupe_pass","adaptive_output")
+                     "adaptive_dedupe_pass","adaptive_output","adaptive_ranked_output")
         for gt in truth:
             if gt.get("object_type")!="unknown_obstacle" or gt.get("role")!="rsu_test_obstacle":continue
             actor_id=int(gt.get("actor_id",0));bucket=self._road_object_stage_coverage.setdefault(actor_id,{
@@ -523,11 +523,12 @@ class GroundTruthEvaluator(object):
         return {"actors":actors,"range_bands":bands,"support_radius":support_radius,"stage_gate":stage_gate}
 
     def analyze_road_object_cap_comparison(self, baseline_candidates, balanced_candidates,
-                                           adaptive_candidates=None):
+                                           adaptive_candidates=None,adaptive_ranked_candidates=None):
         """Compare baseline, balanced and adaptive Shadow outputs in evaluation."""
         truth=self.truth_objects();result={}
         variants=(("baseline",baseline_candidates),("balanced",balanced_candidates))
         if adaptive_candidates is not None:variants+=(("adaptive",adaptive_candidates),)
+        if adaptive_ranked_candidates is not None:variants+=(("adaptive_ranked",adaptive_ranked_candidates),)
         for name,candidates in variants:
             detected=self._detected_with_range(candidates);pairs=self._match(truth,detected);classes={}
             for ti,_,_ in pairs:
@@ -542,13 +543,14 @@ class GroundTruthEvaluator(object):
 
     @classmethod
     def _adaptive_temporal_profile(cls, items):
-        values={"points":[],"current_points":[],"history_points":[],
+        values={"points":[],"current_points":[],"history_points":[],"rank_score":[],
                 "support_frames":[],"height":[],"long_side":[],
                 "short_side":[],"range":[]};bands={}
         for item in items or []:
             for name,key in (("points","point_count"),("current_points","current_point_count"),
                              ("history_points","temporal_point_count"),
-                             ("support_frames","support_frames"),("range","range")):
+                             ("support_frames","support_frames"),("rank_score","adaptive_rank_score"),
+                             ("range","range")):
                 try:values[name].append(float(item.get(key)))
                 except (TypeError,ValueError):pass
             extent=list(item.get("extent",[]) or [])

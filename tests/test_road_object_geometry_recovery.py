@@ -89,6 +89,20 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertTrue(adaptive[0]["range_adaptive_temporal_shadow"])
         self.assertEqual(0,recovery.last_stats["built"])
 
+    def test_adaptive_low_object_ranking_prefers_compact_height(self):
+        recovery=RoadObjectGeometryRecovery();config={
+            "road_object_recovery_adaptive_ranking_shadow":True,
+            "road_object_recovery_balanced_cap_shadow":True,
+            "road_object_recovery_min_range":5.0,
+            "road_object_recovery_balanced_bands":[{"max_range":35.0,"quota":1}]}
+        low={"id":"low","x":30.0,"y":0.0,"point_count":5,"current_point_count":2,
+             "support_frames":3,"extent":[.5,.2,.08]}
+        tall={"id":"tall","x":30.5,"y":0.0,"point_count":12,"current_point_count":5,
+              "support_frames":4,"extent":[.8,.4,1.2]}
+        selected=recovery._adaptive_ranked_cap([tall,low],1,config)
+        self.assertEqual("low",selected[0]["id"])
+        self.assertGreater(low["adaptive_rank_score"],tall["adaptive_rank_score"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -191,9 +205,10 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far])
         self.assertEqual(2,comparison["baseline_run"]["matched"])
         self.assertEqual(4,comparison["balanced_run"]["matched"])
-        comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far],[far])
+        comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far],[far],[far])
         self.assertEqual(1,comparison["adaptive"]["matched"])
         self.assertEqual(1,comparison["adaptive_run"]["matched"])
+        self.assertEqual(1,comparison["adaptive_ranked"]["matched"])
 
     def test_adaptive_temporal_feature_profile_accumulates_truth_and_fp(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
