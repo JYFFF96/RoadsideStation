@@ -233,6 +233,13 @@ controller is unavailable, the tool falls back to the same staggered crossing
 directions with manual WalkerControl. This changes only the test-target
 generator; the Selected perception policy remains Shadow-only.
 
+V0.6.12.8.2.2.16.2 makes staggered manual WalkerControl the default after the
+Town05 AI pedestrian controller left all 12 walkers stationary for an entire
+benchmark run. The balanced approaches, distinct opposite-side directions and
+0.8-second launch spacing remain in place to avoid the old centre-point crowd
+collision. AI mode is still available explicitly with `--walker-mode ai` for
+maps whose pedestrian navigation mesh supports the requested crossing.
+
 ## Current scope
 
 - Fixed roadside RGB camera
