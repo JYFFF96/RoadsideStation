@@ -3,7 +3,8 @@ from __future__ import print_function
 import unittest
 
 from roadside.camera_objects import CameraObject
-from roadside.selected_camera_support import annotate_selected_camera_support
+from roadside.selected_camera_support import (annotate_selected_camera_support,
+                                                selected_camera_rescue_passes)
 
 
 class _Projector(object):
@@ -34,6 +35,19 @@ class SelectedCameraSupportTest(unittest.TestCase):
         self.assertFalse(annotated[0]["selected_track_admission_camera_visible"])
         self.assertFalse(annotated[0]["selected_track_admission_camera_supported"])
         self.assertEqual(0, stats["visible"])
+
+    def test_strong_rescue_requires_person_and_close_or_overlapping_box(self):
+        base = {"selected_track_admission_camera_supported": True,
+                "selected_track_admission_camera_class": "person",
+                "selected_track_admission_camera_iou": .01,
+                "selected_track_admission_camera_center_distance": 35.0}
+        self.assertTrue(selected_camera_rescue_passes(base, .05, 45.0))
+        self.assertFalse(selected_camera_rescue_passes(base, .05, 30.0))
+        overlap = dict(base);overlap["selected_track_admission_camera_iou"] = .1
+        overlap["selected_track_admission_camera_center_distance"] = 90.0
+        self.assertTrue(selected_camera_rescue_passes(overlap, .05, 30.0))
+        vehicle = dict(overlap);vehicle["selected_track_admission_camera_class"] = "car"
+        self.assertFalse(selected_camera_rescue_passes(vehicle, .05, 30.0))
 
 
 if __name__ == "__main__":

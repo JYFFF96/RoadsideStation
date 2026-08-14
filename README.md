@@ -336,6 +336,15 @@ class. With `carla_truth` this is a simulation benchmark proxy; with `detector`
 the identical path consumes real detector boxes. Neither mode changes Selected
 admission, Fusion, Tracker or ObjectList output.
 
+V0.6.12.8.2.2.28 turns those camera features into parallel Shadow rescue
+ablations. A rescue requires a configured pedestrian camera class plus either
+minimum projected-box IoU or maximum center distance. The evaluator reports
+sample retention for Confirmed/Expired pedestrians and false positives, and
+also counts how many unique Expired-Only actors and pedestrians would be
+rescued. The three candidate rules are compared without changing admission,
+Fusion, Tracker or ObjectList. This keeps the rule portable to a real detector
+while CARLA camera truth remains only a simulation benchmark proxy.
+
 ## Current scope
 
 - Fixed roadside RGB camera

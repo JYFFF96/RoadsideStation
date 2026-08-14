@@ -420,6 +420,12 @@ evaluation:
   # V0.6.12.8.2.2.27: profile camera support for held candidates. The result is
   # evaluator-only and never feeds Selected admission, Fusion or Tracker.
   selected_track_admission_camera_profiling: true
+  # V0.6.12.8.2.2.28: compare strong person-camera support rules and unique
+  # Expired-Only actor rescue coverage. These are Shadow-only ablations.
+  selected_track_admission_camera_rescue_ablations:
+    - {name: iou05_or_d30, min_iou: 0.05, max_center_distance: 30.0, allowed_classes: [person, pedestrian]}
+    - {name: iou05_or_d45, min_iou: 0.05, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
+    - {name: iou10_or_d45, min_iou: 0.10, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
   # V0.6.12.8.2.2.14: parallel Shadow gates; no candidate is filtered.
   road_object_rescue_near_area_ablations: [0.02, 0.04, 0.06, 0.08]
   road_object_rescue_far_range_ablations: [26.0, 28.0, 30.0, 32.0]

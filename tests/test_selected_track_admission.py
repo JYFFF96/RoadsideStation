@@ -91,7 +91,11 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
     def test_evaluator_profiles_pending_transitions_and_actor_coverage(self):
         center = type("Center", (), {"x": 0.0, "y": 0.0})()
         evaluator = GroundTruthEvaluator(None, lambda: center, {
-            "selected_track_admission_profiling": True})
+            "selected_track_admission_profiling": True,
+            "selected_track_admission_camera_rescue_ablations": [
+                {"name":"test_rule", "min_iou":.05,
+                 "max_center_distance":30.0,
+                 "allowed_classes":["person"]}]})
         evaluator.truth_objects = lambda: [
             {"actor_id": 7, "x": 10.0, "y": 0.0,
              "object_type": "person"}]
@@ -143,6 +147,11 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(.4, person_profile["camera"]["iou"]["p50"])
         self.assertEqual(8.0, person_profile["camera"]["center_distance"]["p50"])
         self.assertEqual(.9, person_profile["camera"]["confidence"]["p50"])
+        self.assertEqual({"test_rule": 1},
+                         person_profile["camera"]["rescue_ablations"])
+        rescue = report["camera_rescue_shadow"]["test_rule"]
+        self.assertEqual(1, rescue["confirm_person_samples_kept"])
+        self.assertEqual(0, rescue["confirm_fp_samples_kept"])
         self.assertEqual({"near": 0, "far": 1, "strict": 1, "rescue": 0},
                          fp_profile["paths"])
 
@@ -155,6 +164,33 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             [self._selected()], [shadow_track], 10.0, frame_id=1)
         self.assertEqual([], admitted);self.assertEqual(1, len(rejected))
         self.assertEqual(0, stats["track_bypass"])
+
+    def test_camera_rescue_shadow_counts_unique_expired_only_person(self):
+        center = type("Center", (), {"x": 0.0, "y": 0.0})()
+        evaluator = GroundTruthEvaluator(None, lambda: center, {
+            "selected_track_admission_profiling": True,
+            "selected_track_admission_camera_rescue_ablations": [
+                {"name":"close_person", "min_iou":.05,
+                 "max_center_distance":30.0,
+                 "allowed_classes":["person"]}]})
+        evaluator.truth_objects = lambda: [
+            {"actor_id": 9, "x": 10.0, "y": 0.0,
+             "object_type": "person"}]
+        hold = self._selected();hold.update({
+            "selected_track_admission_pending_id": 21,
+            "selected_track_admission_camera_supported": True,
+            "selected_track_admission_camera_class": "person",
+            "selected_track_admission_camera_iou": .01,
+            "selected_track_admission_camera_center_distance": 20.0})
+        evaluator.observe_selected_track_admission([hold], [], [], frame_id=30)
+        expired = dict(hold);expired["selected_track_admission_reason"] = "expired"
+        evaluator.observe_selected_track_admission([], [], [expired], frame_id=31)
+        result = evaluator.report_selected_track_admission()[
+            "camera_rescue_shadow"]["close_person"]
+        self.assertEqual(1, result["expired_only_actors"])
+        self.assertEqual(1, result["expired_only_person_actors"])
+        self.assertEqual(1, result["expired_only_actors_rescued"])
+        self.assertEqual(1, result["expired_only_person_actors_rescued"])
 
 
 if __name__ == "__main__":

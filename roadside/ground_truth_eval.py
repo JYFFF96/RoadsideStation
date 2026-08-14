@@ -3,6 +3,7 @@ from __future__ import print_function
 import math
 
 from .object_taxonomy import carla_actor_class, iter_carla_road_actors, object_group
+from .selected_camera_support import selected_camera_rescue_passes
 
 
 class GroundTruthEvaluator(object):
@@ -650,8 +651,11 @@ class GroundTruthEvaluator(object):
                 if origin is not None:
                     sample_name = (str(origin.get("object_type", "unknown_obstacle"))
                                    if origin_label == "truth" else "false_positive")
+                    sample = dict(origin.get("candidate", {}))
+                    if origin.get("actor_id") is not None:
+                        sample["_evaluation_actor_id"] = int(origin["actor_id"])
                     totals["outcome_samples"][name].setdefault(
-                        sample_name, []).append(dict(origin.get("candidate", {})))
+                        sample_name, []).append(sample)
                 current_label = "truth" if truth_index is not None else "fp"
                 transition["current_" + current_label] += 1
                 same_actor = (origin is not None and origin_label == "truth" and
@@ -711,20 +715,84 @@ class GroundTruthEvaluator(object):
             outcome_features[decision] = dict(
                 (name, self._selected_outcome_feature_profile(items))
                 for name, items in sorted(buckets.items()))
+        camera_rescue = self._selected_camera_rescue_shadow(outcome_sets)
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
                 "frame": dict(self._selected_track_admission_frame), "run": run,
                 "coverage": coverage,
                 "actor_outcomes": outcomes,
                 "outcome_features": outcome_features,
+                "camera_rescue_shadow": camera_rescue,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
 
-    @classmethod
-    def _selected_outcome_feature_profile(cls, items):
+    def _selected_camera_rescue_rules(self):
+        configured = self.config.get(
+            "selected_track_admission_camera_rescue_ablations", []) or []
+        rules = []
+        for index, item in enumerate(configured):
+            if not isinstance(item, dict):continue
+            rules.append({
+                "name": str(item.get("name", "rule_%d" % index)),
+                "min_iou": float(item.get("min_iou", .05)),
+                "max_center_distance": float(item.get("max_center_distance", 45.0)),
+                "allowed_classes": list(item.get(
+                    "allowed_classes", ["person", "pedestrian"]))})
+        return rules or [
+            {"name":"iou05_or_d30","min_iou":.05,"max_center_distance":30.0,
+             "allowed_classes":["person","pedestrian"]},
+            {"name":"iou05_or_d45","min_iou":.05,"max_center_distance":45.0,
+             "allowed_classes":["person","pedestrian"]},
+            {"name":"iou10_or_d45","min_iou":.10,"max_center_distance":45.0,
+             "allowed_classes":["person","pedestrian"]}]
+
+    def _selected_camera_rescue_shadow(self, outcome_sets):
+        samples = self._selected_track_admission_totals["outcome_samples"]
+        expired = samples.get("expired", {}) or {}
+        confirmed = samples.get("confirm", {}) or {}
+        expired_only = set(outcome_sets.get("expired_only", set()))
+        actor_classes = self._selected_track_admission_totals["actor_classes"]["hold"]
+        expired_only_person = set(
+            actor_id for actor_id in expired_only
+            if actor_classes.get(actor_id) == "person")
+        result = {}
+        for rule in self._selected_camera_rescue_rules():
+            def kept(items):
+                return [item for item in (items or [])
+                        if selected_camera_rescue_passes(
+                            item, rule["min_iou"], rule["max_center_distance"],
+                            rule["allowed_classes"])]
+            expired_person = list(expired.get("person", []))
+            expired_fp = list(expired.get("false_positive", []))
+            confirm_person = list(confirmed.get("person", []))
+            confirm_fp = list(confirmed.get("false_positive", []))
+            rescued_actor_ids = set(
+                item.get("_evaluation_actor_id") for item in kept(expired_person)
+                if item.get("_evaluation_actor_id") in expired_only)
+            result[rule["name"]] = {
+                "min_iou": rule["min_iou"],
+                "max_center_distance": rule["max_center_distance"],
+                "allowed_classes": list(rule["allowed_classes"]),
+                "expired_only_actors": len(expired_only),
+                "expired_only_actors_rescued": len(rescued_actor_ids),
+                "expired_only_person_actors": len(expired_only_person),
+                "expired_only_person_actors_rescued": len(
+                    rescued_actor_ids & expired_only_person),
+                "expired_person_samples": len(expired_person),
+                "expired_person_samples_kept": len(kept(expired_person)),
+                "expired_fp_samples": len(expired_fp),
+                "expired_fp_samples_kept": len(kept(expired_fp)),
+                "confirm_person_samples": len(confirm_person),
+                "confirm_person_samples_kept": len(kept(confirm_person)),
+                "confirm_fp_samples": len(confirm_fp),
+                "confirm_fp_samples_kept": len(kept(confirm_fp)),
+            }
+        return result
+
+    def _selected_outcome_feature_profile(self, items):
         items = list(items or [])
-        profile = cls._geometry_profile(items)
+        profile = self._geometry_profile(items)
         scores = []
         paths = {"near": 0, "far": 0, "strict": 0, "rescue": 0}
         camera = {"visible": 0, "supported": 0, "sources": {}, "classes": {}}
@@ -762,16 +830,22 @@ class GroundTruthEvaluator(object):
         profile["scores"] = {
             "samples": len(scores), "mean": (sum(scores) / len(scores) if scores else None),
             "min": (min(scores) if scores else None),
-            "p10": cls._percentile(scores, .10), "p50": cls._percentile(scores, .50),
-            "p90": cls._percentile(scores, .90), "max": (max(scores) if scores else None)}
+            "p10": self._percentile(scores, .10), "p50": self._percentile(scores, .50),
+            "p90": self._percentile(scores, .90), "max": (max(scores) if scores else None)}
         profile["paths"] = paths
         camera["support_rate"] = (float(camera["supported"]) / camera["visible"]
                                   if camera["visible"] else None)
         camera["visibility_rate"] = (float(camera["visible"]) / len(items)
                                      if items else None)
-        camera["iou"] = cls._distribution(camera_ious)
-        camera["center_distance"] = cls._distribution(camera_distances)
-        camera["confidence"] = cls._distribution(camera_confidences)
+        camera["iou"] = self._distribution(camera_ious)
+        camera["center_distance"] = self._distribution(camera_distances)
+        camera["confidence"] = self._distribution(camera_confidences)
+        camera["rescue_ablations"] = dict(
+            (rule["name"], sum(1 for item in items
+             if selected_camera_rescue_passes(
+                 item, rule["min_iou"], rule["max_center_distance"],
+                 rule["allowed_classes"])))
+            for rule in self._selected_camera_rescue_rules())
         profile["camera"] = camera
         profile["samples"] = len(items)
         return profile

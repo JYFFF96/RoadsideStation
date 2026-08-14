@@ -60,3 +60,23 @@ def annotate_selected_camera_support(candidates, projector, camera_objects,
             item["selected_track_admission_camera_confidence"] = float(confidence)
     stats["supported"] = len(matches)
     return annotated, stats
+
+
+def selected_camera_rescue_passes(candidate, min_iou=0.05,
+                                  max_center_distance=45.0,
+                                  allowed_classes=None):
+    """Return whether an annotated HOLD has strong detector-side support."""
+    if not candidate.get("selected_track_admission_camera_supported", False):
+        return False
+    allowed = set(str(x).lower() for x in
+                  (allowed_classes or ["person", "pedestrian"]))
+    camera_class = str(candidate.get(
+        "selected_track_admission_camera_class", "unknown")).lower()
+    if camera_class not in allowed:
+        return False
+    try:iou = float(candidate.get("selected_track_admission_camera_iou", 0.0))
+    except (TypeError, ValueError):iou = 0.0
+    try:distance = float(candidate.get(
+        "selected_track_admission_camera_center_distance", float("inf")))
+    except (TypeError, ValueError):distance = float("inf")
+    return iou >= float(min_iou) or distance <= float(max_center_distance)

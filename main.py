@@ -325,6 +325,17 @@ def _print_selected_track_admission_profile(report):
     _num(camera_dist.get("p50")),_num(camera_dist.get("p90")),
     _num(camera_conf.get("p50")),_num(camera_conf.get("p90")),camera.get("sources",{}),
     camera.get("classes",{}),value.get("paths",{}),value.get("cluster_modes",{})))
+   print("      [SELECTED CAMERA RESCUE ABLATION %s %s] %s"%(
+    decision.upper(),name,camera.get("rescue_ablations",{})))
+ for name,value in sorted((report.get("camera_rescue_shadow",{}) or {}).items()):
+  print("    [SELECTED CAMERA RESCUE SHADOW %s] IoU>=%.2f OR Dist<=%.0fpx | ExpiredOnly Actors:%d/%d Person:%d/%d | ExpiredSamples Person:%d/%d FP:%d/%d | ConfirmSamples Person:%d/%d FP:%d/%d"%(
+   name,float(value.get("min_iou",0.0)),float(value.get("max_center_distance",0.0)),
+   value.get("expired_only_actors_rescued",0),value.get("expired_only_actors",0),
+   value.get("expired_only_person_actors_rescued",0),value.get("expired_only_person_actors",0),
+   value.get("expired_person_samples_kept",0),value.get("expired_person_samples",0),
+   value.get("expired_fp_samples_kept",0),value.get("expired_fp_samples",0),
+   value.get("confirm_person_samples_kept",0),value.get("confirm_person_samples",0),
+   value.get("confirm_fp_samples_kept",0),value.get("confirm_fp_samples",0)))
 
 def _adaptive_feature(profile,name):
  values=(profile or {}).get(name,{}) or {}
@@ -418,7 +429,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.27 Selected Admission Camera-Support Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.28 Selected Admission Camera-Rescue Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -459,6 +470,7 @@ def main():
  print("Road-Object Stage Attribution: evaluation-only | raw_radius=%.1fm stage_gate=%.1fm bands=%s"%(float(eval_cfg.get("road_object_raw_support_radius",1.5)),float(eval_cfg.get("road_object_stage_match_distance",2.0)),eval_cfg.get("road_object_stage_range_bins",[25.0,35.0,45.0])))
  print("Road-Object Rescue Profiler: %s | Truth Lifecycle Diagnostics: %s"%("enabled" if eval_cfg.get("road_object_hybrid_rescue_feature_profiling",False) else "disabled","enabled" if eval_cfg.get("truth_lifecycle_diagnostics",False) else "disabled"))
  print("Selected Admission Camera-Support Profiling: %s | evaluator-only; never changes admission or tracking"%("enabled" if eval_cfg.get("selected_track_admission_camera_profiling",False) else "disabled"))
+ print("Selected Admission Camera-Rescue: Shadow ablations only | rules=%s"%eval_cfg.get("selected_track_admission_camera_rescue_ablations",[]))
  print("Multi-Class Safety Baseline: vehicle + VRU + configured road obstacles | LiDAR unknowns remain unknown_obstacle")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
