@@ -26,6 +26,8 @@ class GroundTruthEvaluator(object):
         self._selected_track_admission_last_frame = None
         self._selected_track_admission_totals = self._empty_selected_track_admission_totals()
         self._selected_track_admission_frame = {}
+        self._selected_delayed_reappearance_last_frame = None
+        self._selected_delayed_reappearance_totals = {}
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._hybrid_selection_samples = {}
@@ -93,6 +95,8 @@ class GroundTruthEvaluator(object):
         self._selected_track_admission_last_frame = None
         self._selected_track_admission_totals = self._empty_selected_track_admission_totals()
         self._selected_track_admission_frame = {}
+        self._selected_delayed_reappearance_last_frame = None
+        self._selected_delayed_reappearance_totals = {}
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
@@ -716,6 +720,7 @@ class GroundTruthEvaluator(object):
                 (name, self._selected_outcome_feature_profile(items))
                 for name, items in sorted(buckets.items()))
         camera_rescue = self._selected_camera_rescue_shadow(outcome_sets)
+        delayed_reappearance = self._selected_delayed_reappearance_report(outcome_sets)
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
                 "frame": dict(self._selected_track_admission_frame), "run": run,
@@ -723,9 +728,67 @@ class GroundTruthEvaluator(object):
                 "actor_outcomes": outcomes,
                 "outcome_features": outcome_features,
                 "camera_rescue_shadow": camera_rescue,
+                "delayed_reappearance_shadow": delayed_reappearance,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
+
+    def observe_selected_delayed_reappearance(self, rule_candidates, frame_id=None):
+        """Truth-attribute parallel LiDAR reappearance rules for evaluation only."""
+        if not self.config.get("selected_track_admission_profiling", False):
+            return False
+        if frame_id is not None and frame_id == self._selected_delayed_reappearance_last_frame:
+            return False
+        self._selected_delayed_reappearance_last_frame = frame_id
+        truth = self.truth_objects()
+        for name, candidates in (rule_candidates or {}).items():
+            detected, pairs = self._admission_classification(truth, candidates)
+            total = self._selected_delayed_reappearance_totals.setdefault(
+                str(name), {"candidates":0, "matched":0, "fp":0,
+                            "actors":{}, "time_gaps":[], "match_distances":[]})
+            total["candidates"] += len(detected);total["matched"] += len(pairs)
+            total["fp"] += max(0, len(detected) - len(pairs))
+            for truth_index, detected_index, unused_distance in pairs:
+                actor_id = truth[truth_index].get("actor_id")
+                if actor_id is not None:
+                    total["actors"][int(actor_id)] = str(truth[truth_index].get(
+                        "object_type", "unknown_obstacle"))
+            for item in detected:
+                for values, key in ((total["time_gaps"],
+                                     "selected_delayed_reappearance_time_gap"),
+                                    (total["match_distances"],
+                                     "selected_delayed_reappearance_match_distance")):
+                    try:values.append(float(item.get(key)))
+                    except (TypeError, ValueError):pass
+        return True
+
+    def _selected_delayed_reappearance_report(self, outcome_sets):
+        expired_only = set(outcome_sets.get("expired_only", set()))
+        actor_classes = self._selected_track_admission_totals["actor_classes"]["hold"]
+        expired_only_person = set(
+            actor_id for actor_id in expired_only
+            if actor_classes.get(actor_id) == "person")
+        report = {}
+        for name, source in sorted(self._selected_delayed_reappearance_totals.items()):
+            actors = set(source["actors"])
+            rescued = actors & expired_only
+            item = {"candidates":source["candidates"], "matched":source["matched"],
+                    "fp":source["fp"], "actors":len(actors),
+                    "classes":dict((class_name, sum(
+                        1 for value in source["actors"].values()
+                        if value == class_name))
+                        for class_name in set(source["actors"].values())),
+                    "expired_only_actors":len(expired_only),
+                    "expired_only_actors_rescued":len(rescued),
+                    "expired_only_person_actors":len(expired_only_person),
+                    "expired_only_person_actors_rescued":len(
+                        rescued & expired_only_person),
+                    "time_gap":self._distribution(source["time_gaps"]),
+                    "match_distance":self._distribution(source["match_distances"])}
+            item["precision"] = (float(item["matched"]) / item["candidates"]
+                                 if item["candidates"] else None)
+            report[name] = item
+        return report
 
     def _selected_camera_rescue_rules(self):
         configured = self.config.get(

@@ -345,6 +345,14 @@ rescued. The three candidate rules are compared without changing admission,
 Fusion, Tracker or ObjectList. This keeps the rule portable to a real detector
 while CARLA camera truth remains only a simulation benchmark proxy.
 
+V0.6.12.8.2.2.29 profiles delayed LiDAR reappearance after the camera study
+showed that the remaining Expired-Only pedestrians were outside useful camera
+support at admission time. Four parallel sensor-only rules compare 0.75, 1.0
+and 1.5 second pending windows plus a wider 3.5 meter spatial gate. Each rule
+reports truth/false-positive precision, unique actor coverage, and how many
+Expired-Only pedestrians would reappear in time. The parallel pending state is
+diagnostic only and cannot confirm or filter a runtime track.
+
 ## Current scope
 
 - Fixed roadside RGB camera

@@ -192,6 +192,48 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(1, result["expired_only_actors_rescued"])
         self.assertEqual(1, result["expired_only_person_actors_rescued"])
 
+    def test_delayed_reappearance_confirms_after_base_ttl_only_in_shadow(self):
+        fusion = SimpleFusion("test", {
+            "selected_track_admission_enabled": True,
+            "selected_track_admission_shadow_mode": True,
+            "selected_track_admission_required_frames": 2,
+            "selected_track_admission_match_gate": 2.5,
+            "selected_track_admission_ttl": .5,
+            "selected_track_admission_delayed_reappearance_shadow": True,
+            "selected_track_admission_delayed_reappearance_ablations": [
+                {"name":"long", "ttl":1.0, "match_gate":2.5}]})
+        fusion._gate_selected_new_tracks(
+            [self._selected()], [], 10.0, frame_id=1)
+        admitted, rejected, unused_stats = fusion._gate_selected_new_tracks(
+            [self._selected(10.2)], [], 10.7, frame_id=2)
+        self.assertEqual([], admitted)
+        self.assertEqual(1, len(rejected))
+        delayed = fusion.last_selected_delayed_reappearance_candidates["long"]
+        self.assertEqual(1, len(delayed))
+        self.assertAlmostEqual(.7, delayed[0][
+            "selected_delayed_reappearance_time_gap"])
+
+    def test_delayed_reappearance_evaluator_reports_expired_only_actor(self):
+        center = type("Center", (), {"x": 0.0, "y": 0.0})()
+        evaluator = GroundTruthEvaluator(None, lambda: center, {
+            "selected_track_admission_profiling": True})
+        evaluator.truth_objects = lambda: [
+            {"actor_id": 12, "x": 10.0, "y": 0.0,
+             "object_type": "person"}]
+        hold = self._selected();hold["selected_track_admission_pending_id"] = 31
+        evaluator.observe_selected_track_admission([hold], [], [], frame_id=40)
+        expired = dict(hold);expired["selected_track_admission_reason"] = "expired"
+        evaluator.observe_selected_track_admission([], [], [expired], frame_id=41)
+        event = self._selected();event.update({
+            "selected_delayed_reappearance_time_gap":.8,
+            "selected_delayed_reappearance_match_distance":.4})
+        evaluator.observe_selected_delayed_reappearance(
+            {"long":[event]}, frame_id=41)
+        result = evaluator.report_selected_track_admission()[
+            "delayed_reappearance_shadow"]["long"]
+        self.assertEqual(1, result["matched"])
+        self.assertEqual(1, result["expired_only_person_actors_rescued"])
+
 
 if __name__ == "__main__":
     unittest.main()

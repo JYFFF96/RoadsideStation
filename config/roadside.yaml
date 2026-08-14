@@ -156,6 +156,14 @@ fusion:
   selected_track_admission_match_gate: 2.5
   selected_track_admission_track_gate: 4.0
   selected_track_admission_ttl: 0.5
+  # V0.6.12.8.2.2.29: profile intermittent LiDAR reappearance with longer
+  # sensor-only windows. Parallel state never filters or confirms real tracks.
+  selected_track_admission_delayed_reappearance_shadow: true
+  selected_track_admission_delayed_reappearance_ablations:
+    - {name: ttl075_gate25, ttl: 0.75, match_gate: 2.5}
+    - {name: ttl100_gate25, ttl: 1.00, match_gate: 2.5}
+    - {name: ttl150_gate25, ttl: 1.50, match_gate: 2.5}
+    - {name: ttl100_gate35, ttl: 1.00, match_gate: 3.5}
 
   range_adaptive_clustering: true
   range_bands:

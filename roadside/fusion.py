@@ -111,6 +111,9 @@ class SimpleFusion(object):
         self._selected_track_admission_last_frame = None
         self._selected_track_admission_sequence = 0
         self._selected_track_admission_pending_sequence = 0
+        self._selected_delayed_reappearance_pending = {}
+        self.last_selected_delayed_reappearance_candidates = {}
+        self.last_selected_delayed_reappearance_stats = {}
 
     def set_world_transform(self, t):
         if t is None:
@@ -623,6 +626,8 @@ class SimpleFusion(object):
         new_frame = token != self._selected_track_admission_last_frame
         if new_frame:
             self._selected_track_admission_last_frame = token
+        self._profile_selected_delayed_reappearance(
+            items, previous_tracks, now, token, new_frame)
 
         pending, expired = [], []
         for old in self._selected_track_admission_pending:
@@ -719,6 +724,75 @@ class SimpleFusion(object):
             if not p.get("confirmed", False)]
         stats["pending"] = len(self._selected_track_admission_pending)
         return admitted, rejected, stats
+
+    def _selected_delayed_reappearance_rules(self):
+        rules = []
+        for index, item in enumerate(self.config.get(
+                "selected_track_admission_delayed_reappearance_ablations", []) or []):
+            if not isinstance(item, dict):continue
+            rules.append({"name":str(item.get("name", "rule_%d" % index)),
+                          "ttl":float(item.get("ttl", 1.0)),
+                          "match_gate":float(item.get("match_gate", 2.5))})
+        return rules
+
+    def _profile_selected_delayed_reappearance(self, items, previous_tracks,
+                                                now, token, new_frame):
+        """Run longer LiDAR reappearance windows in parallel, without filtering."""
+        outputs = {};stats = {}
+        rules = self._selected_delayed_reappearance_rules()
+        if (not self.config.get(
+                "selected_track_admission_delayed_reappearance_shadow", False)
+                or not rules or not new_frame):
+            self.last_selected_delayed_reappearance_candidates = outputs
+            self.last_selected_delayed_reappearance_stats = stats
+            return
+        eligible = []
+        for source in items or []:
+            if not source.get("road_object_selected_enforced", False):continue
+            if source.get("radar_radial_velocity") is not None:continue
+            if self._selected_track_support(source, previous_tracks) is not None:continue
+            eligible.append(dict(source))
+        for rule in rules:
+            name = rule["name"];ttl = max(0.0, rule["ttl"])
+            gate = max(0.0, rule["match_gate"])
+            active = [];expired = 0
+            for old in self._selected_delayed_reappearance_pending.get(name, []):
+                if max(0.0, now - float(old.get("last_time", now))) <= ttl:
+                    active.append(old)
+                else:expired += 1
+            confirmed = [];used = set()
+            for source in eligible:
+                best = None
+                for index, old in enumerate(active):
+                    if index in used:continue
+                    distance = math.hypot(float(old["x"]) - float(source["x"]),
+                                          float(old["y"]) - float(source["y"]))
+                    if distance <= gate and (best is None or distance < best[0]):
+                        best = (distance, index, old)
+                if best is None:
+                    entry = dict(source)
+                    entry.update({"x":float(source["x"]), "y":float(source["y"]),
+                                  "last_time":now, "last_frame":token})
+                    active.append(entry);used.add(len(active) - 1)
+                    continue
+                distance, index, old = best;used.add(index)
+                event = dict(source)
+                event["selected_delayed_reappearance_rule"] = name
+                event["selected_delayed_reappearance_ttl"] = ttl
+                event["selected_delayed_reappearance_match_gate"] = gate
+                event["selected_delayed_reappearance_match_distance"] = distance
+                event["selected_delayed_reappearance_time_gap"] = max(
+                    0.0, now - float(old.get("last_time", now)))
+                event["selected_delayed_reappearance_origin"] = dict(old)
+                confirmed.append(event);old["confirmed"] = True
+            active = [item for item in active if not item.get("confirmed", False)]
+            self._selected_delayed_reappearance_pending[name] = active
+            outputs[name] = confirmed
+            stats[name] = {"eligible":len(eligible), "confirmed":len(confirmed),
+                           "expired":expired, "pending":len(active),
+                           "ttl":ttl, "match_gate":gate}
+        self.last_selected_delayed_reappearance_candidates = outputs
+        self.last_selected_delayed_reappearance_stats = stats
 
     def _selected_admission_tracker_candidates(self, original, admitted):
         shadow = (self.config.get("selected_track_admission_enabled", False) and
