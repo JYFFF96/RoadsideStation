@@ -113,5 +113,18 @@ class MultiClassBaselineTest(unittest.TestCase):
         self.assertEqual(1,report["class_counts"]["person"]["pass"])
         self.assertEqual(1,report["class_counts"]["car"]["no_geometry_candidate"])
 
+    def test_detection_drop_uses_one_to_one_stage_matching(self):
+        world=_World([
+            _Actor(1,"walker.pedestrian.0001",20.0,0.0,[.5,.5,1.8]),
+            _Actor(2,"walker.pedestrian.0002",20.8,0.0,[.5,.5,1.8]),
+        ])
+        evaluator=GroundTruthEvaluator(world,lambda:_Vector(),{
+            "radius":80.0,"match_distance":2.0,"include_walkers":True})
+        candidate={"x":20.2,"y":0.0}
+        report=evaluator.analyze_detection_drop_reasons(
+            [candidate],[candidate],[candidate],[candidate])
+        self.assertEqual(1,report["class_counts"]["person"]["pass"])
+        self.assertEqual(1,report["class_counts"]["person"]["no_geometry_candidate"])
+
 
 if __name__=="__main__":unittest.main()

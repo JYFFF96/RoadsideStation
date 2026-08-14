@@ -354,7 +354,8 @@ class GroundTruthEvaluator(object):
     @staticmethod
     def _geometry_profile(items):
         points=[];lengths=[];widths=[];heights=[];modes={}
-        flags={"compact":0,"sparse":0,"recovery":0,"temporal":0,"far_builder":0}
+        flags={"compact":0,"sparse":0,"recovery":0,"temporal":0,"far_builder":0,
+               "road_object":0}
         for item in items or []:
             value=item.get("current_point_count",item.get("point_count"))
             try:points.append(float(value))
@@ -370,6 +371,7 @@ class GroundTruthEvaluator(object):
             if item.get("far_geometry_recovered",False):flags["recovery"]+=1
             if item.get("far_geometry_temporal_supported",False):flags["temporal"]+=1
             if mode=="far_geometry_builder":flags["far_builder"]+=1
+            if item.get("road_object_recovered",False):flags["road_object"]+=1
         def summary(values):
             return {"samples":len(values),"mean":(sum(values)/len(values) if values else None),
                     "min":(min(values) if values else None),"max":(max(values) if values else None)}
@@ -420,14 +422,17 @@ class GroundTruthEvaluator(object):
         roi_rej=self._detected_with_range(roi_rejections)
         score_rej=self._detected_with_range(score_rejections)
         total=self._empty_drop_counts();bins=[];lower=0.0;classes={}
+        def matched_truth(candidates):return set(ti for ti,_,_ in self._match(truth,candidates))
+        geo_match=matched_truth(geo);roi_match=matched_truth(roi);score_match=matched_truth(scored);dyn_match=matched_truth(dyn)
+        roi_reject_match=matched_truth(roi_rej);score_reject_match=matched_truth(score_rej)
         for upper in self.range_bins:
             c=self._empty_drop_counts();c["min_range"]=lower;c["max_range"]=upper;bins.append(c);lower=upper
         details=[]
-        for gt in truth:
-            if not self._has_match(gt,geo):reason="no_geometry_candidate"
-            elif not self._has_match(gt,roi):reason="roi_reject" if self._has_match(gt,roi_rej) else "roi_lost"
-            elif not self._has_match(gt,scored):reason="score_reject" if self._has_match(gt,score_rej) else "score_lost"
-            elif not self._has_match(gt,dyn):reason="dynamic_drop"
+        for truth_index,gt in enumerate(truth):
+            if truth_index not in geo_match:reason="no_geometry_candidate"
+            elif truth_index not in roi_match:reason="roi_reject" if truth_index in roi_reject_match else "roi_lost"
+            elif truth_index not in score_match:reason="score_reject" if truth_index in score_reject_match else "score_lost"
+            elif truth_index not in dyn_match:reason="dynamic_drop"
             else:reason="pass"
             total["truth"]+=1;total[reason]+=1
             name=gt.get("object_type","unknown_obstacle")

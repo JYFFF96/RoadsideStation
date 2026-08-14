@@ -68,6 +68,28 @@ fusion:
   ground_removal_enabled: true
   ground_clearance: 0.30
 
+  # V0.6.12.8.2: a separate, temporally confirmed channel for compact low
+  # road objects. The normal vehicle/VRU ground cut remains unchanged.
+  road_object_recovery_enabled: true
+  road_object_recovery_min_range: 5.0
+  road_object_recovery_max_range: 45.0
+  road_object_recovery_ground_clearance: 0.05
+  road_object_recovery_max_height_above_ground: 1.50
+  road_object_recovery_cell_size: 0.30
+  road_object_recovery_neighbor_cells: 1
+  road_object_recovery_min_points: 2
+  road_object_recovery_max_points: 24
+  road_object_recovery_min_length: 0.08
+  road_object_recovery_max_length: 1.50
+  road_object_recovery_min_width: 0.02
+  road_object_recovery_max_width: 1.20
+  road_object_recovery_min_height: 0.02
+  road_object_recovery_max_height: 1.40
+  road_object_recovery_temporal_frames: 2
+  road_object_recovery_temporal_gate: 0.80
+  road_object_recovery_dedupe_distance: 1.00
+  road_object_recovery_max_candidates: 12
+
   range_adaptive_clustering: true
   range_bands:
     - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.25, max_length: 6.5, min_width: 0.12, max_width: 3.4, min_height: 0.30, max_height: 2.6}

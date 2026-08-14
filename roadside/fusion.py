@@ -7,6 +7,7 @@ from collections import defaultdict
 from .models import DetectedObject, ObjectList
 from .perception import voxel_cluster_lidar, adaptive_voxel_cluster_lidar, merge_lidar_clusters
 from .sparse_geometry_rescue import track_guided_sparse_rescue
+from .road_object_geometry_recovery import RoadObjectGeometryRecovery
 from .tracking import NearestTracker
 
 
@@ -80,6 +81,7 @@ class SimpleFusion(object):
             config.get("track_coast_edge_ratio", 0.90))
         self.tracker.configure_quality(config)
         self.background = PersistentStaticFilter(**config)
+        self.road_object_recovery = RoadObjectGeometryRecovery()
         self.world_transform = None
         self.radar_matrix = None
         self.radar_origin = None
@@ -578,6 +580,13 @@ class SimpleFusion(object):
             clean_points, previous_tracks, self.world_transform, clusters, c)
         if sparse_rescues:
             clusters = list(clusters) + list(sparse_rescues)
+        ground_cut_local=None
+        if self.ground_reference_z is not None and self.world_transform is not None:
+            ground_cut_local=float(self.ground_reference_z)+float(c.get("ground_clearance",.30))-float(self.world_transform["z"])
+        road_object_rescues=self.road_object_recovery.update(
+            lidar_points,clusters,ground_cut_local,c,frame_id=frame_id)
+        if road_object_rescues:
+            clusters=list(clusters)+list(road_object_rescues)
 
         world_clusters, accepted, roi_rejections = [], [], []
         roi_rescued = 0
@@ -599,7 +608,8 @@ class SimpleFusion(object):
                         "far_geometry_temporal_supported", "current_point_count",
                         "temporal_point_count", "oriented_yaw",
                         "oriented_extent", "axis_aligned_extent",
-                        "far_geometry_recovered", "recovery_fragment_count"):
+                        "far_geometry_recovered", "recovery_fragment_count",
+                        "road_object_recovered", "road_object_temporal_hits"):
                 if key in i:
                     item[key] = i.get(key)
             item = self._mark_recovery_track_support(item, previous_tracks)
@@ -669,6 +679,7 @@ class SimpleFusion(object):
         sparse_roi = sum(1 for x in accepted if x.get("sparse_rescued", False))
         sparse_score = sum(1 for x in scored if x.get("sparse_rescued", False))
         sparse_dynamic = sum(1 for x in tracker_candidates if x.get("sparse_rescued", False))
+        road_stats=dict(self.road_object_recovery.last_stats or {})
         ts = dict(getattr(self.tracker, "last_stats", {}) or {})
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
@@ -679,6 +690,13 @@ class SimpleFusion(object):
             "sparse_rescue_candidates": len(sparse_rescues),
             "sparse_rescue_roi": sparse_roi, "sparse_rescue_score": sparse_score,
             "sparse_rescue_dynamic": sparse_dynamic,
+            "road_object_recovery_input": int(road_stats.get("input_points",0)),
+            "road_object_recovery_components": int(road_stats.get("components",0)),
+            "road_object_recovery_shape_pass": int(road_stats.get("shape_pass",0)),
+            "road_object_recovery_pending": int(road_stats.get("pending",0)),
+            "road_object_recovery_temporal_pass": int(road_stats.get("temporal_pass",0)),
+            "road_object_recovery_dedupe": int(road_stats.get("dedupe",0)),
+            "road_object_recovery_built": int(road_stats.get("built",0)),
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),
             "scored_candidates": len(scored), "score_rejected": len(score_rejections),

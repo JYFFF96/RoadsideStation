@@ -99,6 +99,12 @@ V0.6.12.8.1 also prints per-class Geometry attribution and stage-drop lines.
 the profiles show point counts, extents, cluster modes and rescue sources for
 matched geometry. CARLA truth remains evaluation-only.
 
+V0.6.12.8.2 adds a separate low road-object recovery channel below the normal
+0.30m ground cut. Compact candidates must repeat for two consecutive LiDAR
+frames before they enter ROI and Tracker. `[ROAD-OBJECT RECOVERY]` reports the
+point, shape, temporal and deduplication stages. Stage-drop attribution now uses
+one-to-one matching at every stage.
+
 ## Current scope
 
 - Fixed roadside RGB camera

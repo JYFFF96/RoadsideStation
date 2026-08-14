@@ -88,7 +88,7 @@ def _print_detection_drop(dd):
 def _print_geometry_attribution(a):
  for name,b in sorted((a.get("classes",{}) or {}).items()):
   p=b.get("profile",{}) or {};pts=p.get("points",{}) or {};length=p.get("length",{}) or {};width=p.get("width",{}) or {};height=p.get("height",{}) or {};src=p.get("sources",{}) or {}
-  print("  [MULTI-CLASS GEOMETRY %s] T:%d G:%d NoG:%d R:%s Pts(avg/min/max):%s/%s/%s LWH(avg):%s/%s/%s Modes:%s Src(C/S/R/T/F):%d/%d/%d/%d/%d"%(name,b.get("truth",0),b.get("matched",0),b.get("no_geometry",0),_pct(b.get("recall")),_num(pts.get("mean")),_num(pts.get("min")),_num(pts.get("max")),_num(length.get("mean")),_num(width.get("mean")),_num(height.get("mean")),p.get("cluster_modes",{}),src.get("compact",0),src.get("sparse",0),src.get("recovery",0),src.get("temporal",0),src.get("far_builder",0)))
+  print("  [MULTI-CLASS GEOMETRY %s] T:%d G:%d NoG:%d R:%s Pts(avg/min/max):%s/%s/%s LWH(avg):%s/%s/%s Modes:%s Src(C/S/R/T/F/O):%d/%d/%d/%d/%d/%d"%(name,b.get("truth",0),b.get("matched",0),b.get("no_geometry",0),_pct(b.get("recall")),_num(pts.get("mean")),_num(pts.get("min")),_num(pts.get("max")),_num(length.get("mean")),_num(width.get("mean")),_num(height.get("mean")),p.get("cluster_modes",{}),src.get("compact",0),src.get("sparse",0),src.get("recovery",0),src.get("temporal",0),src.get("far_builder",0),src.get("road_object",0)))
  fp=a.get("false_profile",{}) or {};points=fp.get("points",{}) or {}
  print("  [GEOMETRY UNATTRIBUTED] FP:%d Pts(avg):%s Modes:%s"%(a.get("false_positive",0),_num(points.get("mean")),fp.get("cluster_modes",{})))
 
@@ -121,6 +121,9 @@ def _print_far_admission_risk_classes(profile):
 def _print_sparse_geometry(s):
  print("  [SPARSE GEOMETRY] Built:%d ROI:%d Score:%d Dynamic:%d"%(s.get("sparse_rescue_candidates",0),s.get("sparse_rescue_roi",0),s.get("sparse_rescue_score",0),s.get("sparse_rescue_dynamic",0)))
 
+def _print_road_object_recovery(s):
+ print("  [ROAD-OBJECT RECOVERY] InputPts:%d Components:%d ShapePass:%d Pending:%d TemporalPass:%d Dedupe:%d Built:%d"%(s.get("road_object_recovery_input",0),s.get("road_object_recovery_components",0),s.get("road_object_recovery_shape_pass",0),s.get("road_object_recovery_pending",0),s.get("road_object_recovery_temporal_pass",0),s.get("road_object_recovery_dedupe",0),s.get("road_object_recovery_built",0)))
+
 def _print_discovery_diagnostics(d):
  print("  [DISCOVERY SOURCE] TrackRescue B:%d R:%d S:%d D:%d | NewDiscovery B:%d R:%d S:%d D:%d"%(d.get("track_rescue_built",0),d.get("track_rescue_roi",0),d.get("track_rescue_score",0),d.get("track_rescue_dynamic",0),d.get("new_discovery_built",0),d.get("new_discovery_roi",0),d.get("new_discovery_score",0),d.get("new_discovery_dynamic",0)))
  print("  [DISCOVERY TRACK] New:%d Confirmed:%d OneFrameDrop:%d Active:%d"%(d.get("discovery_track_new",0),d.get("discovery_track_confirmed",0),d.get("discovery_track_one_frame_drop",0),d.get("discovery_track_active",0)))
@@ -140,11 +143,12 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.1 Multi-Class Geometry Attribution starting...")
+ print("RoadsideStation V0.6.12.8.2 Road-Object Geometry Recovery starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
   gz=station.junction_center.z if station.junction_center is not None else None;print("Ground removal: enabled reference_z=%s clearance=%.2fm"%(("-" if gz is None else "%.2f"%gz),float(fc.get("ground_clearance",0.30))))
+ print("Road-Object Geometry Recovery: %s | range=%.0f..%.0fm low_clearance=%.2fm temporal_frames=%d max=%d"%('enabled' if fc.get('road_object_recovery_enabled',False) else 'disabled',float(fc.get('road_object_recovery_min_range',5.0)),float(fc.get('road_object_recovery_max_range',45.0)),float(fc.get('road_object_recovery_ground_clearance',.05)),int(fc.get('road_object_recovery_temporal_frames',2)),int(fc.get('road_object_recovery_max_candidates',12))))
  print("LiDAR clustering: %s"%("hybrid range-adaptive (near geometry filtered, mid 3D, far multi-scale BEV)" if fc.get("range_adaptive_clustering",False) else "fixed"))
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  near_band=(fc.get("range_bands") or [{}])[0]
@@ -226,7 +230,7 @@ def main():
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
-    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
+    _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     print("  [FAR TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("far_admission_shadow_mode",False) else "ENFORCE",s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0),s.get("far_admission_tracker_input",0)))
@@ -242,7 +246,7 @@ def main():
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
-    _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
+    _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
      admission_report=evaluator.report_far_admission_decisions(reset=True)
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)
