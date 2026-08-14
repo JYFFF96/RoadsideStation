@@ -75,9 +75,11 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
             "road_object_precision_gate_shadow":True,
             "road_object_gate_min_points":10,
+            "road_object_gate_point_ablations":[8,9,10],
             "road_object_gate_max_height":.45,
             "road_object_gate_max_range":25.0})
-        truth=[{"object_type":"unknown_obstacle","x":10.0,"y":0.0}]
+        truth=[{"actor_id":42,"type_id":"static.prop.box02","role":"rsu_test_obstacle",
+                "object_type":"unknown_obstacle","x":10.0,"y":0.0,"range":10.0}]
         evaluator.truth_objects=lambda:truth
         evaluator._detected_with_range=lambda items:list(items)
         good={"x":10.0,"y":0.0,"point_count":12,"extent":[.6,.3,.2],"range":10.0}
@@ -88,6 +90,27 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         report=evaluator.analyze_road_object_recovery([good,false])
         self.assertEqual(2,report["cumulative"]["classes"]["unknown_obstacle"]["matched_samples"])
         self.assertEqual(2,report["cumulative"]["precision_gate_shadow"]["fp"]["rejected"])
+        actor=report["cumulative"]["actor_coverage"][0]
+        self.assertEqual(42,actor["actor_id"])
+        self.assertEqual(2,actor["visible_frames"])
+        self.assertEqual(2,actor["matched_frames"])
+        self.assertEqual(2,actor["gate_kept_frames"])
+
+    def test_point_gate_ablation_and_overlapping_rejection_reasons(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_precision_gate_shadow":True,"road_object_gate_min_points":10,
+            "road_object_gate_point_ablations":[8,9,10],
+            "road_object_gate_max_height":.45,"road_object_gate_max_range":25.0})
+        borderline={"point_count":9,"extent":[.6,.3,.2],"range":20.0}
+        false={"point_count":6,"extent":[.6,.3,.9],"range":30.0}
+        reports=evaluator._road_object_ablations({"unknown_obstacle":[borderline]},[false])
+        self.assertEqual(1,reports["8"]["truth"]["kept"])
+        self.assertEqual(1,reports["9"]["truth"]["kept"])
+        self.assertEqual(0,reports["10"]["truth"]["kept"])
+        failures=reports["10"]["fp"]["failures"]
+        self.assertEqual(1,failures["points"])
+        self.assertEqual(1,failures["height"])
+        self.assertEqual(1,failures["range"])
 
 
 if __name__=="__main__":unittest.main()

@@ -332,6 +332,8 @@ evaluation:
   # perception candidates or alter ROI, Tracker and ObjectList.
   road_object_precision_gate_shadow: true
   road_object_gate_min_points: 10
+  # V0.6.12.8.2.2.1: compare point thresholds in parallel without enforcement.
+  road_object_gate_point_ablations: [8, 9, 10]
   road_object_gate_max_height: 0.45
   road_object_gate_max_range: 25.0
   # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.

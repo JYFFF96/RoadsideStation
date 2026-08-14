@@ -136,6 +136,20 @@ def _print_road_object_gate(label,gate):
  truth=gate.get("truth",{}) or {};fp=gate.get("fp",{}) or {};classes=[]
  for name,b in sorted((gate.get("classes",{}) or {}).items()):classes.append("%s:%d/%d"%(name,b.get("kept",0),b.get("total",0)))
  print("    [ROAD-OBJECT PRECISION GATE %s] Keep:%d/%d TruthKeep:%d/%d FPReject:%d/%d Classes:%s"%(label,gate.get("kept",0),gate.get("candidates",0),truth.get("kept",0),truth.get("total",0),fp.get("rejected",0),fp.get("total",0)," | ".join(classes) if classes else "-"))
+ tf=truth.get("failures",{}) or {};ff=fp.get("failures",{}) or {}
+ print("    [ROAD-OBJECT GATE REJECT %s] Truth(points/height/range/invalid):%d/%d/%d/%d FP:%d/%d/%d/%d"%(label,tf.get("points",0),tf.get("height",0),tf.get("range",0),tf.get("invalid",0),ff.get("points",0),ff.get("height",0),ff.get("range",0),ff.get("invalid",0)))
+
+def _print_road_object_ablations(label,ablations):
+ for threshold,gate in sorted((ablations or {}).items(),key=lambda x:int(x[0])):
+  truth=gate.get("truth",{}) or {};fp=gate.get("fp",{}) or {};kept=gate.get("kept",0)
+  precision=(float(truth.get("kept",0))/kept) if kept else None
+  print("    [ROAD-OBJECT GATE ABLATION %s PTS>=%s] TruthKeep:%d/%d FPReject:%d/%d KeptPrecision:%s"%(label,threshold,truth.get("kept",0),truth.get("total",0),fp.get("rejected",0),fp.get("total",0),_pct(precision)))
+
+def _print_road_object_actor_coverage(items):
+ for item in items or []:
+  visible=item.get("visible_frames",0);matched=item.get("matched_frames",0);kept=item.get("gate_kept_frames",0);fail=item.get("gate_failures",{}) or {}
+  ablation=" ".join("P%s:%d"%(key,value) for key,value in sorted((item.get("ablation_kept",{}) or {}).items(),key=lambda x:int(x[0])))
+  print("    [ROAD-OBJECT ACTOR COVERAGE] id=%d type=%s range=%.1f..%.1fm Visible:%d RecoveryMatch:%d(%s) GateKeep:%d/%d(%s) Fail(P/H/R):%d/%d/%d Ablation:%s"%(item.get("actor_id",0),item.get("type_id","unknown"),float(item.get("range_min",0.0) or 0.0),float(item.get("range_max",0.0) or 0.0),visible,matched,_pct(float(matched)/visible if visible else None),kept,matched,_pct(float(kept)/matched if matched else None),fail.get("points",0),fail.get("height",0),fail.get("range",0),ablation or "-"))
 
 def _print_road_object_profile(a):
  precision=(float(a.get('matched',0))/a.get('geometry',0)) if a.get('geometry',0) else None
@@ -150,6 +164,8 @@ def _print_road_object_profile(a):
  fp=(cumulative.get("false_profile",{}) or {}).get("points",{}) or {}
  _print_road_object_distribution("RUN-FP",cumulative.get("false_profile",{}),fp.get("samples",0))
  _print_road_object_gate("RUN",cumulative.get("precision_gate_shadow",{}))
+ _print_road_object_ablations("RUN",cumulative.get("gate_ablations",{}))
+ _print_road_object_actor_coverage(cumulative.get("actor_coverage",[]))
 
 def _print_test_targets(evaluator):
  targets=evaluator.test_targets();print("Evaluation benchmark targets: %d tagged actor(s)"%len(targets))
@@ -175,7 +191,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2 Road-Object Precision Gate Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.1 Road-Object Actor Coverage and Gate Ablation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

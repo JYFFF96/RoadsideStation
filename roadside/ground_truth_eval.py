@@ -23,6 +23,7 @@ class GroundTruthEvaluator(object):
         self._far_admission_last_frame = None
         self._far_admission_totals = self._empty_admission_totals()
         self._road_object_samples = {"classes": {}, "false": []}
+        self._road_object_actor_coverage = {}
 
     def _parse_bins(self, values):
         bins = []
@@ -394,35 +395,87 @@ class GroundTruthEvaluator(object):
                 "height":summary(heights),"range":summary(ranges),
                 "cluster_modes":modes,"sources":flags}
 
-    def _road_object_gate_pass(self, item):
+    def _road_object_gate_thresholds(self):
+        values=self.config.get("road_object_gate_point_ablations",[8,9,10]);out=[]
+        for value in values or []:
+            try:value=int(value)
+            except (TypeError,ValueError):continue
+            if value>0 and value not in out:out.append(value)
+        return sorted(out) or [8,9,10]
+
+    def _road_object_gate_failures(self, item, min_points=None):
         """Evaluation-only scalar gate. No truth labels are read here."""
         try:
             points=float(item.get("current_point_count",item.get("point_count",0)))
             height=float((item.get("extent",[]) or [0.0,0.0,0.0])[2])
             distance=float(item.get("range",0.0))
-        except (IndexError,TypeError,ValueError):return False
-        return (points>=float(self.config.get("road_object_gate_min_points",10)) and
-                height<=float(self.config.get("road_object_gate_max_height",.45)) and
-                distance<=float(self.config.get("road_object_gate_max_range",25.0)))
+        except (IndexError,TypeError,ValueError):return ["invalid"]
+        threshold=float(self.config.get("road_object_gate_min_points",10) if min_points is None else min_points)
+        failures=[]
+        if points<threshold:failures.append("points")
+        if height>float(self.config.get("road_object_gate_max_height",.45)):failures.append("height")
+        if distance>float(self.config.get("road_object_gate_max_range",25.0)):failures.append("range")
+        return failures
 
-    def _road_object_gate_profile(self, class_items, false_items):
+    def _road_object_gate_pass(self, item, min_points=None):
+        return not self._road_object_gate_failures(item,min_points)
+
+    def _road_object_rejection_profile(self, items, min_points=None):
+        result={"total":len(items or []),"passed":0,"points":0,"height":0,"range":0,"invalid":0}
+        for item in items or []:
+            failures=self._road_object_gate_failures(item,min_points)
+            if not failures:result["passed"]+=1
+            for name in failures:result[name]=result.get(name,0)+1
+        return result
+
+    def _road_object_gate_profile(self, class_items, false_items, min_points=None):
         classes={};truth_total=0;truth_kept=0
         for name,items in (class_items or {}).items():
-            kept=sum(1 for item in items if self._road_object_gate_pass(item));total=len(items)
+            kept=sum(1 for item in items if self._road_object_gate_pass(item,min_points));total=len(items)
             classes[name]={"total":total,"kept":kept,"rejected":total-kept}
             truth_total+=total;truth_kept+=kept
-        fp_total=len(false_items or []);fp_kept=sum(1 for item in false_items or [] if self._road_object_gate_pass(item))
+        fp_total=len(false_items or []);fp_kept=sum(1 for item in false_items or [] if self._road_object_gate_pass(item,min_points))
+        truth_items=[]
+        for items in (class_items or {}).values():truth_items.extend(items)
         return {"enabled":bool(self.config.get("road_object_precision_gate_shadow",False)),
+                "min_points":int(self.config.get("road_object_gate_min_points",10) if min_points is None else min_points),
                 "candidates":truth_total+fp_total,"kept":truth_kept+fp_kept,
                 "rejected":truth_total+fp_total-truth_kept-fp_kept,
-                "truth":{"total":truth_total,"kept":truth_kept,"rejected":truth_total-truth_kept},
-                "fp":{"total":fp_total,"kept":fp_kept,"rejected":fp_total-fp_kept},
+                "truth":{"total":truth_total,"kept":truth_kept,"rejected":truth_total-truth_kept,
+                         "failures":self._road_object_rejection_profile(truth_items,min_points)},
+                "fp":{"total":fp_total,"kept":fp_kept,"rejected":fp_total-fp_kept,
+                      "failures":self._road_object_rejection_profile(false_items,min_points)},
                 "classes":classes}
+
+    def _road_object_ablations(self, class_items, false_items):
+        return dict((str(value),self._road_object_gate_profile(class_items,false_items,value))
+                    for value in self._road_object_gate_thresholds())
+
+    def _record_road_object_actor_coverage(self, truth, pairs, detected):
+        by_truth=dict((ti,di) for ti,di,_ in pairs);thresholds=self._road_object_gate_thresholds()
+        for ti,item in enumerate(truth):
+            if item.get("object_type")!="unknown_obstacle" or item.get("role")!="rsu_test_obstacle":continue
+            actor_id=int(item.get("actor_id",0));bucket=self._road_object_actor_coverage.setdefault(actor_id,{
+                "actor_id":actor_id,"type_id":item.get("type_id","unknown"),"visible_frames":0,
+                "matched_frames":0,"gate_kept_frames":0,"range_min":None,"range_max":None,
+                "gate_failures":{"points":0,"height":0,"range":0,"invalid":0},
+                "ablation_kept":dict((str(value),0) for value in thresholds)})
+            distance=float(item.get("range",0.0));bucket["visible_frames"]+=1
+            bucket["range_min"]=distance if bucket["range_min"] is None else min(bucket["range_min"],distance)
+            bucket["range_max"]=distance if bucket["range_max"] is None else max(bucket["range_max"],distance)
+            if ti not in by_truth:continue
+            candidate=detected[by_truth[ti]];bucket["matched_frames"]+=1
+            failures=self._road_object_gate_failures(candidate)
+            if not failures:bucket["gate_kept_frames"]+=1
+            for name in failures:bucket["gate_failures"][name]=bucket["gate_failures"].get(name,0)+1
+            for value in thresholds:
+                if self._road_object_gate_pass(candidate,value):bucket["ablation_kept"][str(value)]+=1
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""
         truth=self.truth_objects();detected=self._detected_with_range(geometry_candidates)
         pairs=self._match(truth,detected);used=set(di for _,di,_ in pairs);class_items={}
+        self._record_road_object_actor_coverage(truth,pairs,detected)
         for ti,di,_ in pairs:
             name=truth[ti].get("object_type","unknown_obstacle")
             class_items.setdefault(name,[]).append(detected[di])
@@ -445,9 +498,12 @@ class GroundTruthEvaluator(object):
                 "false_positive":len(false_items),"classes":classes,
                 "false_profile":self._geometry_profile(false_items),
                 "precision_gate_shadow":self._road_object_gate_profile(class_items,false_items),
+                "gate_ablations":self._road_object_ablations(class_items,false_items),
                 "cumulative":{"classes":cumulative_classes,
                               "false_profile":self._geometry_profile(self._road_object_samples["false"]),
-                              "precision_gate_shadow":self._road_object_gate_profile(cumulative_items,self._road_object_samples["false"])}}
+                              "precision_gate_shadow":self._road_object_gate_profile(cumulative_items,self._road_object_samples["false"]),
+                              "gate_ablations":self._road_object_ablations(cumulative_items,self._road_object_samples["false"]),
+                              "actor_coverage":[dict(item) for _,item in sorted(self._road_object_actor_coverage.items())]}}
 
     def analyze_geometry_attribution(self, geometry_candidates):
         """Attribute Geometry-stage candidates to CARLA road-object classes.

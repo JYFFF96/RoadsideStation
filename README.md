@@ -119,6 +119,12 @@ cumulatively. The provisional gate (points >= 10, height <= 0.45m, range <=
 perception path. Benchmark actors are tagged so main.py records their exact
 type, position and range in the same log.
 
+V0.6.12.8.2.2.1 keeps the gate in Shadow and adds actor-level coverage for
+every tagged benchmark obstacle. Each actor reports visible frames, recovery
+matches, gate keeps and point/height/range rejection counts. Point thresholds
+8, 9 and 10 are evaluated in parallel so the next enforcing version can select
+a threshold using measured object coverage instead of aggregate samples alone.
+
 ## Current scope
 
 - Fixed roadside RGB camera
