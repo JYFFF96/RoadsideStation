@@ -68,7 +68,7 @@ fusion:
 
   range_adaptive_clustering: true
   range_bands:
-    - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.75, max_length: 6.5, min_width: 0.55, max_width: 3.4, min_height: 0.45, max_height: 2.6}
+    - {max_range: 30.0, mode: 3d, voxel_size: 0.40, min_points: 3, min_length: 0.25, max_length: 6.5, min_width: 0.12, max_width: 3.4, min_height: 0.30, max_height: 2.6}
     - {max_range: 50.0, mode: 3d, voxel_size: 0.65, min_points: 3, min_length: 0.30, min_width: 0.20, min_height: 0.12}
     - {max_range: 80.0, mode: bev_multiscale, bev_cell_sizes: [0.55, 0.85], bev_neighbor_cells: 1, bev_dedupe_distance: 1.40, min_points: 2, min_length: 0.18, min_width: 0.10, min_height: 0.07}
 
@@ -84,6 +84,15 @@ fusion:
   vehicle_min_height: 0.15
   vehicle_max_height: 4.0
   max_objects: 140
+
+  # V0.6.12.8: preserve compact VRU/road-obstacle geometry. Classification is
+  # supplied by camera association when available; otherwise output is unknown_obstacle.
+  pole_filter_enabled: false
+  multiclass_compact_geometry_enabled: true
+  multiclass_compact_max_length: 1.20
+  multiclass_compact_max_width: 1.00
+  multiclass_compact_max_height: 2.40
+  multiclass_compact_score_bonus: 0.14
 
   cluster_merge_enabled: true
   cluster_merge_gap: 1.2
@@ -290,6 +299,8 @@ evaluation:
   range_bins: [30.0, 50.0, 80.0]
   match_distance: 4.0
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
+  include_walkers: true
+  obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]
   report_interval: 2.0
   # V0.6.12.7.2: truth attribution is evaluation-only and never feeds admission.
   far_admission_decision_diagnostics: true

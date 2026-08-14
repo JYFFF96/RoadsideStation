@@ -280,6 +280,12 @@ class SimpleFusion(object):
         elif points >= 2:
             score += .05
         score += .17 if votes >= 2 else .04
+        compact = (.18 <= hl <= float(self.config.get("multiclass_compact_max_length", 1.20)) and
+                   .08 <= hs <= float(self.config.get("multiclass_compact_max_width", 1.00)) and
+                   .30 <= h <= float(self.config.get("multiclass_compact_max_height", 2.40)))
+        if self.config.get("multiclass_compact_geometry_enabled", True) and compact:
+            score += float(self.config.get("multiclass_compact_score_bonus", 0.14))
+            item["multiclass_compact_geometry"] = True
         if item.get("sparse_rescued", False):
             score += float(self.config.get("sparse_geometry_rescue_score_bonus", 0.08))
         lateral = details.get("lateral")
@@ -559,7 +565,8 @@ class SimpleFusion(object):
         previous_tracks = [dict(x) for x in self.last_tracked_candidates]
         clean_points, ground_removed = self._remove_ground_points(lidar_points)
         raw = self._cluster(clean_points, c)
-        filtered = [x for x in raw if not self._looks_like_pole(x.get("extent", [0, 0, 0]))]
+        filtered = ([x for x in raw if not self._looks_like_pole(x.get("extent", [0, 0, 0]))]
+                    if c.get("pole_filter_enabled", False) else [dict(x) for x in raw])
         clusters = merge_lidar_clusters(
             filtered, c.get("cluster_merge_gap", 1.4),
             c.get("merged_vehicle_max_length", 14.), c.get("merged_vehicle_max_width", 4.2),
@@ -651,7 +658,7 @@ class SimpleFusion(object):
         tracked = self.tracker.update(tracker_candidates, now)
         self.last_tracked_candidates = [dict(x) for x in tracked]
         objs = [DetectedObject(i["id"], i["x"], i["y"], i["z"], vx=i["vx"], vy=i["vy"],
-                               object_type="unknown", confidence=i["confidence"],
+                               object_type="unknown_obstacle", confidence=i["confidence"],
                                sources=i["sources"]) for i in tracked]
         nearest = [x.get("radar_nearest_xy") for x in roi if x.get("radar_nearest_xy") is not None]
         reasons = defaultdict(int)

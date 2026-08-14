@@ -1,17 +1,7 @@
 from __future__ import print_function
 
 from .camera_objects import CameraObjectList
-
-
-def carla_actor_class(actor):
-    tid = actor.type_id.lower()
-    if "bus" in tid:
-        return "bus"
-    if "truck" in tid or "carlacola" in tid or "firetruck" in tid:
-        return "truck"
-    if tid.startswith("vehicle."):
-        return "car"
-    return "unknown"
+from .object_taxonomy import carla_actor_class, iter_carla_road_actors
 
 
 def _project_actor_bbox(actor, projector, width, height):
@@ -34,7 +24,8 @@ def _project_actor_bbox(actor, projector, width, height):
     return [x1, y1, x2, y2]
 
 
-def make_truth_camera_objects(world, projector, camera_id, width, height, frame_id=None, timestamp=None):
+def make_truth_camera_objects(world, projector, camera_id, width, height, frame_id=None,
+                              timestamp=None, obstacle_patterns=None):
     """Simulation-only CameraObjectList built from CARLA actor bounding boxes.
 
     This is a temporary adapter to validate fusion while the production RTSP
@@ -42,7 +33,7 @@ def make_truth_camera_objects(world, projector, camera_id, width, height, frame_
     CameraObjectList interface it will receive from the real detector.
     """
     detections = []
-    for actor in world.get_actors().filter("vehicle.*"):
+    for actor in iter_carla_road_actors(world, obstacle_patterns):
         rect = _project_actor_bbox(actor, projector, width, height)
         if rect is None:
             continue

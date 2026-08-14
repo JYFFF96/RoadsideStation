@@ -2,6 +2,8 @@ from __future__ import print_function
 
 import math
 
+from .object_taxonomy import carla_actor_class, iter_carla_road_actors, object_group
+
 
 class GroundTruthEvaluator(object):
     """CARLA-only truth evaluator.
@@ -35,19 +37,33 @@ class GroundTruthEvaluator(object):
     def _distance2d(a, b):return math.hypot(float(a.x) - float(b.x), float(a.y) - float(b.y))
     def _center(self):return self.center_provider()
 
-    def truth_vehicles(self):
+    def truth_objects(self):
         center = self._center();out = []
         if center is None:return out
-        for actor in self.world.get_actors().filter("vehicle.*"):
+        obstacle_patterns = self.config.get("obstacle_actor_patterns", [])
+        for actor in iter_carla_road_actors(self.world, obstacle_patterns):
             try:
                 role = actor.attributes.get("role_name", "")
-                if self.include_roles and role not in self.include_roles:continue
+                object_type = carla_actor_class(actor)
+                group = object_group(object_type)
+                if group == "vehicle" and self.include_roles and role not in self.include_roles:continue
+                if object_type == "person" and not self.config.get("include_walkers", True):continue
                 loc = actor.get_location();distance = self._distance2d(loc, center)
                 if distance > self.radius:continue
                 vel = actor.get_velocity();extent = actor.bounding_box.extent
-                out.append({"actor_id":int(actor.id),"type_id":actor.type_id,"role":role,"x":float(loc.x),"y":float(loc.y),"z":float(loc.z),"vx":float(vel.x),"vy":float(vel.y),"speed":math.hypot(float(vel.x),float(vel.y)),"size":[float(extent.x)*2.0,float(extent.y)*2.0,float(extent.z)*2.0],"range":float(distance)})
+                out.append({"actor_id":int(actor.id),"type_id":actor.type_id,
+                            "object_type":object_type,"object_group":group,"role":role,
+                            "x":float(loc.x),"y":float(loc.y),"z":float(loc.z),
+                            "vx":float(vel.x),"vy":float(vel.y),
+                            "speed":math.hypot(float(vel.x),float(vel.y)),
+                            "size":[float(extent.x)*2.0,float(extent.y)*2.0,float(extent.z)*2.0],
+                            "range":float(distance)})
             except Exception:continue
         return out
+
+    def truth_vehicles(self):
+        """Compatibility view for vehicle-specific legacy diagnostics."""
+        return [x for x in self.truth_objects() if x.get("object_group") == "vehicle"]
 
     def _detected_with_range(self, detected):
         center = self._center();out = []
@@ -83,8 +99,17 @@ class GroundTruthEvaluator(object):
         return result
 
     def evaluate_candidates(self, detected_candidates):
-        truth=self.truth_vehicles();detected=self._detected_with_range(detected_candidates);pairs=self._match(truth,detected);metrics=self._metrics(len(truth),len(detected),pairs)
-        metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected)})
+        truth=self.truth_objects();detected=self._detected_with_range(detected_candidates);pairs=self._match(truth,detected);metrics=self._metrics(len(truth),len(detected),pairs)
+        matched_truth=set(x[0] for x in pairs);classes={}
+        for index,item in enumerate(truth):
+            name=item.get("object_type","unknown_obstacle")
+            bucket=classes.setdefault(name,{"truth":0,"matched":0,"missed":0})
+            bucket["truth"]+=1
+            if index in matched_truth:bucket["matched"]+=1
+            else:bucket["missed"]+=1
+        for bucket in classes.values():
+            bucket["recall"]=(float(bucket["matched"])/bucket["truth"] if bucket["truth"] else None)
+        metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected),"class_metrics":classes})
         return metrics
 
     @staticmethod
@@ -115,6 +140,8 @@ class GroundTruthEvaluator(object):
             "risk_shadow": dict((decision, {
                 "truth": risk_bucket(), "fp": risk_bucket()})
                 for decision in ("would_hold", "would_confirm", "expired")),
+            "risk_classes": dict((decision, {})
+                                 for decision in ("would_hold", "would_confirm", "expired")),
         }
 
     @staticmethod
@@ -225,6 +252,13 @@ class GroundTruthEvaluator(object):
             bucket["kept"] += 1
         if reason in bucket:bucket[reason] += 1
 
+    def _record_admission_risk_class(self, classes, object_type, item):
+        bucket = classes.setdefault(str(object_type), {
+            "total": 0, "kept": 0, "rejected": 0,
+            "hard_edge": 0, "soft_risk": 0, "unknown_edge": 0,
+        })
+        self._record_admission_shadow_risk(bucket, item)
+
     def _summarize_feature_bucket(self, bucket):
         result = {"count": int(bucket.get("count", 0))}
         for source in ("recovery", "sparse", "temporal", "far_builder",
@@ -252,7 +286,7 @@ class GroundTruthEvaluator(object):
         confirmed = [x for x in (admitted_candidates or [])
                      if x.get("far_track_admission_reason") == "repeat"]
         expired = list(expired_candidates or [])
-        truth = self.truth_vehicles()
+        truth = self.truth_objects()
         totals = self._far_admission_totals
         totals["frames"] += 1
         for name, candidates in (("would_hold", held),
@@ -260,6 +294,8 @@ class GroundTruthEvaluator(object):
                                  ("expired", expired)):
             detected, pairs = self._admission_classification(truth, candidates)
             matched_indices = set(pair[1] for pair in pairs)
+            matched_types = dict((pair[1], truth[pair[0]].get(
+                "object_type", "unknown_obstacle")) for pair in pairs)
             count = len(detected);matched = len(matched_indices)
             false_positive = max(0, count - matched)
             totals[name] += count
@@ -272,6 +308,9 @@ class GroundTruthEvaluator(object):
                 self._record_admission_features(profile[label], item)
                 if self.config.get("far_admission_edge_risk_shadow", False):
                     self._record_admission_shadow_risk(risk_profile[label], item)
+                    if label == "truth":
+                        self._record_admission_risk_class(
+                            totals["risk_classes"][name], matched_types[index], item)
         for item in held + confirmed:
             value = item.get("far_track_admission_match_distance")
             if value is not None:totals["match_distances"].append(float(value))
@@ -285,7 +324,7 @@ class GroundTruthEvaluator(object):
         totals = self._far_admission_totals
         result = dict((k, v) for k, v in totals.items()
                       if k not in ("match_distances", "time_gaps", "frame_gaps",
-                                   "profiles", "risk_shadow"))
+                                   "profiles", "risk_shadow", "risk_classes"))
         result["candidate_jump"] = self._distribution(totals["match_distances"])
         result["time_gap"] = self._distribution(totals["time_gaps"])
         result["frame_gap"] = self._distribution(totals["frame_gaps"])
@@ -296,6 +335,9 @@ class GroundTruthEvaluator(object):
         result["edge_risk_shadow"] = dict((decision, dict(
             (label, dict(bucket)) for label, bucket in labels.items()))
             for decision, labels in totals["risk_shadow"].items())
+        result["edge_risk_classes"] = dict((decision, dict(
+            (name, dict(bucket)) for name, bucket in classes.items()))
+            for decision, classes in totals["risk_classes"].items())
         if reset:self._far_admission_totals = self._empty_admission_totals()
         return result
 
@@ -321,7 +363,7 @@ class GroundTruthEvaluator(object):
         Geometry stage. With the current pipeline this cannot yet distinguish raw
         point-support failure from an earlier clustering/geometry rejection.
         """
-        truth=self.truth_vehicles()
+        truth=self.truth_objects()
         geo=self._detected_with_range(geometry_candidates)
         roi=self._detected_with_range(roi_candidates)
         scored=self._detected_with_range(scored_candidates)
@@ -352,12 +394,12 @@ class GroundTruthEvaluator(object):
     def analyze_roi_false_rejections(self, accepted_candidates, rejected_candidates, min_range=30.0, max_range=50.0):
         """Evaluation-only diagnosis of truth vehicles lost specifically at ROI.
 
-        A truth vehicle is reported only when it has no accepted ROI candidate
+        A truth road object is reported only when it has no accepted ROI candidate
         within the normal evaluator gate but does have a rejected candidate.
         Ground truth never feeds back into perception or fusion.
         """
         lo=float(min_range);hi=float(max_range)
-        truth=[x for x in self.truth_vehicles() if lo<=x.get("range",0.0)<hi]
+        truth=[x for x in self.truth_objects() if lo<=x.get("range",0.0)<hi]
         accepted=[x for x in self._detected_with_range(accepted_candidates) if lo<=x.get("range",0.0)<hi]
         rejected=[x for x in self._detected_with_range(rejected_candidates) if lo<=x.get("range",0.0)<hi]
         accepted_pairs=self._match(truth,accepted);covered=set(p[0] for p in accepted_pairs)

@@ -5,7 +5,7 @@ import time
 
 class DetectedObject(object):
     def __init__(self, object_id, x, y, z=0.0, vx=0.0, vy=0.0,
-                 object_type="unknown", confidence=1.0, sources=None):
+                 object_type="unknown_obstacle", confidence=1.0, sources=None):
         self.object_id = str(object_id)
         self.x = float(x)
         self.y = float(y)

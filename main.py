@@ -9,6 +9,8 @@ from roadside.sparse_geometry_rescue import track_guided_sparse_rescue
 from roadside.far_geometry_builder import build_far_geometry_candidates
 from roadside.camera_fusion import CameraProjector
 from roadside.camera_lidar_association import associate_camera_to_lidar
+from roadside.camera_detector import create_camera_detector
+from roadside.camera_objects import CameraObjectList
 from roadside.fused_objects import build_fused_object_list
 from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.lidar_projection import project_lidar_tracks
@@ -51,6 +53,12 @@ def _print_stage(name,m):
  for b in m.get("range_bins",[]):
   print("    [%02.0f-%02.0fm] Cand:%d Match:%d Miss:%d FP:%d Recall:%s"%(b["min_range"],b["max_range"],b["detected"],b["matched"],b["missed"],b["false_positive"],_pct(b["recall"])))
 
+def _print_multiclass(m):
+ parts=[]
+ for name,b in sorted((m.get("class_metrics",{}) or {}).items()):
+  parts.append("%s:T%d/M%d/Miss%d/R%s"%(name,b.get("truth",0),b.get("matched",0),b.get("missed",0),_pct(b.get("recall"))))
+ print("  [MULTI-CLASS TRACK] %s"%(" | ".join(parts) if parts else "no truth objects"))
+
 def _print_detection_stability(ds):
  print("  [DETECTION STABILITY] Dyn:%d Persistent:%d New:%d OneFrameLost:%d Reassoc:%d Fragmented:%d Lost:%d Jump(avg/max):%.2f/%.2fm ExtentDelta:%.2f"%(ds.get("candidates",0),ds.get("persistent",0),ds.get("new",0),ds.get("one_frame_lost",0),ds.get("reassociated",0),ds.get("fragmented",0),ds.get("lost",0),float(ds.get("mean_jump",0.0)),float(ds.get("max_jump",0.0)),float(ds.get("mean_extent_delta",0.0))))
 
@@ -78,6 +86,13 @@ def _print_far_admission_risk_shadow(name,profile):
  truth_rate=(float(truth_kept)/truth_total) if truth_total else None;fp_rate=(float(fp_rejected)/fp_total) if fp_total else None
  print("  [FAR ADMISSION EDGE-RISK SHADOW %s] TruthKeep:%d/%d(%s) FPReject:%d/%d(%s) HardEdge(T/F):%d/%d SoftRisk(T/F):%d/%d UnknownEdge(T/F):%d/%d"%(label,truth_kept,truth_total,_pct(truth_rate),fp_rejected,fp_total,_pct(fp_rate),truth.get("hard_edge",0),fp.get("hard_edge",0),truth.get("soft_risk",0),fp.get("soft_risk",0),truth.get("unknown_edge",0),fp.get("unknown_edge",0)))
 
+def _print_far_admission_risk_classes(profile):
+ parts=[]
+ for name,b in sorted((profile or {}).items()):
+  total=int(b.get("total",0));kept=int(b.get("kept",0));rate=(float(kept)/total) if total else None
+  parts.append("%s:%d/%d(%s)"%(name,kept,total,_pct(rate)))
+ print("  [FAR ADMISSION EDGE-RISK CLASS CONFIRM] TruthKeep %s"%(" | ".join(parts) if parts else "no truth candidates"))
+
 def _print_sparse_geometry(s):
  print("  [SPARSE GEOMETRY] Built:%d ROI:%d Score:%d Dynamic:%d"%(s.get("sparse_rescue_candidates",0),s.get("sparse_rescue_roi",0),s.get("sparse_rescue_score",0),s.get("sparse_rescue_dynamic",0)))
 
@@ -100,7 +115,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.7.4 Far Admission Edge-Risk Shadow Gate starting...")
+ print("RoadsideStation V0.6.12.8 Multi-Class Road Object Baseline starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -134,12 +149,19 @@ def main():
  print("Far Admission Decision diagnostics: evaluation-only | truth labels never feed admission/tracking/fusion")
  print("Far Admission Feature Profiling: evaluation-only | score/points/range/shape/source truth-vs-FP")
  print("Far Admission Edge-Risk Shadow: evaluation-only | hard>=%.2f soft>=%.2f with score<%.2f or risky source | never filters Tracker input"%(float(eval_cfg.get("far_admission_edge_hard_ratio",.65)),float(eval_cfg.get("far_admission_edge_soft_ratio",.35)),float(eval_cfg.get("far_admission_edge_soft_score",.68))))
+ print("Multi-Class Safety Baseline: vehicle + VRU + configured road obstacles | LiDAR unknowns remain unknown_obstacle")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
  projector=None;width=0;height=0
  if station.camera_transform is not None:
   cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
  camera_id=config.get("camera",{}).get("id","CAM_01");camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
+ camera_detector=None;camera_detection_frame=None;camera_detection_objects=[]
+ if camera_source=="detector" and config.get("camera_detection",{}).get("enabled",True):
+  try:
+   camera_detector=create_camera_detector(config.get("camera_detection",{}));print("Camera detector active in fusion loop: %s"%camera_detector.name)
+  except Exception as exc:
+   print("WARNING: camera detector unavailable; camera classification disabled: %s"%exc);camera_source="none"
  evaluator=None
  if eval_cfg.get("enabled",True):
   def eval_center():
@@ -167,9 +189,13 @@ def main():
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
-     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp);camera_objects=cam_list.objects
-     for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
-      p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
+     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp,obstacle_patterns=eval_cfg.get("obstacle_actor_patterns",[]));camera_objects=cam_list.objects
+    elif camera_source=="detector" and camera_detector is not None:
+     if camera_detection_frame!=camera[0]:
+      detections=camera_detector.detect(camera[1][:,:,:3].copy());cam_list=CameraObjectList.from_detections(camera_id,detections,timestamp=ol.timestamp,frame_id=camera[0]);camera_detection_objects=cam_list.objects;camera_detection_frame=camera[0]
+     camera_objects=list(camera_detection_objects)
+    for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
+     p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
    fusion.apply_camera_confirmations(pairs,timestamp=ol.timestamp)
    fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs);oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
    if now-last>=1.0:
@@ -189,6 +215,7 @@ def main():
    if evaluator is not None and now-last_eval>=eval_interval:
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
+    _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     _print_sparse_geometry(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_detection_drop(dd)
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
@@ -196,10 +223,11 @@ def main():
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)
      if eval_cfg.get("far_admission_feature_profiling",False):
       profiles=admission_report.get("feature_profiles",{})
-      _print_far_admission_profile("hold",profiles.get("would_hold",{}));_print_far_admission_profile("confirm",profiles.get("would_confirm",{}));_print_far_admission_profile("expired",profiles.get("expired",{}))
+     _print_far_admission_profile("hold",profiles.get("would_hold",{}));_print_far_admission_profile("confirm",profiles.get("would_confirm",{}));_print_far_admission_profile("expired",profiles.get("expired",{}))
      if eval_cfg.get("far_admission_edge_risk_shadow",False):
       risk=admission_report.get("edge_risk_shadow",{})
       _print_far_admission_risk_shadow("hold",risk.get("would_hold",{}));_print_far_admission_risk_shadow("confirm",risk.get("would_confirm",{}));_print_far_admission_risk_shadow("expired",risk.get("expired",{}))
+      _print_far_admission_risk_classes(admission_report.get("edge_risk_classes",{}).get("would_confirm",{}))
     print("  [TRACK LIFE] NEW:%d UPDATE:%d COAST:%d SUPPRESS:%d DROP:%d"%(s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0)))
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))

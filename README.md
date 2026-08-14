@@ -58,6 +58,17 @@ cd ~/RoadsideStation
 python3.7 main.py
 ```
 
+For the V0.6.12.8 multi-class baseline, optionally start deterministic
+crosswalk walkers and lane obstacles in another terminal before main.py:
+
+```bash
+cd ~/RoadsideStation
+python3.7 tools/spawn_multiclass_targets.py --walkers 6 --obstacles 3
+```
+
+LiDAR-only road occupancy is published as `unknown_obstacle`. Camera-associated
+targets use `person`, `bicycle`, `motorcycle`, `car`, `bus` or `truck`.
+
 At startup RoadsideStation reports how many existing CARLA vehicles and walkers it sees, for example:
 
 ```text

@@ -4,7 +4,7 @@ import time
 
 
 class FusedObject(object):
-    def __init__(self, object_id, object_type="unknown", x=0.0, y=0.0, z=0.0,
+    def __init__(self, object_id, object_type="unknown_obstacle", x=0.0, y=0.0, z=0.0,
                  vx=0.0, vy=0.0, size=None, confidence=0.0, sources=None,
                  camera=None, radar_speed=None):
         self.object_id = str(object_id)
@@ -72,7 +72,7 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
         ex, ey, ez = [float(v) for v in extent]
         size = [max(ex, ey), min(ex, ey), ez]
         sources = list(item.get("sources", []))
-        object_type = item.get("object_type", "unknown")
+        object_type = item.get("object_type", "unknown_obstacle")
         confidence = float(item.get("confidence", 0.0))
         camera_meta = None
         matched = camera_by_track.get(str(item.get("id", "")))
