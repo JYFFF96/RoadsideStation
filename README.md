@@ -212,6 +212,13 @@ rescues compare maximum sensor ranges. The profiler now reports sensor range
 and footprint area directly, keeping all features portable to a real roadside
 sensor coordinate frame. No ablation filters ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.15 applies the selected geometry rules to a new Shadow branch.
+Strict Hybrid-Gate candidates are always retained. Incremental Near rescues
+must have at least 0.04 square metres of footprint, while incremental Far
+rescues must be within 28m of the sensor. The resulting complete candidate list
+is evaluated beside the ungated Rescue list and remains disconnected from ROI,
+Tracker and ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

@@ -135,6 +135,10 @@ fusion:
   road_object_hybrid_rescue_far_support_frames: 3
   road_object_hybrid_rescue_far_min_points: 4
   road_object_hybrid_rescue_far_current_points: 1
+  # V0.6.12.8.2.2.15: selected source-aware geometry gate, Shadow only.
+  road_object_recovery_adaptive_hybrid_geometry_gate_shadow: true
+  road_object_hybrid_geometry_gate_near_min_area: 0.04
+  road_object_hybrid_geometry_gate_far_max_range: 28.0
 
   range_adaptive_clustering: true
   range_bands:

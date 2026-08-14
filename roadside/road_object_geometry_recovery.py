@@ -40,7 +40,10 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_hybrid_gate_kept":0,"adaptive_hybrid_gate_rejected":0,
                 "adaptive_hybrid_gate_reasons":{},
                 "adaptive_hybrid_rescue_kept":0,"adaptive_hybrid_rescued":0,
-                "adaptive_hybrid_rescue_sources":{}}
+                "adaptive_hybrid_rescue_sources":{},
+                "adaptive_hybrid_geometry_gate_kept":0,
+                "adaptive_hybrid_geometry_gate_rejected":0,
+                "adaptive_hybrid_geometry_gate_reasons":{}}
 
     @staticmethod
     def _empty_stages():
@@ -50,7 +53,8 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_dedupe_pass":[],"adaptive_output":[],
                 "adaptive_ranked_output":[],"adaptive_stratified_output":[],
                 "adaptive_hybrid_output":[],"adaptive_hybrid_gated_output":[],
-                "adaptive_hybrid_rescued_output":[]}
+                "adaptive_hybrid_rescued_output":[],
+                "adaptive_hybrid_geometry_gated_output":[]}
 
 
     def _clear_diagnostics(self):
@@ -230,6 +234,29 @@ class RoadObjectGeometryRecovery(object):
                 item["adaptive_hybrid_temporal_rescue"]=True;output.append(item)
                 sources[source]=sources.get(source,0)+1
         return output,sources
+
+    def _adaptive_hybrid_rescue_geometry_gate(self, items, config):
+        """Filter only temporal-rescue additions in a second Shadow branch."""
+        if not config.get("road_object_recovery_adaptive_hybrid_geometry_gate_shadow",False):return [],{}
+        output=[];reasons={}
+        for item in items:
+            if not item.get("adaptive_hybrid_temporal_rescue",False):
+                output.append(item);continue
+            source=str(item.get("adaptive_hybrid_source","unknown"));keep=False;reason="unknown_source"
+            if source=="near_baseline":
+                extent=list(item.get("extent",[]) or [])
+                try:area=max(0.0,float(extent[0]))*max(0.0,float(extent[1]))
+                except (IndexError,TypeError,ValueError):area=0.0
+                keep=area>=float(config.get("road_object_hybrid_geometry_gate_near_min_area",.04))
+                reason="near_area"
+            else:
+                keep=self._sensor_range(item)<=float(config.get("road_object_hybrid_geometry_gate_far_max_range",28.0))
+                reason="far_range"
+            item["adaptive_hybrid_geometry_gate_keep"]=keep
+            item["adaptive_hybrid_geometry_gate_reason"]=(None if keep else reason)
+            if keep:output.append(item)
+            else:reasons[reason]=reasons.get(reason,0)+1
+        return output,reasons
 
     @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
@@ -438,6 +465,7 @@ class RoadObjectGeometryRecovery(object):
         hybrid=self._adaptive_hybrid_cap(dedupe_pass,adaptive["dedupe_pass"],limit,c)
         hybrid_gated,hybrid_gate_reasons=self._adaptive_hybrid_gate(hybrid,c)
         hybrid_rescued,hybrid_rescue_sources=self._adaptive_hybrid_temporal_rescue(hybrid,c)
+        hybrid_geometry_gated,hybrid_geometry_gate_reasons=self._adaptive_hybrid_rescue_geometry_gate(hybrid_rescued,c)
         stats["adaptive_hybrid_built"]=len(hybrid);hybrid_counts={};hybrid_lower=min_range
         for value in c.get("road_object_recovery_balanced_bands",[]) or []:
             try:hybrid_upper=float(value.get("max_range"))
@@ -456,6 +484,9 @@ class RoadObjectGeometryRecovery(object):
         stats["adaptive_hybrid_rescue_kept"]=len(hybrid_rescued)
         stats["adaptive_hybrid_rescued"]=max(0,len(hybrid_rescued)-len(hybrid_gated))
         stats["adaptive_hybrid_rescue_sources"]=hybrid_rescue_sources
+        stats["adaptive_hybrid_geometry_gate_kept"]=len(hybrid_geometry_gated)
+        stats["adaptive_hybrid_geometry_gate_rejected"]=max(0,len(hybrid_rescued)-len(hybrid_geometry_gated))
+        stats["adaptive_hybrid_geometry_gate_reasons"]=hybrid_geometry_gate_reasons
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
@@ -471,5 +502,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_stratified_output":[dict(x) for x in adaptive["stratified_output"]],
                                  "adaptive_hybrid_output":[dict(x) for x in hybrid],
                                  "adaptive_hybrid_gated_output":[dict(x) for x in hybrid_gated],
-                                 "adaptive_hybrid_rescued_output":[dict(x) for x in hybrid_rescued]}
+                                 "adaptive_hybrid_rescued_output":[dict(x) for x in hybrid_rescued],
+                                 "adaptive_hybrid_geometry_gated_output":[dict(x) for x in hybrid_geometry_gated]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out
