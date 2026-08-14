@@ -127,6 +127,7 @@ def _print_road_object_recovery(s):
  print("  [ROAD-OBJECT ADAPTIVE RANKING] Mode:SHADOW Built:%d Bands:%s"%(s.get("road_object_recovery_adaptive_ranked_built",0),s.get("road_object_recovery_adaptive_ranked_bands",{})))
  print("  [ROAD-OBJECT ADAPTIVE STRATIFIED] Mode:SHADOW Built:%d Bands:%s Heights:%s"%(s.get("road_object_recovery_adaptive_stratified_built",0),s.get("road_object_recovery_adaptive_stratified_bands",{}),s.get("road_object_recovery_adaptive_stratified_heights",{})))
  print("  [ROAD-OBJECT ADAPTIVE HYBRID] Mode:SHADOW Built:%d Bands:%s Sources:%s"%(s.get("road_object_recovery_adaptive_hybrid_built",0),s.get("road_object_recovery_adaptive_hybrid_bands",{}),s.get("road_object_recovery_adaptive_hybrid_sources",{})))
+ print("  [ROAD-OBJECT HYBRID GATE] Mode:SHADOW Keep:%d Reject:%d Reasons:%s"%(s.get("road_object_recovery_adaptive_hybrid_gate_kept",0),s.get("road_object_recovery_adaptive_hybrid_gate_rejected",0),s.get("road_object_recovery_adaptive_hybrid_gate_reasons",{})))
 
 def _dist3(profile,key):
  d=(profile or {}).get(key,{}) or {}
@@ -165,12 +166,14 @@ def _print_road_object_stage_attribution(report):
   print("      [ROAD-OBJECT RANKED ACTOR] id=%d Ranked:%d(%s)"%(item.get("actor_id",0),stages.get("adaptive_ranked_output",0),_stage_rate(stages.get("adaptive_ranked_output",0),visible)))
   print("      [ROAD-OBJECT STRATIFIED ACTOR] id=%d Stratified:%d(%s)"%(item.get("actor_id",0),stages.get("adaptive_stratified_output",0),_stage_rate(stages.get("adaptive_stratified_output",0),visible)))
   print("      [ROAD-OBJECT HYBRID ACTOR] id=%d Hybrid:%d(%s)"%(item.get("actor_id",0),stages.get("adaptive_hybrid_output",0),_stage_rate(stages.get("adaptive_hybrid_output",0),visible)))
+  print("      [ROAD-OBJECT HYBRID-GATED ACTOR] id=%d Gated:%d(%s)"%(item.get("actor_id",0),stages.get("adaptive_hybrid_gated_output",0),_stage_rate(stages.get("adaptive_hybrid_gated_output",0),visible)))
  for band in report.get("range_bands",[]) or []:
   visible=band.get("visible_frames",0)
   print("    [ROAD-OBJECT RANGE STAGE %.0f-%.0fm] Actors:%d Visible:%d Raw:%d(%s) Component:%d(%s) Shape:%d(%s) Temporal:%d(%s) DedupePass:%d(%s) Baseline:%d(%s) Balanced:%d(%s) Adaptive(C/S/T/D/O):%d/%d/%d/%d/%d"%(band.get("min_range",0.0),band.get("max_range",0.0),band.get("actors",0),visible,band.get("raw_frames",0),_stage_rate(band.get("raw_frames",0),visible),band.get("component",0),_stage_rate(band.get("component",0),visible),band.get("shape",0),_stage_rate(band.get("shape",0),visible),band.get("temporal",0),_stage_rate(band.get("temporal",0),visible),band.get("dedupe_pass",0),_stage_rate(band.get("dedupe_pass",0),visible),band.get("output",0),_stage_rate(band.get("output",0),visible),band.get("balanced_output",0),_stage_rate(band.get("balanced_output",0),visible),band.get("adaptive_component",0),band.get("adaptive_shape",0),band.get("adaptive_temporal",0),band.get("adaptive_dedupe_pass",0),band.get("adaptive_output",0)))
   print("      [ROAD-OBJECT RANKED RANGE] Ranked:%d(%s)"%(band.get("adaptive_ranked_output",0),_stage_rate(band.get("adaptive_ranked_output",0),visible)))
   print("      [ROAD-OBJECT STRATIFIED RANGE] Stratified:%d(%s)"%(band.get("adaptive_stratified_output",0),_stage_rate(band.get("adaptive_stratified_output",0),visible)))
   print("      [ROAD-OBJECT HYBRID RANGE] Hybrid:%d(%s)"%(band.get("adaptive_hybrid_output",0),_stage_rate(band.get("adaptive_hybrid_output",0),visible)))
+  print("      [ROAD-OBJECT HYBRID-GATED RANGE] Gated:%d(%s)"%(band.get("adaptive_hybrid_gated_output",0),_stage_rate(band.get("adaptive_hybrid_gated_output",0),visible)))
 
 def _print_road_object_cap_comparison(report):
  for suffix,label in (("","FRAME"),("_run","RUN")):
@@ -194,6 +197,10 @@ def _print_road_object_cap_comparison(report):
   if hybrid:
    hp=float(hybrid.get("matched",0))/hybrid.get("candidates",0) if hybrid.get("candidates",0) else None
    print("    [ROAD-OBJECT HYBRID COMPARE %s] C:%d M:%d FP:%d P:%s Classes:%s"%(label,hybrid.get("candidates",0),hybrid.get("matched",0),hybrid.get("fp",0),_pct(hp),hybrid.get("classes",{})))
+  gated=report.get("adaptive_hybrid_gated"+suffix,{}) or {}
+  if gated:
+   gp=float(gated.get("matched",0))/gated.get("candidates",0) if gated.get("candidates",0) else None
+   print("    [ROAD-OBJECT HYBRID-GATED COMPARE %s] C:%d M:%d FP:%d P:%s Classes:%s"%(label,gated.get("candidates",0),gated.get("matched",0),gated.get("fp",0),_pct(gp),gated.get("classes",{})))
 
 def _adaptive_feature(profile,name):
  values=(profile or {}).get(name,{}) or {}
@@ -265,7 +272,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.10 Hybrid Selection Feature Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.11 Hybrid Source-Aware Gate Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -369,7 +376,7 @@ def main():
      print("  %-12s type=%-7s state=%-9s q=%.2f sensors=%-3s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,q,sensors,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
    if evaluator is not None and now-last_eval>=eval_interval:
-    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);road_ga=evaluator.analyze_road_object_recovery(fusion.last_road_object_recovery_candidates);road_diag=fusion.road_object_recovery_diagnostics_world();road_stage=evaluator.analyze_road_object_recovery_stages(road_diag);road_stages=road_diag.get("stages",{}) or {};road_cap=evaluator.analyze_road_object_cap_comparison(fusion.last_road_object_recovery_candidates,road_stages.get("balanced_output",[]),road_stages.get("adaptive_output",[]),road_stages.get("adaptive_ranked_output",[]),road_stages.get("adaptive_stratified_output",[]),road_stages.get("adaptive_hybrid_output",[]));road_adaptive=evaluator.analyze_road_object_adaptive_profile(road_stages.get("adaptive_dedupe_pass",[]));road_hybrid=evaluator.analyze_road_object_hybrid_profile(road_stages.get("adaptive_hybrid_output",[]));dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
+    s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);road_ga=evaluator.analyze_road_object_recovery(fusion.last_road_object_recovery_candidates);road_diag=fusion.road_object_recovery_diagnostics_world();road_stage=evaluator.analyze_road_object_recovery_stages(road_diag);road_stages=road_diag.get("stages",{}) or {};road_cap=evaluator.analyze_road_object_cap_comparison(fusion.last_road_object_recovery_candidates,road_stages.get("balanced_output",[]),road_stages.get("adaptive_output",[]),road_stages.get("adaptive_ranked_output",[]),road_stages.get("adaptive_stratified_output",[]),road_stages.get("adaptive_hybrid_output",[]),road_stages.get("adaptive_hybrid_gated_output",[]));road_adaptive=evaluator.analyze_road_object_adaptive_profile(road_stages.get("adaptive_dedupe_pass",[]));road_hybrid=evaluator.analyze_road_object_hybrid_profile(road_stages.get("adaptive_hybrid_output",[]));dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_multiclass(ev)
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)

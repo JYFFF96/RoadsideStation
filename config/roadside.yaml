@@ -118,6 +118,15 @@ fusion:
   # V0.6.12.8.2.2.9: near Baseline plus far Adaptive Ranked, still Shadow only.
   road_object_recovery_adaptive_hybrid_shadow: true
   road_object_adaptive_hybrid_split_range: 25.0
+  # V0.6.12.8.2.2.11: source-aware scalar admission gate, Shadow only.
+  road_object_recovery_adaptive_hybrid_gate_shadow: true
+  road_object_hybrid_gate_near_min_points: 8
+  road_object_hybrid_gate_near_low_height: 0.45
+  road_object_hybrid_gate_near_min_short_side: 0.50
+  road_object_hybrid_gate_far_stable_frames: 4
+  road_object_hybrid_gate_far_close_range: 32.0
+  road_object_hybrid_gate_far_close_min_points: 5
+  road_object_hybrid_gate_far_close_current_points: 2
 
   range_adaptive_clustering: true
   range_bands:

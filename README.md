@@ -181,6 +181,12 @@ truth classes and false positives, with score, point support, temporal support,
 height, footprint and range distributions. The profiler is evaluation-only and
 provides real-device-portable evidence for a later Hybrid admission gate.
 
+V0.6.12.8.2.2.11 adds that source-aware Hybrid admission gate in Shadow. Near
+Baseline candidates require sufficient points and either a low profile or a
+complete short side. Far Ranked candidates require four-frame stability, or
+strong current support inside 32m. Logs compare the gated list with the full
+Hybrid list; neither list is connected to production ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

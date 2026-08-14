@@ -146,6 +146,38 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(4,sum(1 for item in selected
                                if item["adaptive_hybrid_source"]=="near_baseline"))
 
+    def test_hybrid_source_aware_gate_uses_near_shape_and_far_support(self):
+        recovery=RoadObjectGeometryRecovery();config={
+            "road_object_recovery_adaptive_hybrid_gate_shadow":True,
+            "road_object_hybrid_gate_near_min_points":8,
+            "road_object_hybrid_gate_near_low_height":.45,
+            "road_object_hybrid_gate_near_min_short_side":.50,
+            "road_object_hybrid_gate_far_stable_frames":4,
+            "road_object_hybrid_gate_far_close_range":32.0,
+            "road_object_hybrid_gate_far_close_min_points":5,
+            "road_object_hybrid_gate_far_close_current_points":2}
+        items=[
+            {"id":"near_wide","x":15.0,"y":0.0,"point_count":8,
+             "extent":[.8,.6,.9],"adaptive_hybrid_source":"near_baseline"},
+            {"id":"near_low","x":20.0,"y":0.0,"point_count":8,
+             "extent":[.4,.2,.2],"adaptive_hybrid_source":"near_baseline"},
+            {"id":"near_weak","x":18.0,"y":0.0,"point_count":7,
+             "extent":[.8,.6,.9],"adaptive_hybrid_source":"near_baseline"},
+            {"id":"far_stable","x":38.0,"y":0.0,"point_count":4,
+             "current_point_count":1,"support_frames":4,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"},
+            {"id":"far_close","x":30.0,"y":0.0,"point_count":5,
+             "current_point_count":2,"support_frames":3,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"},
+            {"id":"far_weak","x":38.0,"y":0.0,"point_count":5,
+             "current_point_count":2,"support_frames":3,"extent":[.5,.2,.1],
+             "adaptive_hybrid_source":"far_ranked"}]
+        kept,reasons=recovery._adaptive_hybrid_gate(items,config)
+        self.assertEqual(set(["near_wide","near_low","far_stable","far_close"]),
+                         set(item["id"] for item in kept))
+        self.assertEqual(1,reasons["near_points"])
+        self.assertEqual(1,reasons["far_support"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
