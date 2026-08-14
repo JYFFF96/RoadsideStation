@@ -120,6 +120,32 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(2,sum(1 for value in heights if value<=.30))
         self.assertEqual(2,sum(1 for value in heights if value>.30))
 
+    def test_adaptive_hybrid_combines_near_baseline_and_far_ranked(self):
+        recovery=RoadObjectGeometryRecovery();config={
+            "road_object_recovery_adaptive_hybrid_shadow":True,
+            "road_object_recovery_balanced_cap_shadow":True,
+            "road_object_recovery_min_range":5.0,
+            "road_object_recovery_dedupe_distance":.5,
+            "road_object_adaptive_hybrid_split_range":25.0,
+            "road_object_recovery_balanced_bands":[
+                {"max_range":25.0,"quota":4},{"max_range":35.0,"quota":4},
+                {"max_range":45.0,"quota":4}]}
+        baseline=[];adaptive=[]
+        for index,distance in enumerate([10,12,14,16,18,20]):
+            baseline.append({"id":"near%d"%index,"x":float(distance),"y":0.0,
+                             "point_count":20-index,"extent":[.5,.2,.2]})
+        for index,distance in enumerate([28,29,30,31,32,33,37,38,39,40,41,42]):
+            adaptive.append({"id":"far%d"%index,"x":float(distance),"y":0.0,
+                             "point_count":5,"current_point_count":2,
+                             "support_frames":4,"extent":[.5,.2,.1]})
+        selected=recovery._adaptive_hybrid_cap(baseline,adaptive,12,config)
+        ranges=[recovery._sensor_range(item) for item in selected]
+        self.assertEqual(4,sum(1 for value in ranges if value<25.0))
+        self.assertEqual(4,sum(1 for value in ranges if 25.0<=value<35.0))
+        self.assertEqual(4,sum(1 for value in ranges if 35.0<=value<45.0))
+        self.assertEqual(4,sum(1 for item in selected
+                               if item["adaptive_hybrid_source"]=="near_baseline"))
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,

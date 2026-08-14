@@ -169,6 +169,12 @@ low-obstacle recall from V0.6.12.8.2.2.6 can be retained without displacing as
 many pedestrian candidates. Benchmark activation now waits for tagged obstacle
 actors, preventing a transient walker-only frame from creating a second reset.
 
+V0.6.12.8.2.2.9 adds a hybrid recovery selection in Shadow. Stable Baseline
+candidates supply the 5-25m band while scalar-ranked Adaptive candidates supply
+25-45m; range quotas are then applied to the combined, spatially deduplicated
+pool. Baseline far candidates can refill unused capacity. The Hybrid list is
+evaluation-only and does not alter ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

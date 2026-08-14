@@ -115,6 +115,9 @@ fusion:
   road_object_recovery_adaptive_stratified_shadow: true
   road_object_adaptive_stratified_height: 0.30
   road_object_adaptive_stratified_elevated_quota: 2
+  # V0.6.12.8.2.2.9: near Baseline plus far Adaptive Ranked, still Shadow only.
+  road_object_recovery_adaptive_hybrid_shadow: true
+  road_object_adaptive_hybrid_split_range: 25.0
 
   range_adaptive_clustering: true
   range_bands:

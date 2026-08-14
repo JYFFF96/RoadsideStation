@@ -34,7 +34,9 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_built":0,"adaptive_band_counts":{},
                 "adaptive_ranked_built":0,"adaptive_ranked_band_counts":{},
                 "adaptive_stratified_built":0,"adaptive_stratified_band_counts":{},
-                "adaptive_stratified_height_counts":{}}
+                "adaptive_stratified_height_counts":{},
+                "adaptive_hybrid_built":0,"adaptive_hybrid_band_counts":{},
+                "adaptive_hybrid_source_counts":{}}
 
     @staticmethod
     def _empty_stages():
@@ -42,7 +44,8 @@ class RoadObjectGeometryRecovery(object):
                 "output":[],"balanced_output":[],"adaptive_component":[],
                 "adaptive_shape":[],"adaptive_temporal":[],
                 "adaptive_dedupe_pass":[],"adaptive_output":[],
-                "adaptive_ranked_output":[],"adaptive_stratified_output":[]}
+                "adaptive_ranked_output":[],"adaptive_stratified_output":[],
+                "adaptive_hybrid_output":[]}
 
     def _clear_diagnostics(self):
         self.last_input_points=np.empty((0,3),dtype=np.float32)
@@ -148,6 +151,25 @@ class RoadObjectGeometryRecovery(object):
             if len(selected)>=limit:break
             if id(item) not in selected_ids:selected.append(item);selected_ids.add(id(item))
         return selected
+
+    def _adaptive_hybrid_cap(self, baseline_items, adaptive_items, limit, config):
+        """Combine near baseline stability with far Adaptive ranking in Shadow."""
+        if not config.get("road_object_recovery_adaptive_hybrid_shadow",False) or limit<=0:return []
+        split=float(config.get("road_object_adaptive_hybrid_split_range",25.0))
+        near=sorted([item for item in baseline_items if self._sensor_range(item)<split],
+                    key=lambda value:value.get("point_count",0),reverse=True)
+        for item in adaptive_items:item["adaptive_rank_score"]=self._adaptive_rank_score(item,config)
+        far=sorted([item for item in adaptive_items if self._sensor_range(item)>=split],
+                   key=lambda value:(value.get("adaptive_rank_score",0.0),
+                   value.get("support_frames",0)),reverse=True)
+        fallback=sorted([item for item in baseline_items if self._sensor_range(item)>=split],
+                        key=lambda value:value.get("point_count",0),reverse=True)
+        dedupe=float(config.get("road_object_recovery_dedupe_distance",1.0));pool=[]
+        for source,items in (("near_baseline",near),("far_ranked",far),("far_baseline_fallback",fallback)):
+            for item in items:
+                if any(self._distance(item,old)<=dedupe for old in pool):continue
+                item["adaptive_hybrid_source"]=source;pool.append(item)
+        return self._balanced_cap(pool,limit,config) or pool[:limit]
 
     @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
@@ -353,6 +375,19 @@ class RoadObjectGeometryRecovery(object):
             label="%.0f-%.0fm"%(lower,upper);counts[label]=sum(1 for item in balanced if lower<=self._sensor_range(item)<upper);lower=upper
         stats["balanced_band_counts"]=counts
         adaptive=self._adaptive_temporal_candidates(pts,existing_geometry,c,stats)
+        hybrid=self._adaptive_hybrid_cap(dedupe_pass,adaptive["dedupe_pass"],limit,c)
+        stats["adaptive_hybrid_built"]=len(hybrid);hybrid_counts={};hybrid_lower=min_range
+        for value in c.get("road_object_recovery_balanced_bands",[]) or []:
+            try:hybrid_upper=float(value.get("max_range"))
+            except (AttributeError,TypeError,ValueError):continue
+            label="%.0f-%.0fm"%(hybrid_lower,hybrid_upper)
+            hybrid_counts[label]=sum(1 for item in hybrid if hybrid_lower<=self._sensor_range(item)<hybrid_upper)
+            hybrid_lower=hybrid_upper
+        stats["adaptive_hybrid_band_counts"]=hybrid_counts;source_counts={}
+        for item in hybrid:
+            source=str(item.get("adaptive_hybrid_source","unknown"))
+            source_counts[source]=source_counts.get(source,0)+1
+        stats["adaptive_hybrid_source_counts"]=source_counts
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
@@ -365,5 +400,6 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_dedupe_pass":[dict(x) for x in adaptive["dedupe_pass"]],
                                  "adaptive_output":[dict(x) for x in adaptive["output"]],
                                  "adaptive_ranked_output":[dict(x) for x in adaptive["ranked_output"]],
-                                 "adaptive_stratified_output":[dict(x) for x in adaptive["stratified_output"]]}
+                                 "adaptive_stratified_output":[dict(x) for x in adaptive["stratified_output"]],
+                                 "adaptive_hybrid_output":[dict(x) for x in hybrid]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out

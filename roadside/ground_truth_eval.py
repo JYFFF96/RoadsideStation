@@ -34,7 +34,8 @@ class GroundTruthEvaluator(object):
     @staticmethod
     def _empty_road_object_cap_totals():
         return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
-                    for name in ("baseline","balanced","adaptive","adaptive_ranked","adaptive_stratified"))
+                    for name in ("baseline","balanced","adaptive","adaptive_ranked",
+                                 "adaptive_stratified","adaptive_hybrid"))
 
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
@@ -528,7 +529,7 @@ class GroundTruthEvaluator(object):
         stage_names=("component","shape","temporal","dedupe_pass","output","balanced_output",
                      "adaptive_component","adaptive_shape","adaptive_temporal",
                      "adaptive_dedupe_pass","adaptive_output","adaptive_ranked_output",
-                     "adaptive_stratified_output")
+                     "adaptive_stratified_output","adaptive_hybrid_output")
         for gt in truth:
             if gt.get("object_type")!="unknown_obstacle" or gt.get("role")!="rsu_test_obstacle":continue
             actor_id=int(gt.get("actor_id",0));bucket=self._road_object_stage_coverage.setdefault(actor_id,{
@@ -565,13 +566,15 @@ class GroundTruthEvaluator(object):
 
     def analyze_road_object_cap_comparison(self, baseline_candidates, balanced_candidates,
                                            adaptive_candidates=None,adaptive_ranked_candidates=None,
-                                           adaptive_stratified_candidates=None):
+                                           adaptive_stratified_candidates=None,
+                                           adaptive_hybrid_candidates=None):
         """Compare baseline, balanced and adaptive Shadow outputs in evaluation."""
         truth=self.truth_objects();result={}
         variants=(("baseline",baseline_candidates),("balanced",balanced_candidates))
         if adaptive_candidates is not None:variants+=(("adaptive",adaptive_candidates),)
         if adaptive_ranked_candidates is not None:variants+=(("adaptive_ranked",adaptive_ranked_candidates),)
         if adaptive_stratified_candidates is not None:variants+=(("adaptive_stratified",adaptive_stratified_candidates),)
+        if adaptive_hybrid_candidates is not None:variants+=(("adaptive_hybrid",adaptive_hybrid_candidates),)
         for name,candidates in variants:
             detected=self._detected_with_range(candidates);pairs=self._match(truth,detected);classes={}
             for ti,_,_ in pairs:
