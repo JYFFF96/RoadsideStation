@@ -353,6 +353,13 @@ reports truth/false-positive precision, unique actor coverage, and how many
 Expired-Only pedestrians would reappear in time. The parallel pending state is
 diagnostic only and cannot confirm or filter a runtime track.
 
+V0.6.12.8.2.2.30 separates each delayed rule's incremental events from
+current-frame candidates already confirmed by the original 0.5 second rule.
+Only those extra rescues are truth-attributed and profiled by time gap, spatial
+displacement, apparent speed, current/origin score and point count, height and
+range. This exposes the real cost of the promising 1.5 second window before it
+can be considered for enforcement; all logic remains evaluation-only.
+
 ## Current scope
 
 - Fixed roadside RGB camera

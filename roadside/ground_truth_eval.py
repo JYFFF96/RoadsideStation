@@ -733,7 +733,9 @@ class GroundTruthEvaluator(object):
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
 
-    def observe_selected_delayed_reappearance(self, rule_candidates, frame_id=None):
+    def observe_selected_delayed_reappearance(self, rule_candidates,
+                                               base_admitted_candidates=None,
+                                               frame_id=None):
         """Truth-attribute parallel LiDAR reappearance rules for evaluation only."""
         if not self.config.get("selected_track_admission_profiling", False):
             return False
@@ -741,11 +743,18 @@ class GroundTruthEvaluator(object):
             return False
         self._selected_delayed_reappearance_last_frame = frame_id
         truth = self.truth_objects()
+        base_repeats = [item for item in (base_admitted_candidates or [])
+                        if item.get("selected_track_admission_reason") == "repeat"]
+        duplicate_gate = float(self.config.get(
+            "selected_delayed_reappearance_base_duplicate_gate", .05))
         for name, candidates in (rule_candidates or {}).items():
             detected, pairs = self._admission_classification(truth, candidates)
             total = self._selected_delayed_reappearance_totals.setdefault(
                 str(name), {"candidates":0, "matched":0, "fp":0,
-                            "actors":{}, "time_gaps":[], "match_distances":[]})
+                            "actors":{}, "time_gaps":[], "match_distances":[],
+                            "incremental":{"candidates":0, "matched":0, "fp":0,
+                                           "actors":{}, "truth_samples":[],
+                                           "fp_samples":[]}})
             total["candidates"] += len(detected);total["matched"] += len(pairs)
             total["fp"] += max(0, len(detected) - len(pairs))
             for truth_index, detected_index, unused_distance in pairs:
@@ -760,7 +769,71 @@ class GroundTruthEvaluator(object):
                                      "selected_delayed_reappearance_match_distance")):
                     try:values.append(float(item.get(key)))
                     except (TypeError, ValueError):pass
+            incremental = []
+            for item in detected:
+                duplicated = any(math.hypot(
+                    float(item.get("x", 0.0)) - float(base.get("x", 0.0)),
+                    float(item.get("y", 0.0)) - float(base.get("y", 0.0)))
+                    <= duplicate_gate for base in base_repeats)
+                if not duplicated:incremental.append(item)
+            inc_detected, inc_pairs = self._admission_classification(truth, incremental)
+            inc = total["incremental"];inc["candidates"] += len(inc_detected)
+            inc["matched"] += len(inc_pairs)
+            inc["fp"] += max(0, len(inc_detected) - len(inc_pairs))
+            truth_by_detected = dict((detected_index, truth_index)
+                                     for truth_index, detected_index, unused in inc_pairs)
+            for index, item in enumerate(inc_detected):
+                sample = dict(item);truth_index = truth_by_detected.get(index)
+                if truth_index is None:
+                    inc["fp_samples"].append(sample);continue
+                actor_id = truth[truth_index].get("actor_id")
+                object_type = str(truth[truth_index].get(
+                    "object_type", "unknown_obstacle"))
+                sample["_evaluation_object_type"] = object_type
+                inc["truth_samples"].append(sample)
+                if actor_id is not None:inc["actors"][int(actor_id)] = object_type
         return True
+
+    def _selected_delayed_feature_profile(self, items):
+        items = list(items or [])
+        values = dict((name, []) for name in (
+            "score", "points", "height", "range", "time_gap",
+            "match_distance", "apparent_speed", "origin_score",
+            "origin_points"))
+        classes = {}
+        for item in items:
+            origin = item.get("selected_delayed_reappearance_origin", {}) or {}
+            fields = (("score", item.get("selected_admission_shadow_score",
+                                          item.get("candidate_score"))),
+                      ("points", item.get("current_point_count",
+                                           item.get("point_count"))),
+                      ("range", item.get("range")),
+                      ("time_gap", item.get(
+                          "selected_delayed_reappearance_time_gap")),
+                      ("match_distance", item.get(
+                          "selected_delayed_reappearance_match_distance")),
+                      ("origin_score", origin.get("selected_admission_shadow_score",
+                                                   origin.get("candidate_score"))),
+                      ("origin_points", origin.get("current_point_count",
+                                                    origin.get("point_count"))))
+            for name, value in fields:
+                try:values[name].append(float(value))
+                except (TypeError, ValueError):pass
+            try:values["height"].append(float((item.get("extent") or [])[2]))
+            except (IndexError, TypeError, ValueError):pass
+            try:
+                gap = float(item.get("selected_delayed_reappearance_time_gap"))
+                distance = float(item.get(
+                    "selected_delayed_reappearance_match_distance"))
+                if gap > 0.0:values["apparent_speed"].append(distance / gap)
+            except (TypeError, ValueError):pass
+            object_type = item.get("_evaluation_object_type")
+            if object_type is not None:
+                classes[str(object_type)] = int(classes.get(str(object_type), 0)) + 1
+        result = dict((name, self._distribution(bucket))
+                      for name, bucket in values.items())
+        result["samples"] = len(items);result["classes"] = classes
+        return result
 
     def _selected_delayed_reappearance_report(self, outcome_sets):
         expired_only = set(outcome_sets.get("expired_only", set()))
@@ -787,6 +860,29 @@ class GroundTruthEvaluator(object):
                     "match_distance":self._distribution(source["match_distances"])}
             item["precision"] = (float(item["matched"]) / item["candidates"]
                                  if item["candidates"] else None)
+            inc_source = source.get("incremental", {}) or {};inc_actors = set(
+                (inc_source.get("actors", {}) or {}).keys())
+            inc_rescued = inc_actors & expired_only
+            incremental = {
+                "candidates":int(inc_source.get("candidates", 0)),
+                "matched":int(inc_source.get("matched", 0)),
+                "fp":int(inc_source.get("fp", 0)),
+                "actors":len(inc_actors),
+                "classes":dict((class_name, sum(
+                    1 for value in (inc_source.get("actors", {}) or {}).values()
+                    if value == class_name)) for class_name in set(
+                        (inc_source.get("actors", {}) or {}).values())),
+                "expired_only_actors_rescued":len(inc_rescued),
+                "expired_only_person_actors_rescued":len(
+                    inc_rescued & expired_only_person),
+                "truth_features":self._selected_delayed_feature_profile(
+                    inc_source.get("truth_samples", [])),
+                "fp_features":self._selected_delayed_feature_profile(
+                    inc_source.get("fp_samples", []))}
+            incremental["precision"] = (
+                float(incremental["matched"]) / incremental["candidates"]
+                if incremental["candidates"] else None)
+            item["incremental"] = incremental
             report[name] = item
         return report
 

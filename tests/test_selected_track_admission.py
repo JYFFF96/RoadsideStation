@@ -228,11 +228,32 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "selected_delayed_reappearance_time_gap":.8,
             "selected_delayed_reappearance_match_distance":.4})
         evaluator.observe_selected_delayed_reappearance(
-            {"long":[event]}, frame_id=41)
+            {"long":[event]}, [], frame_id=41)
         result = evaluator.report_selected_track_admission()[
             "delayed_reappearance_shadow"]["long"]
         self.assertEqual(1, result["matched"])
         self.assertEqual(1, result["expired_only_person_actors_rescued"])
+        self.assertEqual(1, result["incremental"]["matched"])
+        self.assertEqual(1, result["incremental"][
+            "expired_only_person_actors_rescued"])
+
+    def test_delayed_incremental_profile_excludes_base_repeat(self):
+        center = type("Center", (), {"x": 0.0, "y": 0.0})()
+        evaluator = GroundTruthEvaluator(None, lambda: center, {
+            "selected_track_admission_profiling": True})
+        evaluator.truth_objects = lambda: [
+            {"actor_id": 15, "x": 10.0, "y": 0.0,
+             "object_type": "person"}]
+        event = self._selected();event.update({
+            "selected_delayed_reappearance_time_gap":.8,
+            "selected_delayed_reappearance_match_distance":.4,
+            "selected_delayed_reappearance_origin":self._selected(9.6)})
+        base = self._selected();base["selected_track_admission_reason"] = "repeat"
+        evaluator.observe_selected_delayed_reappearance(
+            {"long":[event]}, [base], frame_id=50)
+        result = evaluator._selected_delayed_reappearance_totals["long"]
+        self.assertEqual(1, result["candidates"])
+        self.assertEqual(0, result["incremental"]["candidates"])
 
 
 if __name__ == "__main__":
