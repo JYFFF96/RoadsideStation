@@ -2,8 +2,16 @@ from __future__ import print_function
 
 import argparse
 import math
+import os
 import random
+import sys
 import time
+
+# Direct execution sets sys.path[0] to tools/. Add the repository root so the
+# documented `python3.7 tools/spawn_multiclass_targets.py` command can import
+# the roadside package without requiring a separate PYTHONPATH entry for it.
+PROJECT_ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:sys.path.insert(0,PROJECT_ROOT)
 
 import carla
 import yaml
