@@ -89,6 +89,7 @@ class SimpleFusion(object):
         self.candidate_validator = None
         self.last_stats = {}
         self.last_geometry_world = []
+        self.last_road_object_recovery_candidates = []
         self.last_roi_candidates = []
         self.last_scored_candidates = []
         self.last_dynamic_candidates = []
@@ -585,7 +586,15 @@ class SimpleFusion(object):
             ground_cut_local=float(self.ground_reference_z)+float(c.get("ground_clearance",.30))-float(self.world_transform["z"])
         road_object_rescues=self.road_object_recovery.update(
             lidar_points,clusters,ground_cut_local,c,frame_id=frame_id)
-        if road_object_rescues:
+        road_object_shadow=bool(c.get("road_object_recovery_shadow_mode",True))
+        road_object_world=[]
+        for item in road_object_rescues:
+            wx,wy,wz=self._to_world(item["x"],item["y"],item["z"])
+            candidate=dict(item);candidate.update({"x":wx,"y":wy,"z":wz,
+                                                   "confidence":.72,"sources":["lidar"]})
+            road_object_world.append(candidate)
+        self.last_road_object_recovery_candidates=[dict(x) for x in road_object_world]
+        if road_object_rescues and not road_object_shadow:
             clusters=list(clusters)+list(road_object_rescues)
 
         world_clusters, accepted, roi_rejections = [], [], []
@@ -697,6 +706,7 @@ class SimpleFusion(object):
             "road_object_recovery_temporal_pass": int(road_stats.get("temporal_pass",0)),
             "road_object_recovery_dedupe": int(road_stats.get("dedupe",0)),
             "road_object_recovery_built": int(road_stats.get("built",0)),
+            "road_object_recovery_shadow_mode": road_object_shadow,
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),
             "scored_candidates": len(scored), "score_rejected": len(score_rejections),

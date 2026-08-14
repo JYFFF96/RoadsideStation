@@ -71,6 +71,8 @@ fusion:
   # V0.6.12.8.2: a separate, temporally confirmed channel for compact low
   # road objects. The normal vehicle/VRU ground cut remains unchanged.
   road_object_recovery_enabled: true
+  # V0.6.12.8.2.1: profile candidates without feeding ROI/Tracker.
+  road_object_recovery_shadow_mode: true
   road_object_recovery_min_range: 5.0
   road_object_recovery_max_range: 45.0
   road_object_recovery_ground_clearance: 0.05

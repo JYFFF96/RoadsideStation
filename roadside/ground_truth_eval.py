@@ -353,12 +353,14 @@ class GroundTruthEvaluator(object):
 
     @staticmethod
     def _geometry_profile(items):
-        points=[];lengths=[];widths=[];heights=[];modes={}
+        points=[];lengths=[];widths=[];heights=[];ranges=[];modes={}
         flags={"compact":0,"sparse":0,"recovery":0,"temporal":0,"far_builder":0,
                "road_object":0}
         for item in items or []:
             value=item.get("current_point_count",item.get("point_count"))
             try:points.append(float(value))
+            except (TypeError,ValueError):pass
+            try:ranges.append(float(item.get("range")))
             except (TypeError,ValueError):pass
             extent=list(item.get("extent",[]) or [])
             for values,index in ((lengths,0),(widths,1),(heights,2)):
@@ -376,7 +378,8 @@ class GroundTruthEvaluator(object):
             return {"samples":len(values),"mean":(sum(values)/len(values) if values else None),
                     "min":(min(values) if values else None),"max":(max(values) if values else None)}
         return {"points":summary(points),"length":summary(lengths),"width":summary(widths),
-                "height":summary(heights),"cluster_modes":modes,"sources":flags}
+                "height":summary(heights),"range":summary(ranges),
+                "cluster_modes":modes,"sources":flags}
 
     def analyze_geometry_attribution(self, geometry_candidates):
         """Attribute Geometry-stage candidates to CARLA road-object classes.

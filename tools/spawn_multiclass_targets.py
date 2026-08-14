@@ -34,17 +34,17 @@ def junction_center(client, config):
     return station.world, station.world_map, station.junction_center
 
 
-def spawn_walkers(world, world_map, center, count):
+def spawn_walkers(world, world_map, center, count, rng):
     library = world.get_blueprint_library();blueprints = list(library.filter("walker.pedestrian.*"))
     try:locations = [x for x in world_map.get_crosswalks() if distance(x, center) <= 45.0]
     except Exception:locations = []
     if not locations:
         locations = [world.get_random_location_from_navigation() for _ in range(max(10, count * 5))]
         locations = [x for x in locations if x is not None and distance(x, center) <= 45.0]
-    random.shuffle(locations);actors=[]
+    rng.shuffle(locations);actors=[]
     for loc in locations:
         if len(actors) >= count:break
-        bp = random.choice(blueprints)
+        bp = rng.choice(blueprints)
         if bp.has_attribute("is_invincible"):bp.set_attribute("is_invincible", "false")
         transform = carla.Transform(carla.Location(x=loc.x, y=loc.y, z=loc.z + 0.35))
         actor = world.try_spawn_actor(bp, transform)
@@ -62,7 +62,7 @@ def obstacle_blueprints(library):
             if any(word in bp.id.lower() for word in words)]
 
 
-def spawn_obstacles(world, world_map, center, count):
+def spawn_obstacles(world, world_map, center, count, rng):
     blueprints=obstacle_blueprints(world.get_blueprint_library())
     if not blueprints:
         print("WARNING: no suitable static road-obstacle blueprints are available in this CARLA build.")
@@ -72,10 +72,10 @@ def spawn_obstacles(world, world_map, center, count):
         d=distance(wp.transform.location,center)
         if 12.0<=d<=38.0 and all(distance(wp.transform.location,x.transform.location)>8.0 for x in points):
             points.append(wp)
-    random.shuffle(points);actors=[]
+    rng.shuffle(points);actors=[]
     for wp in points:
         if len(actors)>=count:break
-        bp=random.choice(blueprints);transform=wp.transform
+        bp=rng.choice(blueprints);transform=wp.transform
         transform.location.z+=0.20
         actor=world.try_spawn_actor(bp,transform)
         if actor is not None:actors.append(actor)
@@ -83,16 +83,20 @@ def spawn_obstacles(world, world_map, center, count):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.1 crosswalk walkers and lane obstacles")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.1 deterministic walkers and road obstacles")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
-    args=parser.parse_args();config=load_config(args.config);cc=config.get("carla",{})
+    parser.add_argument("--seed",type=int,default=42)
+    args=parser.parse_args();rng=random.Random(args.seed);config=load_config(args.config);cc=config.get("carla",{})
     client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
     world,world_map,center=junction_center(client,config)
-    walkers=spawn_walkers(world,world_map,center,max(0,args.walkers))
-    obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles));actors=walkers+obstacles
-    print("V0.6.12.8.1 targets active: walkers=%d road_obstacles=%d"%(len(walkers),len(obstacles)))
+    walkers=spawn_walkers(world,world_map,center,max(0,args.walkers),rng)
+    obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
+    print("V0.6.12.8.2.1 targets active: seed=%d walkers=%d road_obstacles=%d"%(args.seed,len(walkers),len(obstacles)))
+    for label,items in (("walker",walkers),("obstacle",obstacles)):
+        for actor in items:
+            loc=actor.get_location();print("  TARGET %s id=%d type=%s pos=(%.2f,%.2f,%.2f) range=%.2fm"%(label,actor.id,actor.type_id,loc.x,loc.y,loc.z,distance(loc,center)))
     print("Keep this process running; Ctrl+C removes only these test targets.")
     try:
         while True:time.sleep(1.0)
@@ -101,7 +105,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.1 test targets removed.")
+        print("V0.6.12.8.2.1 test targets removed.")
 
 
 if __name__=="__main__":main()

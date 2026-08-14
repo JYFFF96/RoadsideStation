@@ -66,7 +66,7 @@ crosswalk walkers and lane obstacles in another terminal before main.py:
 
 ```bash
 cd ~/RoadsideStation
-python3.7 tools/spawn_multiclass_targets.py --walkers 12 --obstacles 6
+python3.7 tools/spawn_multiclass_targets.py --walkers 12 --obstacles 6 --seed 42
 ```
 
 LiDAR-only road occupancy is published as `unknown_obstacle`. Camera-associated
@@ -104,6 +104,12 @@ V0.6.12.8.2 adds a separate low road-object recovery channel below the normal
 frames before they enter ROI and Tracker. `[ROAD-OBJECT RECOVERY]` reports the
 point, shape, temporal and deduplication stages. Stage-drop attribution now uses
 one-to-one matching at every stage.
+
+V0.6.12.8.2.1 keeps that recovery channel in Shadow mode: candidates are
+profiled against simulation truth but never enter ROI, Tracker or ObjectList.
+The target generator defaults to seed 42 and prints every spawned blueprint,
+position and RSU range so comparison runs use the same scenario. Shadow logs
+separate matched classes from false positives with point, size and range means.
 
 ## Current scope
 
