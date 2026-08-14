@@ -330,6 +330,14 @@ class SimpleFusion(object):
             item = dict(src)
             rng = self._sensor_range(item["x"], item["y"])
             item["sensor_range"] = rng
+            if (item.get("road_object_selected_enforced", False) and
+                    c.get("road_object_selected_admission_score_shadow", False)):
+                # V0.6.12.8.2.2.20: expose the normal sensor-only geometry
+                # score below the generic 50m scoring boundary. This is
+                # diagnostic metadata only; the production decision below is
+                # deliberately unchanged.
+                item["selected_admission_shadow_score"] = self._candidate_score(item)
+                item["selected_admission_shadow_bypass"] = rng < min_range
             if rng < min_range:
                 item["candidate_score"] = 1.0
                 item["candidate_score_threshold"] = 0.0

@@ -30,6 +30,7 @@ class GroundTruthEvaluator(object):
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
         self._selected_enforcement_totals = self._empty_selected_enforcement_totals()
+        self._selected_admission_score_totals = self._empty_selected_admission_score_totals()
         self._road_object_benchmark_ids = set()
         self._road_object_benchmark_active = False
         self._road_object_benchmark_generation = 0
@@ -50,6 +51,11 @@ class GroundTruthEvaluator(object):
         return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
                     for name in ("roi","score","dynamic","track_current","track_ever"))
 
+    @staticmethod
+    def _empty_selected_admission_score_totals():
+        return {"frames":0,"candidates":0,"matched":0,"fp":0,
+                "truth_scores":[],"fp_scores":[],"thresholds":{}}
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -59,6 +65,7 @@ class GroundTruthEvaluator(object):
         self._road_object_stage_coverage = {}
         self._road_object_cap_totals = self._empty_road_object_cap_totals()
         self._selected_enforcement_totals = self._empty_selected_enforcement_totals()
+        self._selected_admission_score_totals = self._empty_selected_admission_score_totals()
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
@@ -253,6 +260,67 @@ class GroundTruthEvaluator(object):
                                if item["candidates"] else None)
             run[name]=item
         return {"frame":frame,"run":run}
+
+    def _selected_admission_thresholds(self):
+        values=self.config.get("selected_admission_score_thresholds",
+                               [.20,.25,.30,.35,.40,.45]);out=[]
+        for value in values or []:
+            try:value=float(value)
+            except (TypeError,ValueError):continue
+            if 0.0<=value<=1.0 and value not in out:out.append(value)
+        return sorted(out) or [.20,.25,.30,.35,.40,.45]
+
+    def _selected_admission_metrics(self, truth, items):
+        detected=self._detected_with_range(items);pairs=self._match(truth,detected)
+        classes={}
+        for ti,unused_di,unused_distance in pairs:
+            name=str(truth[ti].get("object_type","unknown_obstacle"))
+            classes[name]=int(classes.get(name,0))+1
+        count=len(detected);matched=len(pairs)
+        return {"candidates":count,"matched":matched,"fp":max(0,count-matched),
+                "precision":(float(matched)/count if count else None),"classes":classes},detected,pairs
+
+    def analyze_selected_admission_score_profile(self, scored_candidates):
+        """Profile a sensor-only score gate without changing runtime output."""
+        if not self.config.get("selected_admission_score_profiling",False):
+            return {"enabled":False}
+        selected=[x for x in (scored_candidates or [])
+                  if x.get("road_object_selected_enforced",False) and
+                  x.get("selected_admission_shadow_score") is not None]
+        truth=self.truth_objects();base,detected,pairs=self._selected_admission_metrics(truth,selected)
+        matched_indices=set(di for unused_ti,di,unused_distance in pairs)
+        truth_scores=[float(item["selected_admission_shadow_score"])
+                      for index,item in enumerate(detected) if index in matched_indices]
+        fp_scores=[float(item["selected_admission_shadow_score"])
+                   for index,item in enumerate(detected) if index not in matched_indices]
+        thresholds={};totals=self._selected_admission_score_totals;totals["frames"]+=1
+        totals["candidates"]+=base["candidates"];totals["matched"]+=base["matched"]
+        totals["fp"]+=base["fp"];totals["truth_scores"].extend(truth_scores)
+        totals["fp_scores"].extend(fp_scores)
+        for value in self._selected_admission_thresholds():
+            key="%.2f"%value;kept=[item for item in detected
+                                   if float(item.get("selected_admission_shadow_score",0.0))>=value]
+            metrics,unused_detected,unused_pairs=self._selected_admission_metrics(truth,kept)
+            metrics["truth_retention"]=(float(metrics["matched"])/base["matched"]
+                                        if base["matched"] else None)
+            thresholds[key]=metrics
+            total=totals["thresholds"].setdefault(key,{"candidates":0,"matched":0,"fp":0})
+            for name in ("candidates","matched","fp"):total[name]+=metrics[name]
+        run={"frames":totals["frames"],"candidates":totals["candidates"],
+             "matched":totals["matched"],"fp":totals["fp"],
+             "precision":(float(totals["matched"])/totals["candidates"]
+                          if totals["candidates"] else None),
+             "truth_score":self._distribution(totals["truth_scores"]),
+             "fp_score":self._distribution(totals["fp_scores"]),"thresholds":{}}
+        for key,total in sorted(totals["thresholds"].items()):
+            item=dict(total);item["precision"]=(float(item["matched"])/item["candidates"]
+                                                if item["candidates"] else None)
+            item["truth_retention"]=(float(item["matched"])/totals["matched"]
+                                      if totals["matched"] else None)
+            run["thresholds"][key]=item
+        frame=dict(base);frame["truth_score"]=self._distribution(truth_scores)
+        frame["fp_score"]=self._distribution(fp_scores);frame["thresholds"]=thresholds
+        return {"enabled":True,"frame":frame,"run":run}
 
     @staticmethod
     def _empty_admission_totals():

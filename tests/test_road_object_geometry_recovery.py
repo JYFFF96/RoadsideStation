@@ -344,6 +344,41 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         report=evaluator.analyze_selected_enforcement_attribution([],[],[],[])
         self.assertEqual(2,report["run"]["roi"]["candidates"])
 
+    def test_selected_admission_shadow_score_does_not_change_near_bypass(self):
+        fusion=SimpleFusion("test",{
+            "candidate_scoring_enabled":True,"candidate_scoring_min_range":50.0,
+            "road_object_selected_admission_score_shadow":True})
+        item={"x":10.0,"y":0.0,"z":0.0,"extent":[.8,.4,.3],
+              "point_count":8,"scale_votes":1,
+              "road_object_selected_enforced":True,"roi_details":{}}
+        kept,rejected=fusion._score_candidates([item])
+        self.assertEqual([],rejected);self.assertEqual(1.0,kept[0]["candidate_score"])
+        self.assertTrue(kept[0]["candidate_score_bypass"])
+        self.assertIn("selected_admission_shadow_score",kept[0])
+        self.assertLess(kept[0]["selected_admission_shadow_score"],1.0)
+
+    def test_selected_admission_score_profile_compares_thresholds(self):
+        center=type("Location",(object,),{"x":0.0,"y":0.0})()
+        evaluator=GroundTruthEvaluator(None,lambda:center,{
+            "radius":80.0,"match_distance":2.0,
+            "selected_admission_score_profiling":True,
+            "selected_admission_score_thresholds":[.25,.40]})
+        evaluator.truth_objects=lambda:[{"x":10.0,"y":0.0,"range":10.0,
+                                         "object_type":"person"}]
+        truth={"x":10.2,"y":0.0,"road_object_selected_enforced":True,
+               "selected_admission_shadow_score":.45}
+        false_low={"x":30.0,"y":0.0,"road_object_selected_enforced":True,
+                   "selected_admission_shadow_score":.20}
+        false_high={"x":40.0,"y":0.0,"road_object_selected_enforced":True,
+                    "selected_admission_shadow_score":.35}
+        report=evaluator.analyze_selected_admission_score_profile([truth,false_low,false_high])
+        self.assertEqual(3,report["frame"]["candidates"])
+        self.assertEqual(2,report["frame"]["thresholds"]["0.25"]["candidates"])
+        self.assertEqual(1,report["frame"]["thresholds"]["0.40"]["candidates"])
+        self.assertEqual(1.0,report["frame"]["thresholds"]["0.40"]["truth_retention"])
+        report=evaluator.analyze_selected_admission_score_profile([truth])
+        self.assertEqual(4,report["run"]["candidates"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -568,6 +603,10 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(32.0,config["fusion"]["road_object_hybrid_geometry_gate_far_max_range"])
         self.assertTrue(config["fusion"]["road_object_recovery_selected_output_enforcing"])
         self.assertFalse(config["fusion"]["road_object_recovery_shadow_mode"])
+        self.assertTrue(config["fusion"]["road_object_selected_admission_score_shadow"])
+        self.assertTrue(config["evaluation"]["selected_admission_score_profiling"])
+        self.assertEqual([.20,.25,.30,.35,.40,.45],
+                         config["evaluation"]["selected_admission_score_thresholds"])
 
     def test_truth_lifecycle_distinguishes_boundary_exit_jump_and_disappearance(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
@@ -595,6 +634,7 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         evaluator._adaptive_temporal_samples["false"].append({"point_count":5})
         evaluator._road_object_cap_totals["baseline"]["candidates"]=7
         evaluator._selected_enforcement_totals["roi"]["candidates"]=5
+        evaluator._selected_admission_score_totals["candidates"]=4
         self.assertFalse(evaluator._sync_road_object_benchmark_session([])["reset"])
         walkers=[{"actor_id":10,"role":"rsu_test_walker"}]
         pending=evaluator._sync_road_object_benchmark_session(walkers)
@@ -609,6 +649,7 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual({},evaluator._hybrid_rescue_samples)
         self.assertEqual(0,evaluator._road_object_cap_totals["baseline"]["candidates"])
         self.assertEqual(0,evaluator._selected_enforcement_totals["roi"]["candidates"])
+        self.assertEqual(0,evaluator._selected_admission_score_totals["candidates"])
         evaluator._road_object_cap_totals["baseline"]["candidates"]=3
         self.assertFalse(evaluator._sync_road_object_benchmark_session(first)["reset"])
         self.assertEqual(3,evaluator._road_object_cap_totals["baseline"]["candidates"])

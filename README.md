@@ -265,6 +265,14 @@ frame and cumulative candidate, match, false-positive, precision and class
 counts for every stage. This makes it possible to distinguish useful recovery
 from temporal FP persistence before changing production thresholds.
 
+V0.6.12.8.2.2.20 profiles a dedicated Selected admission score in Shadow mode.
+The normal candidate scorer bypasses objects inside 50 metres, which explains
+why the previous run showed identical ROI, Score and Dynamic counts. Selected
+candidates now carry the same sensor-only geometry score even in the 5–45m
+recovery corridor. The CARLA evaluator compares thresholds from 0.20 to 0.45,
+reporting truth retention, false positives and precision without changing the
+enforcing output or exposing simulation truth to perception.
+
 ## Current scope
 
 - Fixed roadside RGB camera

@@ -143,6 +143,8 @@ fusion:
   road_object_recovery_selected_output_shadow: true
   road_object_recovery_selected_output_policy: adaptive_hybrid_geometry_gated
   road_object_recovery_selected_output_enforcing: true
+  # V0.6.12.8.2.2.20: calculate the normally bypassed near-range score only.
+  road_object_selected_admission_score_shadow: true
 
   range_adaptive_clustering: true
   range_bands:
@@ -400,6 +402,9 @@ evaluation:
   road_object_hybrid_feature_profiling: true
   # V0.6.12.8.2.2.13.1: activate incremental Rescue profiling in evaluation.
   road_object_hybrid_rescue_feature_profiling: true
+  # V0.6.12.8.2.2.20: compare selected score gates without filtering runtime.
+  selected_admission_score_profiling: true
+  selected_admission_score_thresholds: [0.20, 0.25, 0.30, 0.35, 0.40, 0.45]
   # V0.6.12.8.2.2.14: parallel Shadow gates; no candidate is filtered.
   road_object_rescue_near_area_ablations: [0.02, 0.04, 0.06, 0.08]
   road_object_rescue_far_range_ablations: [26.0, 28.0, 30.0, 32.0]
