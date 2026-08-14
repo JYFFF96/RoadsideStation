@@ -145,6 +145,9 @@ fusion:
   road_object_recovery_selected_output_enforcing: true
   # V0.6.12.8.2.2.20: calculate the normally bypassed near-range score only.
   road_object_selected_admission_score_shadow: true
+  # V0.6.12.8.2.2.21: safest observed gate retained 75/75 truth samples.
+  road_object_selected_admission_score_enforcing: true
+  road_object_selected_admission_score_threshold: 0.20
 
   range_adaptive_clustering: true
   range_bands:

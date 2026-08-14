@@ -331,13 +331,26 @@ class SimpleFusion(object):
             rng = self._sensor_range(item["x"], item["y"])
             item["sensor_range"] = rng
             if (item.get("road_object_selected_enforced", False) and
-                    c.get("road_object_selected_admission_score_shadow", False)):
+                    (c.get("road_object_selected_admission_score_shadow", False) or
+                     c.get("road_object_selected_admission_score_enforcing", False))):
                 # V0.6.12.8.2.2.20: expose the normal sensor-only geometry
                 # score below the generic 50m scoring boundary. This is
                 # diagnostic metadata only; the production decision below is
                 # deliberately unchanged.
                 item["selected_admission_shadow_score"] = self._candidate_score(item)
                 item["selected_admission_shadow_bypass"] = rng < min_range
+                selected_threshold=float(c.get("road_object_selected_admission_score_threshold",.20))
+                selected_enforcing=bool(c.get("road_object_selected_admission_score_enforcing",False))
+                item["selected_admission_score_threshold"]=selected_threshold
+                item["selected_admission_score_enforcing"]=selected_enforcing
+                if (selected_enforcing and
+                        item["selected_admission_shadow_score"]<selected_threshold):
+                    item["candidate_score"]=item["selected_admission_shadow_score"]
+                    item["candidate_score_threshold"]=selected_threshold
+                    item["candidate_score_bypass"]=False
+                    item["reason"]="selected_admission_score"
+                    rejected.append(item)
+                    continue
             if rng < min_range:
                 item["candidate_score"] = 1.0
                 item["candidate_score_threshold"] = 0.0
@@ -771,6 +784,10 @@ class SimpleFusion(object):
             "roi_candidates": len(accepted), "roi_rejected": len(roi_rejections),
             "roi_rescued": roi_rescued, "roi_rejection_reasons": dict(reasons),
             "scored_candidates": len(scored), "score_rejected": len(score_rejections),
+            "selected_admission_score_enforcing": bool(c.get("road_object_selected_admission_score_enforcing",False)),
+            "selected_admission_score_threshold": float(c.get("road_object_selected_admission_score_threshold",.20)),
+            "selected_admission_score_kept": sum(1 for x in scored if x.get("road_object_selected_enforced",False)),
+            "selected_admission_score_rejected": sum(1 for x in score_rejections if x.get("reason")=="selected_admission_score"),
             "candidate_scoring_enabled": bool(c.get("candidate_scoring_enabled", False)),
             "candidate_score_avg": (sum(score_values) / len(score_values) if score_values else None),
             "recovery_quality_pass": len(self.last_recovery_quality_candidates),

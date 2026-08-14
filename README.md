@@ -273,6 +273,14 @@ recovery corridor. The CARLA evaluator compares thresholds from 0.20 to 0.45,
 reporting truth retention, false positives and precision without changing the
 enforcing output or exposing simulation truth to perception.
 
+V0.6.12.8.2.2.21 enables the conservative Selected admission score gate at
+0.20. In the profiling run it retained all 75 truth matches while rejecting
+five false-positive samples; thresholds of 0.30 or higher were rejected because
+they removed more than 40 percent of truth support. The gate applies only to
+the selected recovery channel, remains sensor-only and has an explicit switch
+for rollback. Profiling continues across accepted and rejected candidates so
+the enforced result can be checked against the same full input population.
+
 ## Current scope
 
 - Fixed roadside RGB camera

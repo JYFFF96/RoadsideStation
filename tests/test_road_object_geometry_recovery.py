@@ -357,6 +357,26 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertIn("selected_admission_shadow_score",kept[0])
         self.assertLess(kept[0]["selected_admission_shadow_score"],1.0)
 
+    def test_selected_admission_score_gate_rejects_only_selected_below_threshold(self):
+        fusion=SimpleFusion("test",{
+            "candidate_scoring_enabled":True,"candidate_scoring_min_range":50.0,
+            "road_object_selected_admission_score_enforcing":True,
+            "road_object_selected_admission_score_threshold":.20})
+        weak={"x":10.0,"y":0.0,"z":0.0,"extent":[.1,.05,.05],
+              "point_count":1,"scale_votes":1,"roi_details":{},
+              "road_object_selected_enforced":True}
+        regular=dict(weak);regular.pop("road_object_selected_enforced")
+        strong={"x":12.0,"y":0.0,"z":0.0,"extent":[.8,.4,.5],
+                "point_count":8,"scale_votes":2,"roi_details":{},
+                "road_object_selected_enforced":True}
+        kept,rejected=fusion._score_candidates([weak,regular,strong])
+        self.assertEqual(2,len(kept));self.assertEqual(1,len(rejected))
+        self.assertEqual("selected_admission_score",rejected[0]["reason"])
+        self.assertTrue(any(not item.get("road_object_selected_enforced",False)
+                            for item in kept))
+        self.assertTrue(any(item.get("road_object_selected_enforced",False)
+                            for item in kept))
+
     def test_selected_admission_score_profile_compares_thresholds(self):
         center=type("Location",(object,),{"x":0.0,"y":0.0})()
         evaluator=GroundTruthEvaluator(None,lambda:center,{
@@ -604,6 +624,8 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertTrue(config["fusion"]["road_object_recovery_selected_output_enforcing"])
         self.assertFalse(config["fusion"]["road_object_recovery_shadow_mode"])
         self.assertTrue(config["fusion"]["road_object_selected_admission_score_shadow"])
+        self.assertTrue(config["fusion"]["road_object_selected_admission_score_enforcing"])
+        self.assertEqual(.20,config["fusion"]["road_object_selected_admission_score_threshold"])
         self.assertTrue(config["evaluation"]["selected_admission_score_profiling"])
         self.assertEqual([.20,.25,.30,.35,.40,.45],
                          config["evaluation"]["selected_admission_score_thresholds"])
