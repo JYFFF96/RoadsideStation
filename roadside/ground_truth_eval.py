@@ -26,8 +26,49 @@ class GroundTruthEvaluator(object):
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
         self._road_object_actor_coverage = {}
         self._road_object_stage_coverage = {}
-        self._road_object_cap_totals = dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
-                                            for name in ("baseline","balanced","adaptive","adaptive_ranked"))
+        self._road_object_cap_totals = self._empty_road_object_cap_totals()
+        self._road_object_benchmark_ids = set()
+        self._road_object_benchmark_active = False
+        self._road_object_benchmark_generation = 0
+
+    @staticmethod
+    def _empty_road_object_cap_totals():
+        return dict((name,{"candidates":0,"matched":0,"fp":0,"classes":{}})
+                    for name in ("baseline","balanced","adaptive","adaptive_ranked"))
+
+    def _reset_road_object_run_metrics(self):
+        self._road_object_samples = {"classes": {}, "false": []}
+        self._adaptive_temporal_samples = {"classes": {}, "false": []}
+        self._road_object_actor_coverage = {}
+        self._road_object_stage_coverage = {}
+        self._road_object_cap_totals = self._empty_road_object_cap_totals()
+
+    def _sync_road_object_benchmark_session(self, truth):
+        """Start a clean cumulative run when a tagged benchmark batch appears."""
+        enabled=bool(self.config.get("road_object_benchmark_session_isolation",True))
+        tagged=[item for item in truth or []
+                if str(item.get("role","")).startswith("rsu_test_")]
+        obstacles=[item for item in tagged if item.get("role")=="rsu_test_obstacle"]
+        observed=obstacles or tagged
+        actor_ids=set(int(item.get("actor_id")) for item in observed
+                      if item.get("actor_id") is not None)
+        reset=False
+        if enabled and actor_ids:
+            new_batch=(not self._road_object_benchmark_active or
+                       (self._road_object_benchmark_ids and
+                        actor_ids.isdisjoint(self._road_object_benchmark_ids)))
+            if new_batch:
+                self._reset_road_object_run_metrics()
+                self._road_object_benchmark_ids=set(actor_ids)
+                self._road_object_benchmark_generation+=1;reset=True
+            self._road_object_benchmark_active=True
+            self._road_object_benchmark_ids.update(actor_ids)
+        elif enabled:
+            self._road_object_benchmark_active=False
+            self._road_object_benchmark_ids=set()
+        return {"enabled":enabled,"active":bool(actor_ids),"reset":reset,
+                "generation":self._road_object_benchmark_generation,
+                "actors":len(actor_ids)}
 
     def _parse_bins(self, values):
         bins = []
@@ -606,7 +647,8 @@ class GroundTruthEvaluator(object):
 
     def analyze_road_object_recovery(self, geometry_candidates):
         """Profile recovery candidates and simulate the precision gate in Shadow."""
-        truth=self.truth_objects();detected=self._detected_with_range(geometry_candidates)
+        truth=self.truth_objects();session=self._sync_road_object_benchmark_session(truth)
+        detected=self._detected_with_range(geometry_candidates)
         pairs=self._match(truth,detected);used=set(di for _,di,_ in pairs);class_items={}
         self._record_road_object_actor_coverage(truth,pairs,detected)
         for ti,di,_ in pairs:
@@ -629,6 +671,7 @@ class GroundTruthEvaluator(object):
         cumulative_items=self._road_object_samples["classes"]
         return {"truth":len(truth),"geometry":len(detected),"matched":len(pairs),
                 "false_positive":len(false_items),"classes":classes,
+                "benchmark_session":session,
                 "false_profile":self._geometry_profile(false_items),
                 "precision_gate_shadow":self._road_object_gate_profile(class_items,false_items),
                 "gate_ablations":self._road_object_ablations(class_items,false_items),

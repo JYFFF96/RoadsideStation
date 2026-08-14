@@ -198,6 +198,9 @@ def _print_adaptive_temporal_profile(report):
    print("      [ADAPTIVE FEATURE %s %s] N:%d Score(avg/p10/p50/p90):%s TotalPts:%s Current:%s History:%s Frames:%s Height:%s Range:%s SensorBands:%s"%(label,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"range"),profile.get("bands",{})))
 
 def _print_road_object_profile(a):
+ session=a.get("benchmark_session",{}) or {}
+ if session.get("reset",False):
+  print("  [ROAD-OBJECT BENCHMARK SESSION] Reset:1 Generation:%d Actors:%d"%(session.get("generation",0),session.get("actors",0)))
  precision=(float(a.get('matched',0))/a.get('geometry',0)) if a.get('geometry',0) else None
  print("  [ROAD-OBJECT SHADOW EVAL] Candidates:%d TruthMatched:%d FP:%d Precision:%s"%(a.get('geometry',0),a.get('matched',0),a.get('false_positive',0),_pct(precision)))
  for name,b in sorted((a.get('classes',{}) or {}).items()):
@@ -237,7 +240,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.6 Adaptive Low-Object Ranking Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.7 Benchmark Session Isolation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

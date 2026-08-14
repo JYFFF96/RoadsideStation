@@ -156,6 +156,12 @@ to the measured five-point support center, current-frame support and temporal
 persistence. Range-balanced quotas are retained. The ranked list is evaluated
 against the prior Adaptive list but remains isolated from production output.
 
+V0.6.12.8.2.2.7 isolates benchmark sessions in cumulative road-object reports.
+When a new batch of tagged `rsu_test_*` actors first appears, evaluation-only
+samples, actor/stage coverage and cap-comparison totals are reset before that
+frame is recorded. This makes `main.py`-first and target-spawner-first launch
+orders comparable without changing perception, recovery or ranking behavior.
+
 ## Current scope
 
 - Fixed roadside RGB camera

@@ -233,5 +233,28 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         report=evaluator.analyze_road_object_adaptive_profile([good,false])
         self.assertEqual(4,report["run"]["candidates"])
 
+    def test_benchmark_session_resets_pre_spawn_cumulative_metrics(self):
+        evaluator=GroundTruthEvaluator(None,lambda:None,{
+            "road_object_benchmark_session_isolation":True})
+        evaluator._road_object_samples["false"].append({"point_count":4})
+        evaluator._adaptive_temporal_samples["false"].append({"point_count":5})
+        evaluator._road_object_cap_totals["baseline"]["candidates"]=7
+        self.assertFalse(evaluator._sync_road_object_benchmark_session([])["reset"])
+        first=[{"actor_id":42,"role":"rsu_test_obstacle"}]
+        session=evaluator._sync_road_object_benchmark_session(first)
+        self.assertTrue(session["reset"])
+        self.assertEqual(1,session["generation"])
+        self.assertEqual([],evaluator._road_object_samples["false"])
+        self.assertEqual([],evaluator._adaptive_temporal_samples["false"])
+        self.assertEqual(0,evaluator._road_object_cap_totals["baseline"]["candidates"])
+        evaluator._road_object_cap_totals["baseline"]["candidates"]=3
+        self.assertFalse(evaluator._sync_road_object_benchmark_session(first)["reset"])
+        self.assertEqual(3,evaluator._road_object_cap_totals["baseline"]["candidates"])
+        second=[{"actor_id":99,"role":"rsu_test_obstacle"}]
+        session=evaluator._sync_road_object_benchmark_session(second)
+        self.assertTrue(session["reset"])
+        self.assertEqual(2,session["generation"])
+        self.assertEqual(0,evaluator._road_object_cap_totals["baseline"]["candidates"])
+
 
 if __name__=="__main__":unittest.main()
