@@ -91,6 +91,13 @@ fusion:
   road_object_recovery_temporal_gate: 0.80
   road_object_recovery_dedupe_distance: 1.00
   road_object_recovery_max_candidates: 12
+  # V0.6.12.8.2.2.3: parallel range-balanced Top-N selection. Shadow only;
+  # baseline output remains the only recovery list seen by perception/tracking.
+  road_object_recovery_balanced_cap_shadow: true
+  road_object_recovery_balanced_bands:
+    - {max_range: 25.0, quota: 4}
+    - {max_range: 35.0, quota: 4}
+    - {max_range: 45.0, quota: 4}
 
   range_adaptive_clustering: true
   range_bands:

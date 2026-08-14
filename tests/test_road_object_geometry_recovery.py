@@ -56,6 +56,21 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(1,len(recovery.last_stage_outputs["output"]))
         self.assertEqual(1,recovery.last_stats["cap_reject"])
 
+    def test_balanced_cap_reserves_bands_and_refills_unused_quota(self):
+        recovery=RoadObjectGeometryRecovery();items=[]
+        for index,distance in enumerate([10,11,12,13,14,15,28,29,30,40]):
+            items.append({"id":index,"x":float(distance),"y":0.0,"point_count":20-index})
+        config={"road_object_recovery_balanced_cap_shadow":True,
+                "road_object_recovery_min_range":5.0,
+                "road_object_recovery_balanced_bands":[
+                    {"max_range":25.0,"quota":2},{"max_range":35.0,"quota":2},
+                    {"max_range":45.0,"quota":2}]}
+        selected=recovery._balanced_cap(items,6,config)
+        ranges=[recovery._sensor_range(item) for item in selected]
+        self.assertEqual(3,sum(1 for value in ranges if value<25.0))
+        self.assertEqual(2,sum(1 for value in ranges if 25.0<=value<35.0))
+        self.assertEqual(1,sum(1 for value in ranges if 35.0<=value<45.0))
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -140,14 +155,24 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         near={"x":10.1,"y":0.0,"z":0.1};far={"x":30.1,"y":0.0,"z":0.1}
         report=evaluator.analyze_road_object_recovery_stages({
             "input_points":[near,far],"stages":{"component":[near],"shape":[near],
-            "temporal":[near],"dedupe_pass":[near],"output":[near]}})
+            "temporal":[near],"dedupe_pass":[near],"output":[near],
+            "balanced_output":[near,far]}})
         actors=report["actors"]
         self.assertEqual(1,actors[0]["raw_frames"])
         self.assertEqual(1,actors[0]["stage_frames"]["output"])
         self.assertEqual(1,actors[1]["raw_frames"])
         self.assertEqual(0,actors[1]["stage_frames"]["component"])
+        self.assertEqual(1,actors[1]["stage_frames"]["balanced_output"])
         self.assertEqual(1,report["range_bands"][0]["output"])
         self.assertEqual(0,report["range_bands"][1]["output"])
+        self.assertEqual(1,report["range_bands"][1]["balanced_output"])
+        evaluator._detected_with_range=lambda items:list(items)
+        comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far])
+        self.assertEqual(1,comparison["baseline"]["matched"])
+        self.assertEqual(2,comparison["balanced"]["matched"])
+        comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far])
+        self.assertEqual(2,comparison["baseline_run"]["matched"])
+        self.assertEqual(4,comparison["balanced_run"]["matched"])
 
 
 if __name__=="__main__":unittest.main()

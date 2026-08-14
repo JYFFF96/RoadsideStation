@@ -131,6 +131,12 @@ stages. Per-actor and 5-25m/25-35m/35-45m summaries remain evaluation-only and
 show whether a missed object lacks LiDAR support or is rejected later in the
 recovery pipeline. No recovery threshold or production output is changed.
 
+V0.6.12.8.2.2.3 adds a parallel range-balanced cap selection in Shadow. The
+5-25m, 25-35m and 35-45m bands reserve four of the twelve candidate slots each;
+unused slots are refilled by the strongest remaining candidates. Logs compare
+the unchanged global Top-12 baseline with the balanced selection per actor and
+range band. The balanced list never reaches ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

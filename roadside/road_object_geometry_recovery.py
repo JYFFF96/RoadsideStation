@@ -25,11 +25,13 @@ class RoadObjectGeometryRecovery(object):
     @staticmethod
     def _empty_stats():
         return {"input_points":0,"components":0,"shape_pass":0,"pending":0,
-                "temporal_pass":0,"dedupe":0,"cap_reject":0,"built":0}
+                "temporal_pass":0,"dedupe":0,"cap_reject":0,"built":0,
+                "balanced_built":0,"balanced_band_counts":{}}
 
     @staticmethod
     def _empty_stages():
-        return {"component":[],"shape":[],"temporal":[],"dedupe_pass":[],"output":[]}
+        return {"component":[],"shape":[],"temporal":[],"dedupe_pass":[],
+                "output":[],"balanced_output":[]}
 
     def _clear_diagnostics(self):
         self.last_input_points=np.empty((0,3),dtype=np.float32)
@@ -39,6 +41,31 @@ class RoadObjectGeometryRecovery(object):
     def _distance(a, b):
         return math.hypot(float(a["x"])-float(b["x"]),
                           float(a["y"])-float(b["y"]))
+
+    @staticmethod
+    def _sensor_range(item):
+        return math.hypot(float(item.get("x",0.0)),float(item.get("y",0.0)))
+
+    def _balanced_cap(self, items, limit, config):
+        if not config.get("road_object_recovery_balanced_cap_shadow",False) or limit<=0:return []
+        bands=config.get("road_object_recovery_balanced_bands",[]) or []
+        parsed=[];lower=float(config.get("road_object_recovery_min_range",5.0))
+        for value in bands:
+            try:upper=float(value.get("max_range"));quota=max(0,int(value.get("quota",0)))
+            except (AttributeError,TypeError,ValueError):continue
+            if upper<=lower:continue
+            parsed.append((lower,upper,quota));lower=upper
+        selected=[];selected_ids=set()
+        for index,(low,high,quota) in enumerate(parsed):
+            candidates=[item for item in items if id(item) not in selected_ids and
+                        low<=self._sensor_range(item)<high]
+            for item in candidates[:quota]:
+                if len(selected)>=limit:break
+                selected.append(item);selected_ids.add(id(item))
+        for item in items:
+            if len(selected)>=limit:break
+            if id(item) not in selected_ids:selected.append(item);selected_ids.add(id(item))
+        return selected
 
     def update(self, points, existing_geometry, ground_cut_local, config=None, frame_id=None):
         c=config or {};stats=self._empty_stats()
@@ -122,9 +149,17 @@ class RoadObjectGeometryRecovery(object):
             dedupe_pass.append(item);occupied.append(item)
         limit=max(0,int(c.get("road_object_recovery_max_candidates",12)))
         out=dedupe_pass[:limit];stats["cap_reject"]=max(0,len(dedupe_pass)-len(out))
+        balanced=self._balanced_cap(dedupe_pass,limit,c);stats["balanced_built"]=len(balanced)
+        lower=min_range;counts={}
+        for value in c.get("road_object_recovery_balanced_bands",[]) or []:
+            try:upper=float(value.get("max_range"))
+            except (AttributeError,TypeError,ValueError):continue
+            label="%.0f-%.0fm"%(lower,upper);counts[label]=sum(1 for item in balanced if lower<=self._sensor_range(item)<upper);lower=upper
+        stats["balanced_band_counts"]=counts
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
                                  "dedupe_pass":[dict(x) for x in dedupe_pass],
-                                 "output":[dict(x) for x in out]}
+                                 "output":[dict(x) for x in out],
+                                 "balanced_output":[dict(x) for x in balanced]}
         stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out
