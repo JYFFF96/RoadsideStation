@@ -248,6 +248,15 @@ rules would retain about 66 of 69 Full-Rescue truth matches while raising the
 estimated Selected precision from 23.3% to about 26.0%. The policy remains
 Shadow-only and does not yet feed ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.18 begins a controlled CARLA enforcing trial for the named
+Selected output. The chosen adaptive Hybrid Geometry-Gated candidates now feed
+ROI and Tracker when both the selected-enforcing switch is on and global
+Road-Object Shadow mode is off. An invalid or disabled selection falls back to
+the legacy Baseline. Runtime statistics report the selected policy, enforcing
+state and active candidate count so the next benchmark can measure the real
+Tracker/ObjectList effect. The selection still uses sensor geometry only and
+does not consume CARLA truth.
+
 ## Current scope
 
 - Fixed roadside RGB camera

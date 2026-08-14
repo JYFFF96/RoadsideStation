@@ -130,7 +130,10 @@ def _print_road_object_recovery(s):
  print("  [ROAD-OBJECT HYBRID GATE] Mode:SHADOW Keep:%d Reject:%d Reasons:%s"%(s.get("road_object_recovery_adaptive_hybrid_gate_kept",0),s.get("road_object_recovery_adaptive_hybrid_gate_rejected",0),s.get("road_object_recovery_adaptive_hybrid_gate_reasons",{})))
  print("  [ROAD-OBJECT HYBRID TEMPORAL RESCUE] Mode:SHADOW Keep:%d Rescued:%d Sources:%s"%(s.get("road_object_recovery_adaptive_hybrid_rescue_kept",0),s.get("road_object_recovery_adaptive_hybrid_rescued",0),s.get("road_object_recovery_adaptive_hybrid_rescue_sources",{})))
  print("  [ROAD-OBJECT RESCUE GEOMETRY GATE] Mode:SHADOW Keep:%d Reject:%d Reasons:%s"%(s.get("road_object_recovery_adaptive_hybrid_geometry_gate_kept",0),s.get("road_object_recovery_adaptive_hybrid_geometry_gate_rejected",0),s.get("road_object_recovery_adaptive_hybrid_geometry_gate_reasons",{})))
- print("  [ROAD-OBJECT SELECTED OUTPUT] Mode:SHADOW Policy:%s Built:%d"%(s.get("road_object_recovery_selected_output_policy","disabled"),s.get("road_object_recovery_selected_output_built",0)))
+ print("  [ROAD-OBJECT SELECTED OUTPUT] Mode:%s Policy:%s Built:%d Active:%d"%(
+  "ENFORCING" if s.get("road_object_recovery_selected_output_enforcing",False) else "SHADOW",
+  s.get("road_object_recovery_selected_output_policy","disabled"),
+  s.get("road_object_recovery_selected_output_built",0),s.get("road_object_recovery_active_output_built",0)))
 
 def _dist3(profile,key):
  d=(profile or {}).get(key,{}) or {}
@@ -315,7 +318,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.17 Multi-Class Rescue Geometry Gate starting...")
+ print("RoadsideStation V0.6.12.8.2.2.18 Selected Output Controlled Enforcement starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

@@ -71,8 +71,8 @@ fusion:
   # V0.6.12.8.2: a separate, temporally confirmed channel for compact low
   # road objects. The normal vehicle/VRU ground cut remains unchanged.
   road_object_recovery_enabled: true
-  # V0.6.12.8.2.1: profile candidates without feeding ROI/Tracker.
-  road_object_recovery_shadow_mode: true
+  # V0.6.12.8.2.2.18: controlled CARLA trial feeds the selected output to ROI/Tracker.
+  road_object_recovery_shadow_mode: false
   road_object_recovery_min_range: 5.0
   road_object_recovery_max_range: 45.0
   road_object_recovery_ground_clearance: 0.05
@@ -142,6 +142,7 @@ fusion:
   # V0.6.12.8.2.2.16: name the future output branch without enforcing it.
   road_object_recovery_selected_output_shadow: true
   road_object_recovery_selected_output_policy: adaptive_hybrid_geometry_gated
+  road_object_recovery_selected_output_enforcing: true
 
   range_adaptive_clustering: true
   range_bands:

@@ -44,7 +44,9 @@ class RoadObjectGeometryRecovery(object):
                 "adaptive_hybrid_geometry_gate_kept":0,
                 "adaptive_hybrid_geometry_gate_rejected":0,
                 "adaptive_hybrid_geometry_gate_reasons":{},
-                "selected_output_built":0,"selected_output_policy":"disabled"}
+                "selected_output_built":0,"selected_output_policy":"disabled",
+                "selected_output_enforcing":False,"active_output_built":0,
+                "active_output_policy":"baseline"}
 
     @staticmethod
     def _empty_stages():
@@ -273,6 +275,13 @@ class RoadObjectGeometryRecovery(object):
         return list(choices[policy]),policy
 
     @staticmethod
+    def _active_output(baseline, selected, selected_policy, config):
+        """Choose the recovery output without silently bypassing the baseline."""
+        enforcing=bool(config.get("road_object_recovery_selected_output_enforcing",False))
+        if enforcing and selected_policy!="disabled":return list(selected),selected_policy,True
+        return list(baseline),"baseline",False
+
+    @staticmethod
     def _voxelized_history_points(frames, low, high, voxel):
         """Return spatially unique points and the source-frame set per voxel."""
         cells={};voxel=max(.02,float(voxel))
@@ -484,6 +493,8 @@ class RoadObjectGeometryRecovery(object):
             "baseline":out,"adaptive_hybrid_gated":hybrid_gated,
             "adaptive_hybrid_rescued":hybrid_rescued,
             "adaptive_hybrid_geometry_gated":hybrid_geometry_gated},c)
+        active_output,active_policy,selected_enforcing=self._active_output(
+            out,selected_output,selected_policy,c)
         stats["adaptive_hybrid_built"]=len(hybrid);hybrid_counts={};hybrid_lower=min_range
         for value in c.get("road_object_recovery_balanced_bands",[]) or []:
             try:hybrid_upper=float(value.get("max_range"))
@@ -506,6 +517,8 @@ class RoadObjectGeometryRecovery(object):
         stats["adaptive_hybrid_geometry_gate_rejected"]=max(0,len(hybrid_rescued)-len(hybrid_geometry_gated))
         stats["adaptive_hybrid_geometry_gate_reasons"]=hybrid_geometry_gate_reasons
         stats["selected_output_built"]=len(selected_output);stats["selected_output_policy"]=selected_policy
+        stats["selected_output_enforcing"]=selected_enforcing
+        stats["active_output_built"]=len(active_output);stats["active_output_policy"]=active_policy
         self.last_stage_outputs={"component":[dict(x) for x in component_items],
                                  "shape":[dict(x) for x in candidates],
                                  "temporal":[dict(x) for x in stable],
@@ -524,4 +537,4 @@ class RoadObjectGeometryRecovery(object):
                                  "adaptive_hybrid_rescued_output":[dict(x) for x in hybrid_rescued],
                                  "adaptive_hybrid_geometry_gated_output":[dict(x) for x in hybrid_geometry_gated],
                                  "selected_output":[dict(x) for x in selected_output]}
-        stats["built"]=len(out);self.last_output=[dict(x) for x in out];self.last_stats=stats;return out
+        stats["built"]=len(out);self.last_output=[dict(x) for x in active_output];self.last_stats=stats;return active_output

@@ -286,6 +286,22 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual([],disabled)
         self.assertEqual("disabled",policy)
 
+    def test_selected_output_enforcement_is_explicit_and_has_baseline_fallback(self):
+        baseline=[{"id":"baseline"}];selected=[{"id":"selected"}]
+        output,policy,enforcing=RoadObjectGeometryRecovery._active_output(
+            baseline,selected,"adaptive_hybrid_geometry_gated",{})
+        self.assertEqual(baseline,output);self.assertEqual("baseline",policy)
+        self.assertFalse(enforcing)
+        output,policy,enforcing=RoadObjectGeometryRecovery._active_output(
+            baseline,selected,"adaptive_hybrid_geometry_gated",{
+                "road_object_recovery_selected_output_enforcing":True})
+        self.assertEqual(selected,output)
+        self.assertEqual("adaptive_hybrid_geometry_gated",policy);self.assertTrue(enforcing)
+        output,policy,enforcing=RoadObjectGeometryRecovery._active_output(
+            baseline,[],"disabled",{"road_object_recovery_selected_output_enforcing":True})
+        self.assertEqual(baseline,output);self.assertEqual("baseline",policy)
+        self.assertFalse(enforcing)
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -308,6 +324,24 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(3,len(diagnostics["input_points"]))
         self.assertEqual(1,len(diagnostics["stages"]["output"]))
         self.assertGreater(diagnostics["stages"]["output"][0]["sensor_range"],0.0)
+
+    def test_selected_baseline_policy_can_feed_geometry_only_when_both_switches_allow_it(self):
+        config=self._config();config.update({
+            "road_object_recovery_shadow_mode":False,
+            "road_object_recovery_selected_output_shadow":True,
+            "road_object_recovery_selected_output_policy":"baseline",
+            "road_object_recovery_selected_output_enforcing":True,
+            "ground_removal_enabled":True,"candidate_scoring_enabled":False,
+            "range_adaptive_clustering":False,"cluster_min_points":20,
+            "cluster_merge_enabled":False,"sparse_geometry_rescue_enabled":False,
+            "far_geometry_builder_enabled":False,"far_sparse_discovery_enabled":False,
+            "far_track_admission_enabled":False})
+        fusion=SimpleFusion("test",config);fusion.world_transform={"x":0.0,"y":0.0,"z":0.0,"yaw":0.0}
+        fusion.set_ground_reference(0.0);fusion.fuse(self._points(),[],frame_id=1)
+        fusion.fuse(self._points(),[],frame_id=2)
+        self.assertTrue(any(x.get("road_object_recovered",False) for x in fusion.last_geometry_world))
+        self.assertTrue(fusion.last_stats["road_object_recovery_selected_output_enforcing"])
+        self.assertEqual("baseline",fusion.last_stats["road_object_recovery_active_output_policy"])
 
     def test_precision_profile_uses_percentiles_and_normalized_sides(self):
         items=[{"point_count":5,"extent":[.8,.2,.1],"range":10.0},
@@ -488,6 +522,8 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertNotIn("road_object_hybrid_rescue_feature_profiling",config["fusion"])
         self.assertEqual(.02,config["fusion"]["road_object_hybrid_geometry_gate_near_min_area"])
         self.assertEqual(32.0,config["fusion"]["road_object_hybrid_geometry_gate_far_max_range"])
+        self.assertTrue(config["fusion"]["road_object_recovery_selected_output_enforcing"])
+        self.assertFalse(config["fusion"]["road_object_recovery_shadow_mode"])
 
     def test_truth_lifecycle_distinguishes_boundary_exit_jump_and_disappearance(self):
         evaluator=GroundTruthEvaluator(None,lambda:None,{
