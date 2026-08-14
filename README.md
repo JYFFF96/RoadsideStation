@@ -327,6 +327,15 @@ only about 61.5 percent of held actors and leave four pedestrians in the
 Expired-Only group, so this version searches for a portable sensor-only
 exception rule before any enforcement. CARLA truth remains evaluator-only.
 
+V0.6.12.8.2.2.27 adds Selected Admission Camera-Support Profiling. Every held
+candidate is projected into the configured camera and its visibility, generic
+2D association, IoU, center distance, detector class and confidence are copied
+only into the evaluator sample. Confirmed and Expired outcome profiles report
+camera visible/supported counts and support rates by camera source and detected
+class. With `carla_truth` this is a simulation benchmark proxy; with `detector`
+the identical path consumes real detector boxes. Neither mode changes Selected
+admission, Fusion, Tracker or ObjectList output.
+
 ## Current scope
 
 - Fixed roadside RGB camera

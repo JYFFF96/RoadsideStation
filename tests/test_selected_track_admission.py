@@ -99,7 +99,14 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "selected_track_admission_pending_id": 11,
             "adaptive_hybrid_source": "near_baseline",
             "adaptive_hybrid_temporal_rescue": True,
-            "extent": [0.5, 0.3, 1.5], "point_count": 6})
+            "extent": [0.5, 0.3, 1.5], "point_count": 6,
+            "selected_track_admission_camera_visible": True,
+            "selected_track_admission_camera_supported": True,
+            "selected_track_admission_camera_source": "detector",
+            "selected_track_admission_camera_class": "person",
+            "selected_track_admission_camera_iou": .4,
+            "selected_track_admission_camera_center_distance": 8.0,
+            "selected_track_admission_camera_confidence": .9})
         fp_hold = self._selected(30.0);fp_hold.update({
             "selected_track_admission_pending_id": 12,
             "adaptive_hybrid_source": "far_ranked",
@@ -129,6 +136,13 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(0.35, person_profile["scores"]["p50"])
         self.assertEqual({"near": 1, "far": 0, "strict": 0, "rescue": 1},
                          person_profile["paths"])
+        self.assertEqual(1, person_profile["camera"]["visible"])
+        self.assertEqual(1, person_profile["camera"]["supported"])
+        self.assertEqual(1.0, person_profile["camera"]["support_rate"])
+        self.assertEqual({"person": 1}, person_profile["camera"]["classes"])
+        self.assertEqual(.4, person_profile["camera"]["iou"]["p50"])
+        self.assertEqual(8.0, person_profile["camera"]["center_distance"]["p50"])
+        self.assertEqual(.9, person_profile["camera"]["confidence"]["p50"])
         self.assertEqual({"near": 0, "far": 1, "strict": 1, "rescue": 0},
                          fp_profile["paths"])
 

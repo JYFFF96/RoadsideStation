@@ -727,6 +727,8 @@ class GroundTruthEvaluator(object):
         profile = cls._geometry_profile(items)
         scores = []
         paths = {"near": 0, "far": 0, "strict": 0, "rescue": 0}
+        camera = {"visible": 0, "supported": 0, "sources": {}, "classes": {}}
+        camera_ious = [];camera_distances = [];camera_confidences = []
         for item in items:
             value = item.get("selected_admission_shadow_score",
                              item.get("candidate_score"))
@@ -739,12 +741,38 @@ class GroundTruthEvaluator(object):
                 paths["rescue"] += 1
             else:
                 paths["strict"] += 1
+            source = str(item.get("selected_track_admission_camera_source", "none"))
+            camera["sources"][source] = int(camera["sources"].get(source, 0)) + 1
+            if item.get("selected_track_admission_camera_visible", False):
+                camera["visible"] += 1
+            if item.get("selected_track_admission_camera_supported", False):
+                camera["supported"] += 1
+                camera_class = str(item.get(
+                    "selected_track_admission_camera_class", "unknown"))
+                camera["classes"][camera_class] = int(
+                    camera["classes"].get(camera_class, 0)) + 1
+                for values, key in (
+                        (camera_ious, "selected_track_admission_camera_iou"),
+                        (camera_distances,
+                         "selected_track_admission_camera_center_distance"),
+                        (camera_confidences,
+                         "selected_track_admission_camera_confidence")):
+                    try:values.append(float(item.get(key)))
+                    except (TypeError, ValueError):pass
         profile["scores"] = {
             "samples": len(scores), "mean": (sum(scores) / len(scores) if scores else None),
             "min": (min(scores) if scores else None),
             "p10": cls._percentile(scores, .10), "p50": cls._percentile(scores, .50),
             "p90": cls._percentile(scores, .90), "max": (max(scores) if scores else None)}
         profile["paths"] = paths
+        camera["support_rate"] = (float(camera["supported"]) / camera["visible"]
+                                  if camera["visible"] else None)
+        camera["visibility_rate"] = (float(camera["visible"]) / len(items)
+                                     if items else None)
+        camera["iou"] = cls._distribution(camera_ious)
+        camera["center_distance"] = cls._distribution(camera_distances)
+        camera["confidence"] = cls._distribution(camera_confidences)
+        profile["camera"] = camera
         profile["samples"] = len(items)
         return profile
 

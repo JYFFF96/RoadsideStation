@@ -14,6 +14,7 @@ from roadside.camera_objects import CameraObjectList
 from roadside.fused_objects import build_fused_object_list
 from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.lidar_projection import project_lidar_tracks
+from roadside.selected_camera_support import annotate_selected_camera_support
 from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
@@ -308,14 +309,22 @@ def _print_selected_track_admission_profile(report):
   for name,value in sorted((buckets or {}).items()):
    score=value.get("scores",{}) or {};points=value.get("points",{}) or {}
    height=value.get("height",{}) or {};rng=value.get("range",{}) or {}
-   print("    [SELECTED OUTCOME FEATURES %s %s] N:%d Score(avg/p10/p50/p90):%s/%s/%s/%s Points:%s/%s/%s/%s Height:%s/%s/%s/%s Range:%s/%s/%s/%s Paths:%s Modes:%s"%(
+   camera=value.get("camera",{}) or {}
+   camera_iou=camera.get("iou",{}) or {};camera_dist=camera.get("center_distance",{}) or {}
+   camera_conf=camera.get("confidence",{}) or {}
+   print("    [SELECTED OUTCOME FEATURES %s %s] N:%d Score(avg/p10/p50/p90):%s/%s/%s/%s Points:%s/%s/%s/%s Height:%s/%s/%s/%s Range:%s/%s/%s/%s Camera(V/S):%d/%d Visible:%s Support:%s IoU(p50/p90):%s/%s Dist:%s/%s Conf:%s/%s Sources:%s Classes:%s Paths:%s Modes:%s"%(
     decision.upper(),name,value.get("samples",0),_num(score.get("mean")),
     _num(score.get("p10")),_num(score.get("p50")),_num(score.get("p90")),
     _num(points.get("mean")),_num(points.get("p10")),_num(points.get("p50")),
     _num(points.get("p90")),_num(height.get("mean")),_num(height.get("p10")),
     _num(height.get("p50")),_num(height.get("p90")),_num(rng.get("mean")),
     _num(rng.get("p10")),_num(rng.get("p50")),_num(rng.get("p90")),
-    value.get("paths",{}),value.get("cluster_modes",{})))
+    camera.get("visible",0),camera.get("supported",0),
+    _pct(camera.get("visibility_rate")),_pct(camera.get("support_rate")),
+    _num(camera_iou.get("p50")),_num(camera_iou.get("p90")),
+    _num(camera_dist.get("p50")),_num(camera_dist.get("p90")),
+    _num(camera_conf.get("p50")),_num(camera_conf.get("p90")),camera.get("sources",{}),
+    camera.get("classes",{}),value.get("paths",{}),value.get("cluster_modes",{})))
 
 def _adaptive_feature(profile,name):
  values=(profile or {}).get(name,{}) or {}
@@ -409,7 +418,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.26 Selected Outcome Feature Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.27 Selected Admission Camera-Support Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -449,6 +458,7 @@ def main():
  print("Road-Object Precision Gate Shadow: evaluation-only | points>=%d height<=%.2fm range<=%.1fm | never filters ROI/Tracker/ObjectList"%(int(eval_cfg.get("road_object_gate_min_points",10)),float(eval_cfg.get("road_object_gate_max_height",.45)),float(eval_cfg.get("road_object_gate_max_range",25.0))))
  print("Road-Object Stage Attribution: evaluation-only | raw_radius=%.1fm stage_gate=%.1fm bands=%s"%(float(eval_cfg.get("road_object_raw_support_radius",1.5)),float(eval_cfg.get("road_object_stage_match_distance",2.0)),eval_cfg.get("road_object_stage_range_bins",[25.0,35.0,45.0])))
  print("Road-Object Rescue Profiler: %s | Truth Lifecycle Diagnostics: %s"%("enabled" if eval_cfg.get("road_object_hybrid_rescue_feature_profiling",False) else "disabled","enabled" if eval_cfg.get("truth_lifecycle_diagnostics",False) else "disabled"))
+ print("Selected Admission Camera-Support Profiling: %s | evaluator-only; never changes admission or tracking"%("enabled" if eval_cfg.get("selected_track_admission_camera_profiling",False) else "disabled"))
  print("Multi-Class Safety Baseline: vehicle + VRU + configured road obstacles | LiDAR unknowns remain unknown_obstacle")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
@@ -488,8 +498,6 @@ def main():
    camera,lidar,radar=station.cache.snapshot();ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
    if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
-   if evaluator is not None and lidar is not None and eval_cfg.get("selected_track_admission_profiling",False):
-    evaluator.observe_selected_track_admission(fusion.last_selected_track_admission_rejections,fusion.last_selected_track_admission_candidates,fusion.last_selected_track_admission_expired_candidates,frame_id=lidar[0])
    if projector is not None and camera is not None:
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
     if camera_source=="carla_truth":
@@ -500,6 +508,15 @@ def main():
      camera_objects=list(camera_detection_objects)
     for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
      p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
+   selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
+   selected_held=fusion.last_selected_track_admission_rejections
+   if eval_cfg.get("selected_track_admission_camera_profiling",False):
+    selected_held,selected_camera_stats=annotate_selected_camera_support(
+     selected_held,projector if camera is not None else None,camera_objects,width,height,
+     camera_source=camera_source,min_iou=assoc_cfg.get("min_iou",.05),
+     max_center_distance=assoc_cfg.get("max_center_distance",120.0))
+   if evaluator is not None and lidar is not None and eval_cfg.get("selected_track_admission_profiling",False):
+    evaluator.observe_selected_track_admission(selected_held,fusion.last_selected_track_admission_candidates,fusion.last_selected_track_admission_expired_candidates,frame_id=lidar[0])
    fusion.apply_camera_confirmations(pairs,timestamp=ol.timestamp)
    fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs);oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
    if now-last>=1.0:
@@ -510,6 +527,7 @@ def main():
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
     print("  [FAR TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d StrongBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("far_admission_shadow_mode",False) else "ENFORCE",s.get("far_admission_pending",0),s.get("far_admission_held",0),s.get("far_admission_confirmed",0),s.get("far_admission_expired",0),s.get("far_admission_sensor_bypass",0),s.get("far_admission_strong_bypass",0),s.get("far_admission_track_bypass",0),s.get("far_admission_tracker_input",0)))
     print("  [SELECTED NEW-TRACK ADMISSION] Mode:%s Pending:%d WouldHold:%d WouldConfirm:%d Expired:%d SensorBypass:%d TrackBypass:%d TrackerInput:%d"%("SHADOW" if s.get("selected_track_admission_shadow_mode",False) else "ENFORCE",s.get("selected_track_admission_pending",0),s.get("selected_track_admission_held",0),s.get("selected_track_admission_confirmed",0),s.get("selected_track_admission_expired",0),s.get("selected_track_admission_sensor_bypass",0),s.get("selected_track_admission_track_bypass",0),s.get("selected_track_admission_tracker_input",0)))
+    print("  [SELECTED ADMISSION CAMERA SHADOW] Source:%s Held:%d Visible:%d Supported:%d"%(selected_camera_stats.get("source","none"),selected_camera_stats.get("held",0),selected_camera_stats.get("visible",0),selected_camera_stats.get("supported",0)))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  Geometry-aware ROI rescued: %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  Candidate score rejected: %d"%s.get("score_rejected",0))
