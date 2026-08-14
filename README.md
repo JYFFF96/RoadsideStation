@@ -137,6 +137,13 @@ unused slots are refilled by the strongest remaining candidates. Logs compare
 the unchanged global Top-12 baseline with the balanced selection per actor and
 range band. The balanced list never reaches ROI, Tracker or ObjectList.
 
+V0.6.12.8.2.2.4 adds range-adaptive temporal geometry in a second Shadow path.
+The 25-35m band combines up to three low-slice frames and the 35-45m band up to
+four, with spatial voxel deduplication, band-specific support-frame requirements
+and mandatory current-frame support. Logs compare its component, shape,
+temporal, deduplication and capped output against the unchanged Baseline and
+Balanced paths. Adaptive candidates never reach ROI, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera

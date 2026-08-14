@@ -71,6 +71,24 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         self.assertEqual(2,sum(1 for value in ranges if 25.0<=value<35.0))
         self.assertEqual(1,sum(1 for value in ranges if 35.0<=value<45.0))
 
+    def test_adaptive_temporal_shadow_combines_sparse_mid_range_frames(self):
+        recovery=RoadObjectGeometryRecovery();config=self._config();config.update({
+            "road_object_recovery_max_range":45.0,
+            "road_object_recovery_adaptive_temporal_shadow":True,
+            "road_object_recovery_adaptive_voxel_size":.05,
+            "road_object_recovery_adaptive_temporal_bands":[
+                {"min_range":25.0,"max_range":35.0,"history_frames":3,
+                 "min_support_frames":2,"max_points":48}]})
+        first=[[30.00,0.00,.10]];second=[[30.20,.05,.35],[30.10,.02,.20]]
+        self.assertEqual([],recovery.update(first,[],.30,config,frame_id=1))
+        self.assertEqual([],recovery.update(second,[],.30,config,frame_id=2))
+        adaptive=recovery.last_stage_outputs["adaptive_output"]
+        self.assertEqual(1,len(adaptive))
+        self.assertGreaterEqual(adaptive[0]["support_frames"],2)
+        self.assertGreaterEqual(adaptive[0]["current_point_count"],1)
+        self.assertTrue(adaptive[0]["range_adaptive_temporal_shadow"])
+        self.assertEqual(0,recovery.last_stats["built"])
+
     def test_shadow_mode_does_not_feed_geometry_or_tracker(self):
         config=self._config();config.update({
             "road_object_recovery_shadow_mode":True,
@@ -173,6 +191,9 @@ class RoadObjectGeometryRecoveryTest(unittest.TestCase):
         comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far])
         self.assertEqual(2,comparison["baseline_run"]["matched"])
         self.assertEqual(4,comparison["balanced_run"]["matched"])
+        comparison=evaluator.analyze_road_object_cap_comparison([near],[near,far],[far])
+        self.assertEqual(1,comparison["adaptive"]["matched"])
+        self.assertEqual(1,comparison["adaptive_run"]["matched"])
 
 
 if __name__=="__main__":unittest.main()

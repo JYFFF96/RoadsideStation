@@ -98,6 +98,13 @@ fusion:
     - {max_range: 25.0, quota: 4}
     - {max_range: 35.0, quota: 4}
     - {max_range: 45.0, quota: 4}
+  # V0.6.12.8.2.2.4: range-adaptive multi-frame low-slice geometry. Shadow
+  # only. Current-frame support is mandatory and points are voxel-deduplicated.
+  road_object_recovery_adaptive_temporal_shadow: true
+  road_object_recovery_adaptive_voxel_size: 0.08
+  road_object_recovery_adaptive_temporal_bands:
+    - {min_range: 25.0, max_range: 35.0, history_frames: 3, min_support_frames: 2, max_points: 48}
+    - {min_range: 35.0, max_range: 45.0, history_frames: 4, min_support_frames: 3, max_points: 64}
 
   range_adaptive_clustering: true
   range_bands:
