@@ -63,9 +63,20 @@ class GroundTruthEvaluator(object):
 
     @staticmethod
     def _empty_selected_track_admission_totals():
-        return {"frames": 0, "decisions": dict(
-            (name, {"candidates": 0, "matched": 0, "fp": 0, "classes": {}})
-            for name in ("hold", "confirm", "expired", "existing_track", "sensor"))}
+        return {
+            "frames": 0,
+            "decisions": dict(
+                (name, {"candidates": 0, "matched": 0, "fp": 0, "classes": {}})
+                for name in ("hold", "confirm", "expired", "existing_track", "sensor")),
+            "pending_origins": {},
+            "actor_classes": dict((name, {}) for name in ("hold", "confirm", "expired")),
+            "transitions": dict(
+                (name, {"total": 0, "origin_truth": 0, "origin_fp": 0,
+                        "origin_unknown": 0, "current_truth": 0,
+                        "current_fp": 0, "same_truth_actor": 0,
+                        "stable_fp": 0, "changed_label_or_actor": 0})
+                for name in ("confirm", "expired")),
+        }
 
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
@@ -592,6 +603,8 @@ class GroundTruthEvaluator(object):
         frame = {}
         for name, candidates in groups.items():
             detected, pairs = self._admission_classification(truth, candidates)
+            truth_by_detected = dict((detected_index, truth_index)
+                                     for truth_index, detected_index, unused_distance in pairs)
             classes = {}
             for truth_index, unused_detected, unused_distance in pairs:
                 object_type = str(truth[truth_index].get(
@@ -606,6 +619,43 @@ class GroundTruthEvaluator(object):
             for object_type, value in classes.items():
                 bucket["classes"][object_type] = int(
                     bucket["classes"].get(object_type, 0)) + value
+            for detected_index, item in enumerate(detected):
+                pending_id = item.get("selected_track_admission_pending_id")
+                truth_index = truth_by_detected.get(detected_index)
+                actor_id = (truth[truth_index].get("actor_id")
+                            if truth_index is not None else None)
+                object_type = (str(truth[truth_index].get(
+                    "object_type", "unknown_obstacle"))
+                    if truth_index is not None else None)
+                if truth_index is not None and actor_id is not None and name in totals["actor_classes"]:
+                    totals["actor_classes"][name][int(actor_id)] = object_type
+                if pending_id is None:
+                    continue
+                key = str(pending_id)
+                if name == "hold":
+                    if key not in totals["pending_origins"]:
+                        totals["pending_origins"][key] = {
+                            "label": "truth" if truth_index is not None else "fp",
+                            "actor_id": actor_id, "object_type": object_type}
+                    continue
+                if name not in ("confirm", "expired"):
+                    continue
+                transition = totals["transitions"][name]
+                transition["total"] += 1
+                origin = totals["pending_origins"].pop(key, None)
+                origin_label = origin.get("label") if origin is not None else "unknown"
+                transition["origin_" + origin_label] += 1
+                current_label = "truth" if truth_index is not None else "fp"
+                transition["current_" + current_label] += 1
+                same_actor = (origin is not None and origin_label == "truth" and
+                              truth_index is not None and origin.get("actor_id") is not None and
+                              int(origin["actor_id"]) == int(actor_id))
+                if same_actor:
+                    transition["same_truth_actor"] += 1
+                elif origin is not None and origin_label == "fp" and current_label == "fp":
+                    transition["stable_fp"] += 1
+                elif origin is not None:
+                    transition["changed_label_or_actor"] += 1
         self._selected_track_admission_frame = frame
         return True
 
@@ -620,9 +670,19 @@ class GroundTruthEvaluator(object):
             item["precision"] = (float(item.get("matched", 0)) / count
                                  if count else None)
             run[name] = item
+        coverage = {}
+        for name, actors in self._selected_track_admission_totals["actor_classes"].items():
+            classes = {}
+            for object_type in actors.values():
+                classes[object_type] = int(classes.get(object_type, 0)) + 1
+            coverage[name] = {"actors": len(actors), "classes": classes}
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
-                "frame": dict(self._selected_track_admission_frame), "run": run}
+                "frame": dict(self._selected_track_admission_frame), "run": run,
+                "coverage": coverage,
+                "transitions": dict((name, dict(value)) for name, value in
+                                    self._selected_track_admission_totals["transitions"].items()),
+                "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
 
     def report_far_admission_decisions(self, reset=True):
         totals = self._far_admission_totals

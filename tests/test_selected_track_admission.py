@@ -40,6 +40,7 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             [self._selected(10.2)], [shadow_track], 10.1, frame_id=101)
         self.assertEqual([], rejected);self.assertEqual(1, stats["confirmed"])
         self.assertEqual("repeat", admitted[0]["selected_track_admission_reason"])
+        self.assertEqual(1, admitted[0]["selected_track_admission_pending_id"])
 
     def test_same_lidar_frame_cannot_confirm(self):
         fusion = self._fusion(True);item = self._selected()
@@ -85,6 +86,32 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(1, report["run"]["hold"]["matched"])
         self.assertEqual(1, report["run"]["hold"]["fp"])
         self.assertEqual({"person": 1}, report["run"]["hold"]["classes"])
+
+    def test_evaluator_profiles_pending_transitions_and_actor_coverage(self):
+        center = type("Center", (), {"x": 0.0, "y": 0.0})()
+        evaluator = GroundTruthEvaluator(None, lambda: center, {
+            "selected_track_admission_profiling": True})
+        evaluator.truth_objects = lambda: [
+            {"actor_id": 7, "x": 10.0, "y": 0.0,
+             "object_type": "person"}]
+        truth_hold = self._selected();truth_hold["selected_track_admission_pending_id"] = 11
+        fp_hold = self._selected(30.0);fp_hold["selected_track_admission_pending_id"] = 12
+        evaluator.observe_selected_track_admission(
+            [truth_hold, fp_hold], [], [], frame_id=20)
+        truth_confirm = dict(truth_hold);truth_confirm["selected_track_admission_reason"] = "repeat"
+        fp_confirm = dict(fp_hold);fp_confirm["selected_track_admission_reason"] = "repeat"
+        evaluator.observe_selected_track_admission(
+            [], [truth_confirm, fp_confirm], [], frame_id=21)
+        report = evaluator.report_selected_track_admission()
+        transition = report["transitions"]["confirm"]
+        self.assertEqual(2, transition["total"])
+        self.assertEqual(1, transition["origin_truth"])
+        self.assertEqual(1, transition["origin_fp"])
+        self.assertEqual(1, transition["same_truth_actor"])
+        self.assertEqual(1, transition["stable_fp"])
+        self.assertEqual(0, transition["changed_label_or_actor"])
+        self.assertEqual({"actors": 1, "classes": {"person": 1}},
+                         report["coverage"]["confirm"])
 
 
 if __name__ == "__main__":

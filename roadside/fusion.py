@@ -110,6 +110,7 @@ class SimpleFusion(object):
         self._selected_track_admission_pending = []
         self._selected_track_admission_last_frame = None
         self._selected_track_admission_sequence = 0
+        self._selected_track_admission_pending_sequence = 0
 
     def set_world_transform(self, t):
         if t is None:
@@ -663,6 +664,9 @@ class SimpleFusion(object):
                     stats["track_bypass"] += 1
                     admitted.append(item)
                     continue
+                self._selected_track_admission_pending_sequence += 1
+                pending_id = self._selected_track_admission_pending_sequence
+                item["selected_track_admission_pending_id"] = pending_id
                 entry = dict(item)
                 entry.update({"x": float(item["x"]), "y": float(item["y"]),
                               "z": float(item.get("z", 0.0)), "hits": 1,
@@ -673,6 +677,8 @@ class SimpleFusion(object):
             else:
                 distance, index, entry = best
                 used.add(index)
+                item["selected_track_admission_pending_id"] = entry.get(
+                    "selected_track_admission_pending_id")
                 previous_time = float(entry.get("last_time", now))
                 previous_frame = entry.get("last_frame")
                 item["selected_track_admission_match_distance"] = distance

@@ -278,6 +278,23 @@ def _print_selected_track_admission_profile(report):
     name,value.get("candidates",0),value.get("matched",0),value.get("fp",0),
     _pct(value.get("precision")),value.get("classes",{})))
   print("    [SELECTED NEW-TRACK ADMISSION %s] %s"%(label," | ".join(parts)))
+ coverage=report.get("coverage",{}) or {};transitions=report.get("transitions",{}) or {}
+ coverage_parts=[]
+ for key,name in (("hold","HOLD"),("confirm","CONFIRM"),("expired","EXPIRED")):
+  value=coverage.get(key,{}) or {}
+  coverage_parts.append("%s Actors:%d Classes:%s"%(
+   name,value.get("actors",0),value.get("classes",{})))
+ print("    [SELECTED ADMISSION ACTOR COVERAGE] %s"%" | ".join(coverage_parts))
+ transition_parts=[]
+ for key,name in (("confirm","CONFIRM"),("expired","EXPIRED")):
+  value=transitions.get(key,{}) or {}
+  transition_parts.append("%s Total:%d FromT:%d FromFP:%d Unknown:%d NowT:%d NowFP:%d SameActor:%d StableFP:%d Changed:%d"%(
+   name,value.get("total",0),value.get("origin_truth",0),value.get("origin_fp",0),
+   value.get("origin_unknown",0),value.get("current_truth",0),value.get("current_fp",0),
+   value.get("same_truth_actor",0),value.get("stable_fp",0),
+   value.get("changed_label_or_actor",0)))
+ print("    [SELECTED ADMISSION TRANSITIONS] Pending:%d | %s"%(
+  report.get("pending_origins",0)," | ".join(transition_parts)))
 
 def _adaptive_feature(profile,name):
  values=(profile or {}).get(name,{}) or {}
@@ -371,7 +388,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.23 Selected New-Track Admission Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.24 Selected Admission Transition Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

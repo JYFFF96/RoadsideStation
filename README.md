@@ -299,6 +299,16 @@ Tracker unchanged. CARLA-only reports compare Hold, Confirm, Expired,
 Track-Bypass and Sensor-Bypass truth/false-positive counts and classes; runtime
 decisions consume sensor and track geometry only.
 
+V0.6.12.8.2.2.24 adds stable internal IDs to pending Selected admissions and
+profiles their terminal transitions. The preceding run showed that two-frame
+confirmation improved sample precision only from 19.8 to 24.6 percent, while
+expired samples still contained pedestrian evidence; radar bypass was also too
+weak to justify enforcement. The CARLA-only evaluator now reports whether each
+Hold originated as truth or false positive, whether it later Confirmed or
+Expired, whether the same truth actor survived, and unique actor/class coverage.
+The identifiers and decisions remain perception-side metadata in Shadow mode;
+truth labels never enter Fusion, Tracker or ObjectList.
+
 ## Current scope
 
 - Fixed roadside RGB camera
