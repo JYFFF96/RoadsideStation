@@ -439,6 +439,12 @@ controller and no `WalkerControl`, isolating detector projection and
 camera/LiDAR association from motion and cross-frame timing. Manual and AI
 moving modes remain available and unchanged.
 
+V0.6.12.8.2.2.42 preserves CARLA timestamps in the Camera, LiDAR and Radar
+cache entries and reports Camera-minus-LiDAR frame and time deltas once per
+second. This is a diagnostic-only shadow for the slow-walker regression: the
+cache still exposes the latest frame from each sensor, and no synchronization,
+projection, association, Tracker, Fusion, ObjectList or RSM behavior changes.
+
 ## Current scope
 
 - Fixed roadside RGB camera
