@@ -509,3 +509,19 @@ mqtt:
   port: 1883
   topic_object_list: roadside/RSU_001/object_list
   topic_rsm: roadside/RSU_001/rsm
+  # Confirm the writable device-side topic with Dachuan before production use.
+  topic_event: roadside/RSU_001/event2hmi
+
+v2x_events:
+  enabled: true
+  cooldown_seconds: 5.0
+  # Leave unset in normal perception runs. A real OBU adapter will provide it.
+  test_ego_speed_kmh:
+  avw:
+    enabled: true
+    max_stationary_speed_mps: 0.5
+    dwell_seconds: 5.0
+    direction: 1
+  slw:
+    enabled: true
+    speed_limit_kmh: 40
