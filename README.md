@@ -425,6 +425,13 @@ rule tests the narrow separating boundary; 110px is an explicit spillover
 control. Both remain evaluation-only and the selected deployment rule remains
 `iou05_or_d30`.
 
+V0.6.12.8.2.2.40 promotes `detector_d90` to the evaluator-only candidate
+deployment verdict. In the fine-calibration run, d90 and d100 rescued the same
+three person samples with zero false positives, while d105 added both an
+expired and a confirmed false positive without rescuing another person. The
+candidate still cannot affect Tracker, Fusion, ObjectList or RSM; it must meet
+all verdict thresholds, including 50% Expired-Only person actor coverage.
+
 ## Current scope
 
 - Fixed roadside RGB camera
