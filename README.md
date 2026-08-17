@@ -411,6 +411,13 @@ OpenCV DNN cannot import (including YOLOv5 graphs containing incompatible
 ONNX Runtime only when model loading fails. Python 3.7 uses
 `onnxruntime==1.14.1`. The preflight reports the selected runtime explicitly.
 
+V0.6.12.8.2.2.38 adds detector-specific camera-association calibration
+shadows at 90px and 100px. The first real-detector run placed true person
+support near 87--95px while the first supported false positives were near
+107--109px, outside the former 30/45px ablations. These wider rules remain
+evaluation-only: the selected deployment rule stays `iou05_or_d30`, and no
+Tracker, Fusion, ObjectList or RSM behavior changes.
+
 ## Current scope
 
 - Fixed roadside RGB camera
