@@ -351,9 +351,11 @@ def _print_selected_track_admission_profile(report):
  camera_verdict=report.get("camera_rescue_deployment_verdict",{}) or {}
  if camera_verdict.get("enabled",False):
   values=camera_verdict.get("values",{}) or {};criteria=camera_verdict.get("criteria",{}) or {}
-  print("    [SELECTED CAMERA RESCUE DEPLOYMENT VERDICT] Status:%s Rule:%s Samples:%d/%d KeptPerson:%d/%d P:%s/>=%s FPReject:%s/>=%s ActorCoverage:%s/>=%s ConfirmFPReject:%s/>=%s Sources:%s Required:%s Reasons:%s | EVALUATION-ONLY"%(
+  print("    [SELECTED CAMERA RESCUE DEPLOYMENT VERDICT] Status:%s Rule:%s Samples:%d/%d VisiblePerson:%d/%d Opportunity:%s KeptPerson:%d/%d P:%s/>=%s FPReject:%s/>=%s ActorCoverage:%s/>=%s ConfirmFPReject:%s/>=%s Sources:%s Required:%s Reasons:%s | EVALUATION-ONLY"%(
    camera_verdict.get("status","BLOCKED"),camera_verdict.get("rule","-"),
    values.get("expired_person_samples",0),criteria.get("min_expired_person_samples",0),
+   values.get("visible_person_samples",0),criteria.get("min_visible_person_samples",0),
+   _pct(values.get("person_opportunity_rate")),
    values.get("kept_person_samples",0),criteria.get("min_kept_person_samples",0),
    _pct(values.get("kept_precision")),_pct(criteria.get("min_kept_precision")),
    _pct(values.get("expired_fp_rejection")),_pct(criteria.get("min_expired_fp_rejection")),
@@ -508,7 +510,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.45 Camera Rescue Evidence-Floor Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.46 Camera Opportunity Coverage Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
