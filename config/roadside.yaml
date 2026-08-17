@@ -471,6 +471,9 @@ evaluation:
   selected_camera_rescue_deployment_rule: detector_d90
   selected_camera_rescue_required_source: detector
   selected_camera_rescue_min_expired_person_samples: 20
+  # V0.6.12.8.2.2.45: total expired samples are not deployment evidence when
+  # only a few of them actually pass the candidate rescue rule.
+  selected_camera_rescue_min_kept_person_samples: 5
   selected_camera_rescue_min_kept_precision: 0.80
   selected_camera_rescue_min_expired_fp_rejection: 0.98
   selected_camera_rescue_min_person_actor_coverage: 0.50
