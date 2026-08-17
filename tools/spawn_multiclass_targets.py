@@ -90,6 +90,9 @@ def spawn_walkers(world, world_map, center, count, rng, mode="ai", speed=1.2, la
         transform = carla.Transform(carla.Location(x=loc.x, y=loc.y, z=loc.z + 0.35))
         actor = world.try_spawn_actor(bp, transform)
         if actor is None:continue
+        if mode=="static":
+            actors.append(actor)
+            continue
         destination=opposite_crossing_destination(loc,locations,center,used_destinations)
         controller=None
         if controller_bp is not None:
@@ -154,13 +157,13 @@ def spawn_obstacles(world, world_map, center, count, rng):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.40 multi-class moving targets")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.41 static-walker baseline targets")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
     parser.add_argument("--seed",type=int,default=42)
-    parser.add_argument("--walker-mode",choices=("manual","ai"),default="manual",
-                        help="manual is reliable across roads; ai requires a connected pedestrian navmesh")
+    parser.add_argument("--walker-mode",choices=("static","manual","ai"),default="manual",
+                        help="static holds walkers in place; manual moves across roads; ai requires a pedestrian navmesh")
     parser.add_argument("--walker-speed",type=float,default=1.2)
     parser.add_argument("--walker-launch-interval",type=float,default=0.8)
     args=parser.parse_args();rng=random.Random(args.seed);config=load_config(args.config);cc=config.get("carla",{})
@@ -168,7 +171,7 @@ def main():
     world,world_map,center=junction_center(client,config)
     walkers,movements=spawn_walkers(world,world_map,center,max(0,args.walkers),rng,args.walker_mode,max(.1,args.walker_speed),max(0.0,args.walker_launch_interval))
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
-    print("V0.6.12.8.2.2.40 targets active: seed=%d walkers=%d road_obstacles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),args.walker_mode,args.walker_launch_interval))
+    print("V0.6.12.8.2.2.41 targets active: seed=%d walkers=%d road_obstacles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
     for label,items in (("walker",walkers),("obstacle",obstacles)):
         for actor in items:
@@ -196,7 +199,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.40 test targets removed.")
+        print("V0.6.12.8.2.2.41 test targets removed.")
 
 
 if __name__=="__main__":main()
