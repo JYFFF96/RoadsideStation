@@ -18,6 +18,7 @@ from roadside.selected_camera_support import annotate_selected_camera_support
 from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
+from roadside.map_selection import carla_map_short_name,town05_switch_target
 
 _STOP_REQUESTED=False
 
@@ -30,13 +31,20 @@ def load_config(path="config/roadside.yaml"):
  with open(path,"r") as fp:return yaml.safe_load(fp)
 
 def _try_load_configured_map(config):
- cc=config.get("carla",{});target=cc.get("map")
- if not target or not cc.get("load_world_on_start",False):return
- print("WARNING: load_world_on_start=true will reload the CARLA world and remove existing traffic.")
+ cc=config.get("carla",{});target=cc.get("map","Town05_Opt")
+ if not cc.get("load_world_on_start",False):return
  client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
- current=client.get_world().get_map().name.split("/")[-1];print("Experimental CARLA map switch enabled. Target map: %s"%target);print("Current CARLA map: %s"%current)
- if current!=target:
-  print("Calling client.load_world('%s')..."%target);world=client.load_world(target);print("CARLA map switch completed: %s"%world.get_map().name.split("/")[-1]);time.sleep(2.0)
+ current=carla_map_short_name(client.get_world().get_map().name)
+ switch_target=town05_switch_target(current,target)
+ print("Town05 startup map check | current=%s target=%s"%(current,target))
+ if switch_target is None:
+  print("Current world is already Town05; keeping the world and existing traffic.")
+  return
+ print("WARNING: switching to Town05 reloads the CARLA world and removes existing traffic.")
+ print("Calling client.load_world('%s')..."%switch_target)
+ world=client.load_world(switch_target)
+ loaded=carla_map_short_name(world.get_map().name)
+ print("CARLA map switch completed: %s"%loaded);time.sleep(2.0)
 
 def _pct(v):return "-" if v is None else "%.1f%%"%(100.0*float(v))
 def _meters(v):return "-" if v is None else "%.2fm"%float(v)
@@ -457,7 +465,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.30 Delayed-Reappearance Incremental Risk Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.31 Town05 Auto Map Selection starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):

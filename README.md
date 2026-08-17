@@ -360,6 +360,14 @@ displacement, apparent speed, current/origin score and point count, height and
 range. This exposes the real cost of the promising 1.5 second window before it
 can be considered for enforcement; all logic remains evaluation-only.
 
+V0.6.12.8.2.2.31 enables Town05 startup map selection in `main.py`. CARLA map
+names are normalized from either short names or full asset paths. If the
+current short name starts with `Town05` (including `Town05_Opt`), the existing
+world and traffic are preserved. Otherwise `main.py` loads the configured
+`Town05_Opt` world before creating the roadside station. Because a real map
+switch removes CARLA actors, traffic and multi-class targets should be started
+after `main.py`.
+
 ## Current scope
 
 - Fixed roadside RGB camera

@@ -3,8 +3,9 @@ carla:
   port: 2000
   timeout: 60.0
   map: Town05_Opt
-  # Keep traffic created before main.py. Loading a world destroys all actors.
-  load_world_on_start: false
+  # V0.6.12.8.2.2.31: main.py keeps an existing Town05 world, otherwise loads
+  # Town05_Opt. Start traffic generators after main.py when a switch is needed.
+  load_world_on_start: true
   synchronous_mode: false
 
 traffic:
