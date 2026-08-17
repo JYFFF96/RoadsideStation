@@ -26,8 +26,21 @@ class SelectedCameraSupportTest(unittest.TestCase):
         self.assertTrue(annotated[0]["selected_track_admission_camera_supported"])
         self.assertEqual("person", annotated[0]["selected_track_admission_camera_class"])
         self.assertEqual(.91, annotated[0]["selected_track_admission_camera_confidence"])
+        self.assertEqual("person",annotated[0]["selected_track_admission_camera_nearest_class"])
+        self.assertEqual(0.0,annotated[0]["selected_track_admission_camera_nearest_distance"])
         self.assertEqual({"held": 1, "visible": 1, "supported": 1,
                           "source": "detector"}, stats)
+
+    def test_nearest_box_is_recorded_outside_support_gate(self):
+        candidate={"x":0.0,"y":0.0,"z":1.0,"extent":[1.0,1.0,1.0]}
+        camera=CameraObject("CAM_01","car",.77,[170,93,184,107])
+        annotated,stats=annotate_selected_camera_support(
+            [candidate],_Projector(),[camera],200,200,
+            camera_source="detector",min_iou=.05,max_center_distance=20.0)
+        self.assertTrue(annotated[0]["selected_track_admission_camera_visible"])
+        self.assertFalse(annotated[0]["selected_track_admission_camera_supported"])
+        self.assertEqual("car",annotated[0]["selected_track_admission_camera_nearest_class"])
+        self.assertEqual(77.0,annotated[0]["selected_track_admission_camera_nearest_distance"])
 
     def test_no_projector_records_unsupported_source(self):
         annotated, stats = annotate_selected_camera_support(
