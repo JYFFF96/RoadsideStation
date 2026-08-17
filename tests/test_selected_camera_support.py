@@ -61,6 +61,12 @@ class SelectedCameraSupportTest(unittest.TestCase):
         self.assertFalse(selected_camera_rescue_passes(person, .05, 90.0))
         self.assertTrue(selected_camera_rescue_passes(person, .05, 100.0))
         self.assertFalse(selected_camera_rescue_passes(first_fp, .05, 100.0))
+        second_person = dict(person)
+        second_person["selected_track_admission_camera_center_distance"] = 104.18
+        first_fp["selected_track_admission_camera_center_distance"] = 108.90
+        self.assertTrue(selected_camera_rescue_passes(second_person, .05, 105.0))
+        self.assertFalse(selected_camera_rescue_passes(first_fp, .05, 105.0))
+        self.assertTrue(selected_camera_rescue_passes(first_fp, .05, 110.0))
 
 
 if __name__ == "__main__":
