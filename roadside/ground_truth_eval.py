@@ -4,6 +4,7 @@ import math
 
 from .object_taxonomy import carla_actor_class, iter_carla_road_actors, object_group
 from .selected_camera_support import selected_camera_rescue_passes
+from .selected_delayed_risk import selected_delayed_risk_gate_passes
 
 
 class GroundTruthEvaluator(object):
@@ -790,9 +791,53 @@ class GroundTruthEvaluator(object):
                 object_type = str(truth[truth_index].get(
                     "object_type", "unknown_obstacle"))
                 sample["_evaluation_object_type"] = object_type
+                if actor_id is not None:
+                    sample["_evaluation_actor_id"] = int(actor_id)
                 inc["truth_samples"].append(sample)
                 if actor_id is not None:inc["actors"][int(actor_id)] = object_type
         return True
+
+    def _selected_delayed_risk_rules(self):
+        configured = self.config.get(
+            "selected_delayed_reappearance_risk_gate_ablations", []) or []
+        return [dict(rule) for rule in configured if isinstance(rule, dict)]
+
+    def _selected_delayed_risk_ablations(self, source, expired_only,
+                                          expired_only_person):
+        truth_samples = list(source.get("truth_samples", []) or [])
+        fp_samples = list(source.get("fp_samples", []) or [])
+        result = {}
+        for index, configured in enumerate(self._selected_delayed_risk_rules()):
+            rule = dict(configured);name = str(rule.pop("name", "rule_%d" % index))
+            truth_kept = [sample for sample in truth_samples
+                          if selected_delayed_risk_gate_passes(sample, rule)]
+            fp_kept = [sample for sample in fp_samples
+                       if selected_delayed_risk_gate_passes(sample, rule)]
+            actor_classes = {}
+            for sample in truth_kept:
+                actor_id = sample.get("_evaluation_actor_id")
+                if actor_id is not None:
+                    actor_classes[int(actor_id)] = str(sample.get(
+                        "_evaluation_object_type", "unknown_obstacle"))
+            actors = set(actor_classes);rescued = actors & expired_only
+            candidates = len(truth_kept) + len(fp_kept)
+            result[name] = {
+                "rule": rule, "candidates": candidates,
+                "matched": len(truth_kept), "fp": len(fp_kept),
+                "precision": (float(len(truth_kept)) / candidates
+                              if candidates else None),
+                "truth_retention": (float(len(truth_kept)) / len(truth_samples)
+                                    if truth_samples else None),
+                "fp_rejection": (1.0 - float(len(fp_kept)) / len(fp_samples)
+                                 if fp_samples else None),
+                "actors": len(actors),
+                "classes": dict((class_name, sum(
+                    1 for value in actor_classes.values() if value == class_name))
+                    for class_name in set(actor_classes.values())),
+                "expired_only_actors_rescued": len(rescued),
+                "expired_only_person_actors_rescued": len(
+                    rescued & expired_only_person)}
+        return result
 
     def _selected_delayed_feature_profile(self, items):
         items = list(items or [])
@@ -882,6 +927,9 @@ class GroundTruthEvaluator(object):
             incremental["precision"] = (
                 float(incremental["matched"]) / incremental["candidates"]
                 if incremental["candidates"] else None)
+            incremental["risk_gate_ablations"] = (
+                self._selected_delayed_risk_ablations(
+                    inc_source, expired_only, expired_only_person))
             item["incremental"] = incremental
             report[name] = item
         return report

@@ -368,6 +368,12 @@ world and traffic are preserved. Otherwise `main.py` loads the configured
 switch removes CARLA actors, traffic and multi-class targets should be started
 after `main.py`.
 
+V0.6.12.8.2.2.32 adds sensor-only risk-gate ablations to the incremental
+delayed-reappearance profile. Strict, moderate, wide and slow sparse-geometry
+rules report precision, truth retention, false-positive rejection, class/actor
+coverage and final Expired-Only rescue. All gates remain evaluation-only and
+cannot alter Fusion or Tracker input. Town05 startup selection remains enabled.
+
 ## Current scope
 
 - Fixed roadside RGB camera

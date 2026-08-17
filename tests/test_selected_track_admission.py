@@ -4,6 +4,7 @@ import unittest
 
 from roadside.fusion import SimpleFusion
 from roadside.ground_truth_eval import GroundTruthEvaluator
+from roadside.selected_delayed_risk import selected_delayed_risk_gate_passes
 
 
 class SelectedTrackAdmissionTest(unittest.TestCase):
@@ -254,6 +255,54 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         result = evaluator._selected_delayed_reappearance_totals["long"]
         self.assertEqual(1, result["candidates"])
         self.assertEqual(0, result["incremental"]["candidates"])
+
+    def test_delayed_risk_gate_is_sensor_only_and_fails_closed(self):
+        item = self._selected();item.update({
+            "current_point_count": 3, "extent": [0.2, 0.3, 0.18],
+            "selected_delayed_reappearance_time_gap": 1.0,
+            "selected_delayed_reappearance_match_distance": 0.4,
+            "selected_delayed_reappearance_origin": {
+                "candidate_score": 0.30, "current_point_count": 2}})
+        rule = {"max_score": 0.35, "max_origin_score": 0.35,
+                "max_points": 3, "max_origin_points": 3,
+                "max_height": 0.20, "max_apparent_speed": 0.5}
+        self.assertTrue(selected_delayed_risk_gate_passes(item, rule))
+        high = dict(item);high["candidate_score"] = 0.50
+        self.assertFalse(selected_delayed_risk_gate_passes(high, rule))
+        missing = dict(item);missing.pop("extent")
+        self.assertFalse(selected_delayed_risk_gate_passes(missing, rule))
+
+    def test_delayed_risk_ablation_reports_actor_and_fp_rejection(self):
+        center = type("Center", (), {"x": 0.0, "y": 0.0})()
+        evaluator = GroundTruthEvaluator(None, lambda: center, {
+            "selected_track_admission_profiling": True,
+            "selected_delayed_reappearance_risk_gate_ablations": [{
+                "name":"strict", "max_score":.35, "max_origin_score":.35,
+                "max_points":3, "max_origin_points":3, "max_height":.2}]})
+        evaluator.truth_objects = lambda: [{
+            "actor_id": 22, "x": 10.0, "y": 0.0, "object_type":"person"}]
+        held = self._selected();held["selected_track_admission_pending_id"] = 72
+        evaluator.observe_selected_track_admission([held], [], [], frame_id=58)
+        expired = dict(held);expired["selected_track_admission_reason"] = "expired"
+        evaluator.observe_selected_track_admission([], [], [expired], frame_id=59)
+        truth_event = self._selected();truth_event.update({
+            "candidate_score":.3, "current_point_count":2,
+            "extent":[.2,.2,.15],
+            "selected_delayed_reappearance_time_gap":.8,
+            "selected_delayed_reappearance_match_distance":.2,
+            "selected_delayed_reappearance_origin":{
+                "candidate_score":.3,"current_point_count":2}})
+        fp_event = dict(truth_event);fp_event.update({"x":30.0,
+                                                     "candidate_score":.6})
+        evaluator.observe_selected_delayed_reappearance(
+            {"long":[truth_event, fp_event]}, [], frame_id=60)
+        gate = evaluator._selected_delayed_reappearance_report({
+            "expired_only":set([22])})["long"]["incremental"][
+                "risk_gate_ablations"]["strict"]
+        self.assertEqual((1, 1, 0), (gate["candidates"], gate["matched"],
+                                    gate["fp"]))
+        self.assertEqual(1, gate["expired_only_person_actors_rescued"])
+        self.assertEqual(1.0, gate["fp_rejection"])
 
 
 if __name__ == "__main__":

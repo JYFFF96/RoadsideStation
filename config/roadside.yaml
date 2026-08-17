@@ -432,6 +432,13 @@ evaluation:
   # V0.6.12.8.2.2.30: remove current-frame base confirmations from delayed
   # profiles before measuring incremental rescue risk.
   selected_delayed_reappearance_base_duplicate_gate: 0.05
+  # V0.6.12.8.2.2.32: sensor-only risk gates over incremental delayed events.
+  # Evaluation-only: these never filter Fusion or Tracker input.
+  selected_delayed_reappearance_risk_gate_ablations:
+    - {name: sparse_strict, max_score: 0.35, max_origin_score: 0.35, max_points: 3, max_origin_points: 3, max_height: 0.20}
+    - {name: sparse_moderate, max_score: 0.40, max_origin_score: 0.40, max_points: 4, max_origin_points: 4, max_height: 0.25}
+    - {name: sparse_wide, max_score: 0.45, max_origin_score: 0.45, max_points: 5, max_origin_points: 5, max_height: 0.40}
+    - {name: sparse_slow, max_score: 0.40, max_origin_score: 0.40, max_points: 4, max_origin_points: 4, max_height: 0.25, max_apparent_speed: 0.50}
   # V0.6.12.8.2.2.28: compare strong person-camera support rules and unique
   # Expired-Only actor rescue coverage. These are Shadow-only ablations.
   selected_track_admission_camera_rescue_ablations:
