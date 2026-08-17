@@ -13,6 +13,10 @@ class _Projector(object):
                 "v": 100.0 + float(y) * 10.0}
 
 
+class _RightProjector(object):
+    def project(self,x,y,z):return {"u":300.0,"v":100.0}
+
+
 class SelectedCameraSupportTest(unittest.TestCase):
     def test_visible_hold_gets_generic_camera_support_on_copy(self):
         original = {"x": 0.0, "y": 0.0, "z": 1.0,
@@ -48,6 +52,13 @@ class SelectedCameraSupportTest(unittest.TestCase):
         self.assertFalse(annotated[0]["selected_track_admission_camera_visible"])
         self.assertFalse(annotated[0]["selected_track_admission_camera_supported"])
         self.assertEqual(0, stats["visible"])
+
+    def test_offscreen_projection_reason_is_recorded(self):
+        candidate={"x":0.0,"y":0.0,"z":1.0,"extent":[1.0,1.0,1.0]}
+        annotated,stats=annotate_selected_camera_support(
+            [candidate],_RightProjector(),[],200,200,camera_source="detector")
+        self.assertFalse(annotated[0]["selected_track_admission_camera_visible"])
+        self.assertEqual("right",annotated[0]["selected_track_admission_camera_projection_rejection"])
 
     def test_strong_rescue_requires_person_and_close_or_overlapping_box(self):
         base = {"selected_track_admission_camera_supported": True,
