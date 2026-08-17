@@ -19,6 +19,7 @@ from roadside.selected_camera_support import annotate_selected_camera_support
 from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
+from roadside.v2x_events import V2XEventEngine,encode_v2x_event
 from roadside.map_selection import carla_map_short_name,town05_switch_target
 
 _STOP_REQUESTED=False
@@ -510,9 +511,9 @@ def main():
                      help="latest preserves legacy behavior; aligned selects the newest common Camera/LiDAR frame")
  args=parser.parse_args()
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
- config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
+ config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.47 Camera Projection-Rejection Attribution starting...")
+ print("RoadsideStation V0.6.12.8.2.2.48 V2X Event Foundation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -588,6 +589,7 @@ def main():
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
+ print("V2X Event Engine: %s | AVW + SLW | Dachuan-compatible JSON, vendor MQTT direction pending"%("enabled" if event_engine.enabled else "disabled"))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (opt-in benchmark)" if args.sensor_sync=="aligned" else " (legacy default)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
  last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
@@ -675,7 +677,11 @@ def main():
      for item in false_rejects[:max(0,limit)]:
       print("    truth=%s range=%.1fm reason=%s gate=%.2fm lateral=%s allowed=%s excess=%s overlap=%s margin=%s"%(item.get("actor_id"),float(item.get("truth_range",0.0)),item.get("reason"),float(item.get("candidate_distance",0.0)),_num(item.get("lateral")),_num(item.get("allowed_lateral")),_num(item.get("center_excess")),_num(item.get("bbox_overlap")),_num(item.get("roi_margin"))))
     last_eval=now
-   m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj);time.sleep(.05)
+   m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj)
+   ego_speed=(config.get("v2x_events",{}) or {}).get("test_ego_speed_kmh")
+   for event in event_engine.update(ol,{"speed_kmh":ego_speed} if ego_speed is not None else {}):
+    payload=encode_v2x_event(event);pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload);print("[V2X EVENT] %s"%payload)
+   time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
  finally:
   print("Stopping RoadsideStation sensors and MQTT...")
