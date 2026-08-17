@@ -199,7 +199,8 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "selected_camera_rescue_deployment_rule":"close",
             "selected_camera_rescue_required_source":"detector"})
         report = {"close":{
-            "expired_person_samples":38,"expired_person_samples_kept":16,
+            "expired_person_samples":38,"expired_person_visible_samples":16,
+            "expired_person_samples_kept":16,
             "expired_fp_samples":297,"expired_fp_samples_kept":3,
             "confirm_fp_samples":123,"confirm_fp_samples_kept":0,
             "expired_only_person_actors":3,
@@ -215,7 +216,8 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "selected_camera_rescue_deployment_rule":"close",
             "selected_camera_rescue_required_source":"detector"})
         report = {"close":{
-            "expired_person_samples":38,"expired_person_samples_kept":16,
+            "expired_person_samples":38,"expired_person_visible_samples":16,
+            "expired_person_samples_kept":16,
             "expired_fp_samples":297,"expired_fp_samples_kept":3,
             "confirm_fp_samples":123,"confirm_fp_samples_kept":0,
             "expired_only_person_actors":3,
@@ -233,6 +235,7 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "selected_camera_rescue_min_kept_person_samples":5})
         report = {"close":{
             "expired_person_samples":24,"expired_person_samples_kept":2,
+            "expired_person_visible_samples":2,
             "expired_fp_samples":267,"expired_fp_samples_kept":0,
             "confirm_fp_samples":93,"confirm_fp_samples_kept":0,
             "expired_only_person_actors":2,
@@ -240,7 +243,23 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
             "camera_sources":{"detector":2}}}
         verdict = evaluator._selected_camera_deployment_verdict(report)
         self.assertEqual("BLOCKED", verdict["status"])
-        self.assertEqual(["kept_person_samples"], verdict["reasons"])
+        self.assertEqual(["kept_person_samples", "visible_person_samples"], verdict["reasons"])
+
+    def test_camera_deployment_verdict_reports_opportunity_coverage(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_camera_rescue_deployment_verdict_shadow":True,
+            "selected_camera_rescue_deployment_rule":"close",
+            "selected_camera_rescue_required_source":"detector"})
+        report={"close":{
+            "expired_person_samples":20,"expired_person_visible_samples":1,
+            "expired_person_samples_kept":1,"expired_fp_samples":100,
+            "expired_fp_samples_kept":0,"confirm_fp_samples":50,
+            "confirm_fp_samples_kept":0,"expired_only_person_actors":1,
+            "expired_only_person_actors_rescued":1,"camera_sources":{"detector":1}}}
+        verdict=evaluator._selected_camera_deployment_verdict(report)
+        self.assertEqual(1,verdict["values"]["visible_person_samples"])
+        self.assertEqual(.05,verdict["values"]["person_opportunity_rate"])
+        self.assertIn("visible_person_samples",verdict["reasons"])
 
     def test_delayed_reappearance_confirms_after_base_ttl_only_in_shadow(self):
         fusion = SimpleFusion("test", {
