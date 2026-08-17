@@ -225,6 +225,23 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual("READY", verdict["status"])
         self.assertEqual([], verdict["reasons"])
 
+    def test_camera_deployment_verdict_requires_kept_person_evidence(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_camera_rescue_deployment_verdict_shadow":True,
+            "selected_camera_rescue_deployment_rule":"close",
+            "selected_camera_rescue_required_source":"detector",
+            "selected_camera_rescue_min_kept_person_samples":5})
+        report = {"close":{
+            "expired_person_samples":24,"expired_person_samples_kept":2,
+            "expired_fp_samples":267,"expired_fp_samples_kept":0,
+            "confirm_fp_samples":93,"confirm_fp_samples_kept":0,
+            "expired_only_person_actors":2,
+            "expired_only_person_actors_rescued":2,
+            "camera_sources":{"detector":2}}}
+        verdict = evaluator._selected_camera_deployment_verdict(report)
+        self.assertEqual("BLOCKED", verdict["status"])
+        self.assertEqual(["kept_person_samples"], verdict["reasons"])
+
     def test_delayed_reappearance_confirms_after_base_ttl_only_in_shadow(self):
         fusion = SimpleFusion("test", {
             "selected_track_admission_enabled": True,
