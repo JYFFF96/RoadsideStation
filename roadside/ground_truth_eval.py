@@ -1124,6 +1124,7 @@ class GroundTruthEvaluator(object):
         paths = {"near": 0, "far": 0, "strict": 0, "rescue": 0}
         camera = {"visible": 0, "supported": 0, "sources": {}, "classes": {}}
         camera_ious = [];camera_distances = [];camera_confidences = []
+        nearest_distances=[];nearest_ious=[];nearest_confidences=[];nearest_classes={}
         for item in items:
             value = item.get("selected_admission_shadow_score",
                              item.get("candidate_score"))
@@ -1140,6 +1141,16 @@ class GroundTruthEvaluator(object):
             camera["sources"][source] = int(camera["sources"].get(source, 0)) + 1
             if item.get("selected_track_admission_camera_visible", False):
                 camera["visible"] += 1
+            nearest_class=item.get("selected_track_admission_camera_nearest_class")
+            if nearest_class is not None:
+                nearest_class=str(nearest_class)
+                nearest_classes[nearest_class]=int(nearest_classes.get(nearest_class,0))+1
+            for values,key in (
+                    (nearest_distances,"selected_track_admission_camera_nearest_distance"),
+                    (nearest_ious,"selected_track_admission_camera_nearest_iou"),
+                    (nearest_confidences,"selected_track_admission_camera_nearest_confidence")):
+                try:values.append(float(item.get(key)))
+                except (TypeError,ValueError):pass
             if item.get("selected_track_admission_camera_supported", False):
                 camera["supported"] += 1
                 camera_class = str(item.get(
@@ -1167,6 +1178,10 @@ class GroundTruthEvaluator(object):
         camera["iou"] = self._distribution(camera_ious)
         camera["center_distance"] = self._distribution(camera_distances)
         camera["confidence"] = self._distribution(camera_confidences)
+        camera["nearest_distance"] = self._distribution(nearest_distances)
+        camera["nearest_iou"] = self._distribution(nearest_ious)
+        camera["nearest_confidence"] = self._distribution(nearest_confidences)
+        camera["nearest_classes"] = nearest_classes
         camera["rescue_ablations"] = dict(
             (rule["name"], sum(1 for item in items
              if selected_camera_rescue_passes(
