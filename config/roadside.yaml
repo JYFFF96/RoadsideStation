@@ -444,6 +444,16 @@ evaluation:
     - {name: sparse_moderate, max_score: 0.40, max_origin_score: 0.40, max_points: 4, max_origin_points: 4, max_height: 0.25}
     - {name: sparse_wide, max_score: 0.45, max_origin_score: 0.45, max_points: 5, max_origin_points: 5, max_height: 0.40}
     - {name: sparse_slow, max_score: 0.40, max_origin_score: 0.40, max_points: 4, max_origin_points: 4, max_height: 0.25, max_apparent_speed: 0.50}
+  # V0.6.12.8.2.2.34: prevent a single optimistic run from promoting a delayed
+  # policy. This evaluator-only verdict never changes Tracker/Fusion/ObjectList.
+  selected_delayed_reappearance_deployment_verdict_shadow: true
+  selected_delayed_reappearance_deployment_rule: ttl075_gate25
+  selected_delayed_reappearance_deployment_risk_gate: sparse_slow
+  selected_delayed_deployment_min_candidates: 20
+  selected_delayed_deployment_min_precision: 0.85
+  selected_delayed_deployment_min_truth_retention: 0.60
+  selected_delayed_deployment_min_expired_only_actors: 1
+  selected_delayed_deployment_min_expired_only_person_actors: 1
   # V0.6.12.8.2.2.28: compare strong person-camera support rules and unique
   # Expired-Only actor rescue coverage. These are Shadow-only ablations.
   selected_track_admission_camera_rescue_ablations:

@@ -722,6 +722,8 @@ class GroundTruthEvaluator(object):
                 for name, items in sorted(buckets.items()))
         camera_rescue = self._selected_camera_rescue_shadow(outcome_sets)
         delayed_reappearance = self._selected_delayed_reappearance_report(outcome_sets)
+        delayed_deployment = self._selected_delayed_deployment_verdict(
+            delayed_reappearance)
         return {"enabled": True,
                 "frames": int(self._selected_track_admission_totals["frames"]),
                 "frame": dict(self._selected_track_admission_frame), "run": run,
@@ -730,9 +732,57 @@ class GroundTruthEvaluator(object):
                 "outcome_features": outcome_features,
                 "camera_rescue_shadow": camera_rescue,
                 "delayed_reappearance_shadow": delayed_reappearance,
+                "delayed_reappearance_deployment_verdict": delayed_deployment,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
+
+    def _selected_delayed_deployment_verdict(self, delayed_report):
+        """Gate any future enforcement on cumulative evaluator evidence."""
+        if not self.config.get(
+                "selected_delayed_reappearance_deployment_verdict_shadow", False):
+            return {"enabled": False}
+        rule_name = str(self.config.get(
+            "selected_delayed_reappearance_deployment_rule", ""))
+        gate_name = str(self.config.get(
+            "selected_delayed_reappearance_deployment_risk_gate", ""))
+        delayed = (delayed_report or {}).get(rule_name, {}) or {}
+        incremental = delayed.get("incremental", {}) or {}
+        gate = (incremental.get("risk_gate_ablations", {}) or {}).get(
+            gate_name, {}) or {}
+        criteria = {
+            "min_candidates": int(self.config.get(
+                "selected_delayed_deployment_min_candidates", 20)),
+            "min_precision": float(self.config.get(
+                "selected_delayed_deployment_min_precision", .85)),
+            "min_truth_retention": float(self.config.get(
+                "selected_delayed_deployment_min_truth_retention", .60)),
+            "min_expired_only_actors_rescued": int(self.config.get(
+                "selected_delayed_deployment_min_expired_only_actors", 1)),
+            "min_expired_only_person_actors_rescued": int(self.config.get(
+                "selected_delayed_deployment_min_expired_only_person_actors", 1))}
+        values = {
+            "candidates": int(gate.get("candidates", 0)),
+            "precision": gate.get("precision"),
+            "truth_retention": gate.get("truth_retention"),
+            "expired_only_actors_rescued": int(gate.get(
+                "expired_only_actors_rescued", 0)),
+            "expired_only_person_actors_rescued": int(gate.get(
+                "expired_only_person_actors_rescued", 0))}
+        reasons = []
+        if values["candidates"] < criteria["min_candidates"]:
+            reasons.append("samples")
+        for name in ("precision", "truth_retention"):
+            value = values[name]
+            if value is None or float(value) < criteria["min_" + name]:
+                reasons.append(name)
+        for name in ("expired_only_actors_rescued",
+                     "expired_only_person_actors_rescued"):
+            if values[name] < criteria["min_" + name]:reasons.append(name)
+        return {"enabled": True, "status": "READY" if not reasons else "BLOCKED",
+                "rule": rule_name, "risk_gate": gate_name,
+                "values": values, "criteria": criteria, "reasons": reasons,
+                "evaluation_only": True}
 
     def observe_selected_delayed_reappearance(self, rule_candidates,
                                                base_admitted_candidates=None,

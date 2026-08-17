@@ -335,6 +335,40 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(1, gate["expired_only_person_actors_rescued"])
         self.assertEqual(1.0, gate["fp_rejection"])
 
+    def test_delayed_deployment_verdict_blocks_incomplete_evidence(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_delayed_reappearance_deployment_verdict_shadow":True,
+            "selected_delayed_reappearance_deployment_rule":"short",
+            "selected_delayed_reappearance_deployment_risk_gate":"slow",
+            "selected_delayed_deployment_min_candidates":20,
+            "selected_delayed_deployment_min_precision":.85,
+            "selected_delayed_deployment_min_truth_retention":.60,
+            "selected_delayed_deployment_min_expired_only_actors":1,
+            "selected_delayed_deployment_min_expired_only_person_actors":1})
+        report = {"short":{"incremental":{"risk_gate_ablations":{"slow":{
+            "candidates":7,"precision":4.0/7.0,"truth_retention":.308,
+            "expired_only_actors_rescued":0,
+            "expired_only_person_actors_rescued":0}}}}}
+        verdict = evaluator._selected_delayed_deployment_verdict(report)
+        self.assertEqual("BLOCKED", verdict["status"])
+        self.assertEqual(["samples", "precision", "truth_retention",
+                          "expired_only_actors_rescued",
+                          "expired_only_person_actors_rescued"],
+                         verdict["reasons"])
+
+    def test_delayed_deployment_verdict_ready_only_when_all_criteria_pass(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_delayed_reappearance_deployment_verdict_shadow":True,
+            "selected_delayed_reappearance_deployment_rule":"short",
+            "selected_delayed_reappearance_deployment_risk_gate":"slow"})
+        report = {"short":{"incremental":{"risk_gate_ablations":{"slow":{
+            "candidates":25,"precision":.92,"truth_retention":.70,
+            "expired_only_actors_rescued":2,
+            "expired_only_person_actors_rescued":1}}}}}
+        verdict = evaluator._selected_delayed_deployment_verdict(report)
+        self.assertEqual("READY", verdict["status"])
+        self.assertEqual([], verdict["reasons"])
+
 
 if __name__ == "__main__":
     unittest.main()

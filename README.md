@@ -382,6 +382,13 @@ apparent speed <= 0.50m/s). Each LiDAR frame now reports `WouldKeep` and
 unchanged. The other delayed windows and risk gates remain parallel evaluator
 ablations so subsequent runs can verify that the selection is stable.
 
+V0.6.12.8.2.2.34 adds an evaluator-only deployment verdict for the selected
+delayed policy. `ttl075_gate25/sparse_slow` is reported as `READY` only after
+meeting all configured evidence requirements: at least 20 gated candidates,
+85% precision, 60% truth retention, and at least one rescued Expired-Only actor
+and pedestrian. Otherwise the log reports `BLOCKED` with exact reasons. The
+verdict cannot enable enforcement or alter Tracker, Fusion, ObjectList or RSM.
+
 ## Current scope
 
 - Fixed roadside RGB camera
