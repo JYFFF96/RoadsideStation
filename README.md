@@ -445,6 +445,13 @@ second. This is a diagnostic-only shadow for the slow-walker regression: the
 cache still exposes the latest frame from each sensor, and no synchronization,
 projection, association, Tracker, Fusion, ObjectList or RSM behavior changes.
 
+V0.6.12.8.2.2.43 adds a bounded sensor history and an opt-in timestamp-aligned
+benchmark snapshot. Legacy behavior remains the default. Run the same slow
+walker case with `python3.7 main.py --camera-source detector --camera-model
+models/yolov5n.onnx --sensor-sync aligned`; the runtime selects the newest exact
+Camera/LiDAR frame pair and the nearest-timestamp Radar sample. Compare it with
+`--sensor-sync latest` before changing any default perception behavior.
+
 ## Current scope
 
 - Fixed roadside RGB camera
