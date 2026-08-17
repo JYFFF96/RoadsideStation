@@ -157,7 +157,7 @@ def spawn_obstacles(world, world_map, center, count, rng):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.46 camera opportunity targets")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.47 projection attribution targets")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
@@ -171,7 +171,7 @@ def main():
     world,world_map,center=junction_center(client,config)
     walkers,movements=spawn_walkers(world,world_map,center,max(0,args.walkers),rng,args.walker_mode,max(.1,args.walker_speed),max(0.0,args.walker_launch_interval))
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
-    print("V0.6.12.8.2.2.46 targets active: seed=%d walkers=%d road_obstacles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),args.walker_mode,args.walker_launch_interval))
+    print("V0.6.12.8.2.2.47 targets active: seed=%d walkers=%d road_obstacles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
     for label,items in (("walker",walkers),("obstacle",obstacles)):
         for actor in items:
@@ -199,7 +199,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.46 test targets removed.")
+        print("V0.6.12.8.2.2.47 test targets removed.")
 
 
 if __name__=="__main__":main()
