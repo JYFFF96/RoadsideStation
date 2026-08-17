@@ -3,7 +3,7 @@ from __future__ import print_function
 import math
 
 from .camera_lidar_association import associate_camera_to_lidar
-from .lidar_projection import project_lidar_tracks
+from .lidar_projection import project_lidar_tracks_with_diagnostics
 
 
 def _camera_value(camera_object, name, default=None):
@@ -58,7 +58,10 @@ def annotate_selected_camera_support(candidates, projector, camera_objects,
     if projector is None or not annotated:
         return annotated, stats
 
-    projected = project_lidar_tracks(projector, annotated, width, height)
+    projected,rejections = project_lidar_tracks_with_diagnostics(
+        projector, annotated, width, height)
+    for source_index,reason in rejections.items():
+        annotated[int(source_index)]["selected_track_admission_camera_projection_rejection"]=str(reason)
     for item in projected:
         source_index = int(item["source_index"])
         annotated[source_index]["selected_track_admission_camera_visible"] = True
