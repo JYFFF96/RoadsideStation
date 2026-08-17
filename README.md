@@ -459,6 +459,12 @@ when the nearest box lies outside the association gate. This distinguishes a
 projection-offset problem from missing or misclassified person detections; it
 does not change association, admission, Tracker, Fusion, ObjectList or RSM.
 
+V0.6.12.8.2.2.45 hardens the evaluator-only camera-rescue deployment verdict
+with a separate evidence floor for Person samples actually kept by the selected
+rule. Total expired Person observations can no longer produce READY when only
+two camera-positive samples determine precision. The default floor is five;
+camera association and every production output remain unchanged.
+
 ## Current scope
 
 - Fixed roadside RGB camera
