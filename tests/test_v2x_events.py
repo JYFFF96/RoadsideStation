@@ -1,0 +1,39 @@
+from __future__ import print_function
+import json
+import unittest
+
+from roadside.models import DetectedObject,ObjectList
+from roadside.v2x_events import V2XEventEngine,encode_v2x_event
+
+
+class V2XEventTest(unittest.TestCase):
+    def test_avw_requires_vehicle_dwell_and_uses_manual_fields(self):
+        engine=V2XEventEngine("RSU_001",{"enabled":True,"cooldown_seconds":5,
+            "avw":{"enabled":True,"dwell_seconds":3,"max_stationary_speed_mps":.5},
+            "slw":{"enabled":False}})
+        obj=DetectedObject("vehicle_1",1,2,vx=.1,object_type="vehicle")
+        self.assertEqual([],engine.update(ObjectList("RSU_001",[obj],100.0)))
+        events=engine.update(ObjectList("RSU_001",[obj],103.0))
+        self.assertEqual(1,len(events));data=events[0]["data"]
+        self.assertEqual(("AVW",6,"RSU_001"),(data["category"],data["event_sort"],data["sid"]))
+        self.assertEqual("vehicle_1",data["object_id"])
+        self.assertEqual("event",json.loads(encode_v2x_event(events[0]))["type"])
+
+    def test_moving_vehicle_resets_avw_dwell(self):
+        engine=V2XEventEngine("R",{"enabled":True,"avw":{"dwell_seconds":2},
+                                    "slw":{"enabled":False}})
+        stopped=DetectedObject("v",0,0,object_type="vehicle")
+        moving=DetectedObject("v",0,0,vx=2,object_type="vehicle")
+        engine.update(ObjectList("R",[stopped],1));engine.update(ObjectList("R",[moving],2))
+        self.assertEqual([],engine.update(ObjectList("R",[stopped],3)))
+
+    def test_slw_marks_overspeed(self):
+        engine=V2XEventEngine("R",{"enabled":True,"avw":{"enabled":False},
+            "slw":{"enabled":True,"speed_limit_kmh":40}})
+        event=engine.update(ObjectList("R",[],10),{"speed_kmh":51})[0]
+        self.assertEqual("SLW",event["data"]["category"])
+        self.assertEqual(9,event["data"]["event_sort"])
+        self.assertEqual(2,event["data"]["spd_Flag"])
+
+
+if __name__=="__main__":unittest.main()
