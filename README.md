@@ -418,6 +418,13 @@ support near 87--95px while the first supported false positives were near
 evaluation-only: the selected deployment rule stays `iou05_or_d30`, and no
 Tracker, Fusion, ObjectList or RSM behavior changes.
 
+V0.6.12.8.2.2.39 refines the detector distance calibration with 105px and
+110px shadows. The second detector run placed true person support at
+104.09--104.18px and the first false-positive support at 108.90px. The 105px
+rule tests the narrow separating boundary; 110px is an explicit spillover
+control. Both remain evaluation-only and the selected deployment rule remains
+`iou05_or_d30`.
+
 ## Current scope
 
 - Fixed roadside RGB camera
