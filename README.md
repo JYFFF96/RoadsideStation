@@ -397,6 +397,14 @@ evidence source to be `detector`; CARLA truth results remain `BLOCKED` even when
 all numeric thresholds pass. The verdict is evaluator-only and cannot alter the
 runtime perception, tracking, fusion, ObjectList or RSM path.
 
+V0.6.12.8.2.2.36 adds an explicit real-detector validation entry. Run
+`tools/check_camera_detector.py` to verify the configured ONNX file and OpenCV
+DNN loader without starting CARLA. `main.py` now accepts `--camera-source` and
+`--camera-model`, allowing a detector benchmark without editing YAML. Detector
+startup failure falls back to `none`, never to CARLA truth. All camera-rescue
+decisions remain evaluator-only and cannot alter Tracker, Fusion, ObjectList or
+RSM.
+
 ## Current scope
 
 - Fixed roadside RGB camera

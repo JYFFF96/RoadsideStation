@@ -1,5 +1,5 @@
 from __future__ import print_function
-import signal,sys,time,yaml,math
+import argparse,signal,sys,time,yaml,math
 import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
@@ -10,6 +10,7 @@ from roadside.far_geometry_builder import build_far_geometry_candidates
 from roadside.camera_fusion import CameraProjector
 from roadside.camera_lidar_association import associate_camera_to_lidar
 from roadside.camera_detector import create_camera_detector
+from roadside.camera_runtime_config import apply_camera_runtime_overrides
 from roadside.camera_objects import CameraObjectList
 from roadside.fused_objects import build_fused_object_list
 from roadside.ground_truth_eval import GroundTruthEvaluator
@@ -493,10 +494,14 @@ def _print_far_geometry():
 
 def main():
  global _STOP_REQUESTED
+ parser=argparse.ArgumentParser(description="RoadsideStation runtime")
+ parser.add_argument("--config",default="config/roadside.yaml")
+ parser.add_argument("--camera-source",choices=["none","carla_truth","detector"],default=None)
+ parser.add_argument("--camera-model",default=None);args=parser.parse_args()
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
- config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
+ config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.35 Camera-Rescue Deployment Verdict Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.36 Detector Validation Entry starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -550,9 +555,9 @@ def main():
  camera_detector=None;camera_detection_frame=None;camera_detection_objects=[]
  if camera_source=="detector" and config.get("camera_detection",{}).get("enabled",True):
   try:
-   camera_detector=create_camera_detector(config.get("camera_detection",{}));print("Camera detector active in fusion loop: %s"%camera_detector.name)
+   camera_detector=create_camera_detector(config.get("camera_detection",{}));print("Camera detector active in fusion loop: %s model=%s"%(camera_detector.name,config.get("camera_detection",{}).get("model","-")))
   except Exception as exc:
-   print("WARNING: camera detector unavailable; camera classification disabled: %s"%exc);camera_source="none"
+   print("WARNING: camera detector unavailable; camera classification disabled (no truth fallback): %s"%exc);camera_source="none"
  evaluator=None
  if eval_cfg.get("enabled",True):
   def eval_center():
