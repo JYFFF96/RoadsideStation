@@ -452,6 +452,13 @@ models/yolov5n.onnx --sensor-sync aligned`; the runtime selects the newest exact
 Camera/LiDAR frame pair and the nearest-timestamp Radar sample. Compare it with
 `--sensor-sync latest` before changing any default perception behavior.
 
+V0.6.12.8.2.2.44 keeps the aligned benchmark behavior and adds evaluator-only
+nearest-camera-box attribution for every visible Selected HOLD candidate. The
+report includes distance, IoU, confidence and detector-class distributions even
+when the nearest box lies outside the association gate. This distinguishes a
+projection-offset problem from missing or misclassified person detections; it
+does not change association, admission, Tracker, Fusion, ObjectList or RSM.
+
 ## Current scope
 
 - Fixed roadside RGB camera
