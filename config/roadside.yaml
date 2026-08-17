@@ -34,7 +34,7 @@ camera:
 
 camera_detection:
   enabled: true
-  backend: yolov5_onnx_opencv
+  backend: yolov5_onnx_auto
   model: models/yolov5n.onnx
   input_size: 640
   confidence: 0.35
