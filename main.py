@@ -334,6 +334,9 @@ def _print_selected_track_admission_profile(report):
     _num(camera_dist.get("p50")),_num(camera_dist.get("p90")),
     _num(camera_conf.get("p50")),_num(camera_conf.get("p90")),camera.get("sources",{}),
     camera.get("classes",{}),value.get("paths",{}),value.get("cluster_modes",{})))
+   nearest_dist=camera.get("nearest_distance",{}) or {};nearest_iou=camera.get("nearest_iou",{}) or {};nearest_conf=camera.get("nearest_confidence",{}) or {}
+   print("      [SELECTED CAMERA NEAREST %s %s] Dist(p10/p50/p90):%s/%s/%s IoU(p50/p90):%s/%s Conf(p50/p90):%s/%s Classes:%s | diagnostic-only, outside-gate boxes included"%(
+    decision.upper(),name,_num(nearest_dist.get("p10")),_num(nearest_dist.get("p50")),_num(nearest_dist.get("p90")),_num(nearest_iou.get("p50")),_num(nearest_iou.get("p90")),_num(nearest_conf.get("p50")),_num(nearest_conf.get("p90")),camera.get("nearest_classes",{})))
    print("      [SELECTED CAMERA RESCUE ABLATION %s %s] %s"%(
     decision.upper(),name,camera.get("rescue_ablations",{})))
  for name,value in sorted((report.get("camera_rescue_shadow",{}) or {}).items()):
@@ -504,7 +507,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.43 Timestamp-Aligned Snapshot Benchmark starting...")
+ print("RoadsideStation V0.6.12.8.2.2.44 Selected Camera Nearest-Box Attribution starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
