@@ -432,6 +432,13 @@ expired and a confirmed false positive without rescuing another person. The
 candidate still cannot affect Tracker, Fusion, ObjectList or RSM; it must meet
 all verdict thresholds, including 50% Expired-Only person actor coverage.
 
+V0.6.12.8.2.2.41 adds a deterministic static-walker benchmark mode to
+`tools/spawn_multiclass_targets.py`. With `--walker-mode static`, pedestrian
+actors are spawned at the same seeded crosswalk locations but receive no AI
+controller and no `WalkerControl`, isolating detector projection and
+camera/LiDAR association from motion and cross-frame timing. Manual and AI
+moving modes remain available and unchanged.
+
 ## Current scope
 
 - Fixed roadside RGB camera
