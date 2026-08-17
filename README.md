@@ -477,6 +477,14 @@ separate Person and false-positive rejection directions, showing whether low
 camera opportunity is expected field-of-view coverage or a projection defect.
 The diagnostic path cannot create camera support or alter runtime output.
 
+V0.6.12.8.2.2.48 starts the first deliverable V2X event layer. A standalone
+`V2XEventEngine` consumes ObjectList without entering Fusion and emits Dachuan
+event2hmi-compatible JSON for abnormal stopped vehicles (`AVW`, event_sort 6)
+and speed-limit/overspeed warnings (`SLW`, event_sort 9). AVW uses configurable
+speed, dwell and cooldown thresholds. SLW waits for an explicit ego-speed input;
+`test_ego_speed_kmh` exists only for bench validation. The MQTT event topic is
+configurable and must be confirmed with Dachuan before device-side deployment.
+
 ## Current scope
 
 - Fixed roadside RGB camera
