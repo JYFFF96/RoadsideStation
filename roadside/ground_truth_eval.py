@@ -721,6 +721,8 @@ class GroundTruthEvaluator(object):
                 (name, self._selected_outcome_feature_profile(items))
                 for name, items in sorted(buckets.items()))
         camera_rescue = self._selected_camera_rescue_shadow(outcome_sets)
+        camera_deployment = self._selected_camera_deployment_verdict(
+            camera_rescue)
         delayed_reappearance = self._selected_delayed_reappearance_report(outcome_sets)
         delayed_deployment = self._selected_delayed_deployment_verdict(
             delayed_reappearance)
@@ -731,11 +733,68 @@ class GroundTruthEvaluator(object):
                 "actor_outcomes": outcomes,
                 "outcome_features": outcome_features,
                 "camera_rescue_shadow": camera_rescue,
+                "camera_rescue_deployment_verdict": camera_deployment,
                 "delayed_reappearance_shadow": delayed_reappearance,
                 "delayed_reappearance_deployment_verdict": delayed_deployment,
                 "transitions": dict((name, dict(value)) for name, value in
                                     self._selected_track_admission_totals["transitions"].items()),
                 "pending_origins": len(self._selected_track_admission_totals["pending_origins"])}
+
+    def _selected_camera_deployment_verdict(self, camera_report):
+        """Require real-detector evidence before camera rescue can be promoted."""
+        if not self.config.get(
+                "selected_camera_rescue_deployment_verdict_shadow", False):
+            return {"enabled": False}
+        rule_name = str(self.config.get(
+            "selected_camera_rescue_deployment_rule", ""))
+        value = (camera_report or {}).get(rule_name, {}) or {}
+        kept_person = int(value.get("expired_person_samples_kept", 0))
+        kept_fp = int(value.get("expired_fp_samples_kept", 0))
+        expired_fp = int(value.get("expired_fp_samples", 0))
+        confirm_fp = int(value.get("confirm_fp_samples", 0))
+        rescued = int(value.get("expired_only_person_actors_rescued", 0))
+        expired_only = int(value.get("expired_only_person_actors", 0))
+        sources = dict(value.get("camera_sources", {}) or {})
+        required_source = str(self.config.get(
+            "selected_camera_rescue_required_source", "detector"))
+        values = {
+            "expired_person_samples": int(value.get(
+                "expired_person_samples", 0)),
+            "kept_precision": (float(kept_person) / (kept_person + kept_fp)
+                               if kept_person + kept_fp else None),
+            "expired_fp_rejection": (1.0 - float(kept_fp) / expired_fp
+                                     if expired_fp else None),
+            "expired_only_person_actor_coverage": (
+                float(rescued) / expired_only if expired_only else None),
+            "confirm_fp_rejection": (1.0 - float(value.get(
+                "confirm_fp_samples_kept", 0)) / confirm_fp
+                if confirm_fp else None),
+            "camera_sources": sources}
+        criteria = {
+            "min_expired_person_samples": int(self.config.get(
+                "selected_camera_rescue_min_expired_person_samples", 20)),
+            "min_kept_precision": float(self.config.get(
+                "selected_camera_rescue_min_kept_precision", .80)),
+            "min_expired_fp_rejection": float(self.config.get(
+                "selected_camera_rescue_min_expired_fp_rejection", .98)),
+            "min_expired_only_person_actor_coverage": float(self.config.get(
+                "selected_camera_rescue_min_person_actor_coverage", .50)),
+            "min_confirm_fp_rejection": float(self.config.get(
+                "selected_camera_rescue_min_confirm_fp_rejection", .99)),
+            "required_source": required_source}
+        reasons = []
+        if values["expired_person_samples"] < criteria[
+                "min_expired_person_samples"]:reasons.append("samples")
+        for name in ("kept_precision", "expired_fp_rejection",
+                     "expired_only_person_actor_coverage",
+                     "confirm_fp_rejection"):
+            current = values[name]
+            if current is None or float(current) < criteria["min_" + name]:
+                reasons.append(name)
+        if sources.get(required_source, 0) <= 0:reasons.append("camera_source")
+        return {"enabled": True, "status": "READY" if not reasons else "BLOCKED",
+                "rule": rule_name, "values": values, "criteria": criteria,
+                "reasons": reasons, "evaluation_only": True}
 
     def _selected_delayed_deployment_verdict(self, delayed_report):
         """Gate any future enforcement on cumulative evaluator evidence."""
@@ -1024,8 +1083,18 @@ class GroundTruthEvaluator(object):
             expired_fp = list(expired.get("false_positive", []))
             confirm_person = list(confirmed.get("person", []))
             confirm_fp = list(confirmed.get("false_positive", []))
+            kept_expired_person = kept(expired_person)
+            kept_expired_fp = kept(expired_fp)
+            kept_confirm_person = kept(confirm_person)
+            kept_confirm_fp = kept(confirm_fp)
+            camera_sources = {}
+            for item in (kept_expired_person + kept_expired_fp +
+                         kept_confirm_person + kept_confirm_fp):
+                source = str(item.get(
+                    "selected_track_admission_camera_source", "unknown"))
+                camera_sources[source] = int(camera_sources.get(source, 0)) + 1
             rescued_actor_ids = set(
-                item.get("_evaluation_actor_id") for item in kept(expired_person)
+                item.get("_evaluation_actor_id") for item in kept_expired_person
                 if item.get("_evaluation_actor_id") in expired_only)
             result[rule["name"]] = {
                 "min_iou": rule["min_iou"],
@@ -1037,13 +1106,14 @@ class GroundTruthEvaluator(object):
                 "expired_only_person_actors_rescued": len(
                     rescued_actor_ids & expired_only_person),
                 "expired_person_samples": len(expired_person),
-                "expired_person_samples_kept": len(kept(expired_person)),
+                "expired_person_samples_kept": len(kept_expired_person),
                 "expired_fp_samples": len(expired_fp),
-                "expired_fp_samples_kept": len(kept(expired_fp)),
+                "expired_fp_samples_kept": len(kept_expired_fp),
                 "confirm_person_samples": len(confirm_person),
-                "confirm_person_samples_kept": len(kept(confirm_person)),
+                "confirm_person_samples_kept": len(kept_confirm_person),
                 "confirm_fp_samples": len(confirm_fp),
-                "confirm_fp_samples_kept": len(kept(confirm_fp)),
+                "confirm_fp_samples_kept": len(kept_confirm_fp),
+                "camera_sources": camera_sources,
             }
         return result
 

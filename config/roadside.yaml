@@ -460,6 +460,17 @@ evaluation:
     - {name: iou05_or_d30, min_iou: 0.05, max_center_distance: 30.0, allowed_classes: [person, pedestrian]}
     - {name: iou05_or_d45, min_iou: 0.05, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
     - {name: iou10_or_d45, min_iou: 0.10, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
+  # V0.6.12.8.2.2.35: promote camera rescue only after the same scalar rule is
+  # validated with the real detector source. CARLA truth may prove simulation
+  # potential but must produce BLOCKED(camera_source).
+  selected_camera_rescue_deployment_verdict_shadow: true
+  selected_camera_rescue_deployment_rule: iou05_or_d30
+  selected_camera_rescue_required_source: detector
+  selected_camera_rescue_min_expired_person_samples: 20
+  selected_camera_rescue_min_kept_precision: 0.80
+  selected_camera_rescue_min_expired_fp_rejection: 0.98
+  selected_camera_rescue_min_person_actor_coverage: 0.50
+  selected_camera_rescue_min_confirm_fp_rejection: 0.99
   # V0.6.12.8.2.2.14: parallel Shadow gates; no candidate is filtered.
   road_object_rescue_near_area_ablations: [0.02, 0.04, 0.06, 0.08]
   road_object_rescue_far_range_ablations: [26.0, 28.0, 30.0, 32.0]

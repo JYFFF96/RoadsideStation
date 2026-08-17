@@ -389,6 +389,14 @@ meeting all configured evidence requirements: at least 20 gated candidates,
 and pedestrian. Otherwise the log reports `BLOCKED` with exact reasons. The
 verdict cannot enable enforcement or alter Tracker, Fusion, ObjectList or RSM.
 
+V0.6.12.8.2.2.35 adds a separate deployment verdict for the selected camera
+rescue rule `iou05_or_d30`. It measures expired-person sample count, kept-sample
+precision, expired false-positive rejection, Expired-Only person actor coverage
+and confirm false-positive rejection. A sixth mandatory condition requires the
+evidence source to be `detector`; CARLA truth results remain `BLOCKED` even when
+all numeric thresholds pass. The verdict is evaluator-only and cannot alter the
+runtime perception, tracking, fusion, ObjectList or RSM path.
+
 ## Current scope
 
 - Fixed roadside RGB camera

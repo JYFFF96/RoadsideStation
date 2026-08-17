@@ -193,6 +193,38 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertEqual(1, result["expired_only_actors_rescued"])
         self.assertEqual(1, result["expired_only_person_actors_rescued"])
 
+    def test_camera_deployment_verdict_blocks_carla_truth(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_camera_rescue_deployment_verdict_shadow":True,
+            "selected_camera_rescue_deployment_rule":"close",
+            "selected_camera_rescue_required_source":"detector"})
+        report = {"close":{
+            "expired_person_samples":38,"expired_person_samples_kept":16,
+            "expired_fp_samples":297,"expired_fp_samples_kept":3,
+            "confirm_fp_samples":123,"confirm_fp_samples_kept":0,
+            "expired_only_person_actors":3,
+            "expired_only_person_actors_rescued":2,
+            "camera_sources":{"carla_truth":21}}}
+        verdict = evaluator._selected_camera_deployment_verdict(report)
+        self.assertEqual("BLOCKED", verdict["status"])
+        self.assertEqual(["camera_source"], verdict["reasons"])
+
+    def test_camera_deployment_verdict_ready_with_detector_evidence(self):
+        evaluator = GroundTruthEvaluator(None, lambda: None, {
+            "selected_camera_rescue_deployment_verdict_shadow":True,
+            "selected_camera_rescue_deployment_rule":"close",
+            "selected_camera_rescue_required_source":"detector"})
+        report = {"close":{
+            "expired_person_samples":38,"expired_person_samples_kept":16,
+            "expired_fp_samples":297,"expired_fp_samples_kept":3,
+            "confirm_fp_samples":123,"confirm_fp_samples_kept":0,
+            "expired_only_person_actors":3,
+            "expired_only_person_actors_rescued":2,
+            "camera_sources":{"detector":21}}}
+        verdict = evaluator._selected_camera_deployment_verdict(report)
+        self.assertEqual("READY", verdict["status"])
+        self.assertEqual([], verdict["reasons"])
+
     def test_delayed_reappearance_confirms_after_base_ttl_only_in_shadow(self):
         fusion = SimpleFusion("test", {
             "selected_track_admission_enabled": True,
