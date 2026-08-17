@@ -1,8 +1,8 @@
-__version__ = "0.6.12.8.2.2.42"
+__version__ = "0.6.12.8.2.2.43"
 
 from .track_stale_cleanup import install_stale_cleanup_patch
 from .far_geometry_stability import install_far_geometry_stability_patch
 
 install_stale_cleanup_patch()
 install_far_geometry_stability_patch()
-print("RoadsideStation V0.6.12.8.2.2.42 Sensor Timestamp Skew Shadow active")
+print("RoadsideStation V0.6.12.8.2.2.43 Timestamp-Aligned Snapshot Benchmark active")
