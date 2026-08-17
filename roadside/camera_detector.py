@@ -28,7 +28,7 @@ class NullCameraDetector(CameraDetector):
 
 
 class YoloV5OnnxDetector(CameraDetector):
-    name = "yolov5_onnx_opencv"
+    name = "yolov5_onnx_auto"
 
     def __init__(self, model_path, input_size=640, confidence=0.35, nms=0.45):
         if not os.path.exists(model_path):
@@ -37,13 +37,38 @@ class YoloV5OnnxDetector(CameraDetector):
         self.input_size = int(input_size)
         self.confidence = float(confidence)
         self.nms = float(nms)
-        self.net = cv2.dnn.readNetFromONNX(model_path)
+        self.net = None
+        self.session = None
+        self.input_name = None
+        self.runtime = None
+        opencv_error = None
+        try:
+            self.net = cv2.dnn.readNetFromONNX(model_path)
+            self.runtime = "opencv"
+        except Exception as exc:
+            opencv_error = exc
+        if self.net is None:
+            try:
+                import onnxruntime as ort
+                self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+                self.input_name = self.session.get_inputs()[0].name
+                self.runtime = "onnxruntime"
+            except Exception as exc:
+                raise RuntimeError(
+                    "OpenCV DNN rejected this ONNX model (%s). ONNX Runtime fallback also failed (%s). "
+                    "For Python 3.7 install it with: python3.7 -m pip install onnxruntime==1.14.1"
+                    % (opencv_error, exc)
+                )
+        self.name = "yolov5_onnx_%s" % self.runtime
 
     def detect(self, bgr):
         h, w = bgr.shape[:2]
         blob = cv2.dnn.blobFromImage(bgr, 1.0 / 255.0, (self.input_size, self.input_size), swapRB=True, crop=False)
-        self.net.setInput(blob)
-        out = self.net.forward()
+        if self.runtime == "opencv":
+            self.net.setInput(blob)
+            out = self.net.forward()
+        else:
+            out = self.session.run(None, {self.input_name: blob})
         if isinstance(out, (list, tuple)): out = out[0]
         pred = np.asarray(out)
         if pred.ndim == 3: pred = pred[0]
@@ -72,9 +97,9 @@ class YoloV5OnnxDetector(CameraDetector):
 
 def create_camera_detector(config):
     """Factory: select implementation without changing callers/fusion code."""
-    cfg=config or {}; backend=str(cfg.get("backend","yolov5_onnx_opencv")).lower()
+    cfg=config or {}; backend=str(cfg.get("backend","yolov5_onnx_auto")).lower()
     if backend in ("none","null","disabled"):
         return NullCameraDetector()
-    if backend in ("yolov5","yolov5_onnx","yolov5_onnx_opencv"):
+    if backend in ("yolov5","yolov5_onnx","yolov5_onnx_auto","yolov5_onnx_opencv"):
         return YoloV5OnnxDetector(cfg.get("model","models/yolov5n.onnx"),cfg.get("input_size",640),cfg.get("confidence",.35),cfg.get("nms",.45))
     raise ValueError("Unsupported camera detector backend: %s" % backend)
