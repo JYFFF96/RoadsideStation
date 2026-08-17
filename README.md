@@ -405,6 +405,12 @@ startup failure falls back to `none`, never to CARLA truth. All camera-rescue
 decisions remain evaluator-only and cannot alter Tracker, Fusion, ObjectList or
 RSM.
 
+V0.6.12.8.2.2.37 adds an automatic ONNX Runtime fallback for models that
+OpenCV DNN cannot import (including YOLOv5 graphs containing incompatible
+`Floor` nodes). OpenCV remains the first choice; the detector switches to
+ONNX Runtime only when model loading fails. Python 3.7 uses
+`onnxruntime==1.14.1`. The preflight reports the selected runtime explicitly.
+
 ## Current scope
 
 - Fixed roadside RGB camera
