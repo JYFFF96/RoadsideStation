@@ -465,6 +465,12 @@ rule. Total expired Person observations can no longer produce READY when only
 two camera-positive samples determine precision. The default floor is five;
 camera association and every production output remain unchanged.
 
+V0.6.12.8.2.2.46 reports the actual camera opportunity coverage of expired
+Person samples: how many Selected candidates project inside the image and the
+corresponding rate. The deployment verdict requires at least five in-frame
+Person opportunities in addition to five kept positives, preventing off-camera
+samples from being mistaken for detector failures. This remains evaluator-only.
+
 ## Current scope
 
 - Fixed roadside RGB camera
