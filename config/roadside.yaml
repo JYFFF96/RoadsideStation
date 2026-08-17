@@ -468,7 +468,7 @@ evaluation:
   # validated with the real detector source. CARLA truth may prove simulation
   # potential but must produce BLOCKED(camera_source).
   selected_camera_rescue_deployment_verdict_shadow: true
-  selected_camera_rescue_deployment_rule: iou05_or_d30
+  selected_camera_rescue_deployment_rule: detector_d90
   selected_camera_rescue_required_source: detector
   selected_camera_rescue_min_expired_person_samples: 20
   selected_camera_rescue_min_kept_precision: 0.80
