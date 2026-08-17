@@ -1140,7 +1140,8 @@ class GroundTruthEvaluator(object):
         profile = self._geometry_profile(items)
         scores = []
         paths = {"near": 0, "far": 0, "strict": 0, "rescue": 0}
-        camera = {"visible": 0, "supported": 0, "sources": {}, "classes": {}}
+        camera = {"visible": 0, "supported": 0, "sources": {}, "classes": {},
+                  "projection_rejections": {}}
         camera_ious = [];camera_distances = [];camera_confidences = []
         nearest_distances=[];nearest_ious=[];nearest_confidences=[];nearest_classes={}
         for item in items:
@@ -1159,6 +1160,11 @@ class GroundTruthEvaluator(object):
             camera["sources"][source] = int(camera["sources"].get(source, 0)) + 1
             if item.get("selected_track_admission_camera_visible", False):
                 camera["visible"] += 1
+            rejection=item.get("selected_track_admission_camera_projection_rejection")
+            if rejection is not None:
+                rejection=str(rejection)
+                camera["projection_rejections"][rejection]=int(
+                    camera["projection_rejections"].get(rejection,0))+1
             nearest_class=item.get("selected_track_admission_camera_nearest_class")
             if nearest_class is not None:
                 nearest_class=str(nearest_class)
