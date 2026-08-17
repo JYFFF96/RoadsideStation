@@ -471,6 +471,12 @@ corresponding rate. The deployment verdict requires at least five in-frame
 Person opportunities in addition to five kept positives, preventing off-camera
 samples from being mistaken for detector failures. This remains evaluator-only.
 
+V0.6.12.8.2.2.47 attributes every off-screen Selected camera projection to
+behind-camera, left, right, above, below or degenerate geometry. Outcome reports
+separate Person and false-positive rejection directions, showing whether low
+camera opportunity is expected field-of-view coverage or a projection defect.
+The diagnostic path cannot create camera support or alter runtime output.
+
 ## Current scope
 
 - Fixed roadside RGB camera
