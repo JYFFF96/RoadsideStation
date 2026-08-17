@@ -460,6 +460,8 @@ evaluation:
     - {name: iou05_or_d30, min_iou: 0.05, max_center_distance: 30.0, allowed_classes: [person, pedestrian]}
     - {name: iou05_or_d45, min_iou: 0.05, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
     - {name: iou10_or_d45, min_iou: 0.10, max_center_distance: 45.0, allowed_classes: [person, pedestrian]}
+    - {name: detector_d90, min_iou: 0.05, max_center_distance: 90.0, allowed_classes: [person, pedestrian]}
+    - {name: detector_d100, min_iou: 0.05, max_center_distance: 100.0, allowed_classes: [person, pedestrian]}
   # V0.6.12.8.2.2.35: promote camera rescue only after the same scalar rule is
   # validated with the real detector source. CARLA truth may prove simulation
   # potential but must produce BLOCKED(camera_source).
