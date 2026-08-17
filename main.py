@@ -474,7 +474,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=load_config();_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"])
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.32 Delayed-Reappearance Risk-Gate Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.33 Selected Delayed-Risk Policy Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -517,6 +517,7 @@ def main():
  print("Selected Admission Camera-Support Profiling: %s | evaluator-only; never changes admission or tracking"%("enabled" if eval_cfg.get("selected_track_admission_camera_profiling",False) else "disabled"))
  print("Selected Admission Camera-Rescue: Shadow ablations only | rules=%s"%eval_cfg.get("selected_track_admission_camera_rescue_ablations",[]))
  print("Selected Delayed Reappearance: Shadow only | rules=%s"%fc.get("selected_track_admission_delayed_reappearance_ablations",[]))
+ print("Selected Delayed-Risk Policy: Shadow only | rule=%s gate=%s | never confirms or filters Tracker input"%(fc.get("selected_delayed_reappearance_selected_rule","-"),fc.get("selected_delayed_reappearance_selected_risk_gate",{})))
  print("Multi-Class Safety Baseline: vehicle + VRU + configured road obstacles | LiDAR unknowns remain unknown_obstacle")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
@@ -591,6 +592,8 @@ def main():
     print("  [SELECTED ADMISSION CAMERA SHADOW] Source:%s Held:%d Visible:%d Supported:%d"%(selected_camera_stats.get("source","none"),selected_camera_stats.get("held",0),selected_camera_stats.get("visible",0),selected_camera_stats.get("supported",0)))
     for rule,value in sorted((fusion.last_selected_delayed_reappearance_stats or {}).items()):
      print("  [SELECTED DELAYED REAPPEARANCE SHADOW %s] TTL:%.1fs Gate:%.1fm Eligible:%d Pending:%d Confirm:%d Expired:%d"%(rule,value.get("ttl",0.0),value.get("match_gate",0.0),value.get("eligible",0),value.get("pending",0),value.get("confirmed",0),value.get("expired",0)))
+     if value.get("selected_risk_shadow",False):
+      print("  [SELECTED DELAYED RISK POLICY SHADOW %s] WouldKeep:%d WouldReject:%d Rule:%s | TrackerInput:UNCHANGED"%(rule,value.get("would_keep",0),value.get("would_reject",0),value.get("risk_gate",{})))
     if s.get("roi_rejection_reasons"):print("  ROI rejected reasons: %s"%s["roi_rejection_reasons"])
     if s.get("roi_rescued",0):print("  Geometry-aware ROI rescued: %d"%s.get("roi_rescued",0))
     if s.get("score_rejected",0):print("  Candidate score rejected: %d"%s.get("score_rejected",0))

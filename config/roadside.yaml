@@ -165,6 +165,11 @@ fusion:
     - {name: ttl100_gate25, ttl: 1.00, match_gate: 2.5}
     - {name: ttl150_gate25, ttl: 1.50, match_gate: 2.5}
     - {name: ttl100_gate35, ttl: 1.00, match_gate: 3.5}
+  # V0.6.12.8.2.2.33: operational shadow of the best low-risk combination
+  # observed in v061282232(1).log. It only reports WouldKeep/WouldReject and
+  # never confirms a candidate or changes Tracker/Fusion/ObjectList input.
+  selected_delayed_reappearance_selected_rule: ttl075_gate25
+  selected_delayed_reappearance_selected_risk_gate: {max_score: 0.40, max_origin_score: 0.40, max_points: 4, max_origin_points: 4, max_height: 0.25, max_apparent_speed: 0.50}
 
   range_adaptive_clustering: true
   range_bands:

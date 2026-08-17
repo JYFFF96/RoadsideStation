@@ -9,6 +9,7 @@ from .perception import voxel_cluster_lidar, adaptive_voxel_cluster_lidar, merge
 from .sparse_geometry_rescue import track_guided_sparse_rescue
 from .road_object_geometry_recovery import RoadObjectGeometryRecovery
 from .tracking import NearestTracker
+from .selected_delayed_risk import selected_delayed_risk_gate_passes
 
 
 class PersistentStaticFilter(object):
@@ -114,6 +115,7 @@ class SimpleFusion(object):
         self._selected_delayed_reappearance_pending = {}
         self.last_selected_delayed_reappearance_candidates = {}
         self.last_selected_delayed_reappearance_stats = {}
+        self.last_selected_delayed_risk_shadow_candidates = []
 
     def set_world_transform(self, t):
         if t is None:
@@ -739,6 +741,7 @@ class SimpleFusion(object):
                                                 now, token, new_frame):
         """Run longer LiDAR reappearance windows in parallel, without filtering."""
         outputs = {};stats = {}
+        self.last_selected_delayed_risk_shadow_candidates = []
         rules = self._selected_delayed_reappearance_rules()
         if (not self.config.get(
                 "selected_track_admission_delayed_reappearance_shadow", False)
@@ -791,6 +794,24 @@ class SimpleFusion(object):
             stats[name] = {"eligible":len(eligible), "confirmed":len(confirmed),
                            "expired":expired, "pending":len(active),
                            "ttl":ttl, "match_gate":gate}
+        selected_name = str(self.config.get(
+            "selected_delayed_reappearance_selected_rule", ""))
+        selected_gate = self.config.get(
+            "selected_delayed_reappearance_selected_risk_gate", {}) or {}
+        if selected_name in outputs and isinstance(selected_gate, dict):
+            selected = []
+            for source in outputs[selected_name]:
+                item = dict(source)
+                keep = selected_delayed_risk_gate_passes(item, selected_gate)
+                item["selected_delayed_risk_shadow_would_keep"] = bool(keep)
+                selected.append(item)
+            kept = sum(1 for item in selected
+                       if item["selected_delayed_risk_shadow_would_keep"])
+            stats[selected_name]["selected_risk_shadow"] = True
+            stats[selected_name]["would_keep"] = kept
+            stats[selected_name]["would_reject"] = len(selected) - kept
+            stats[selected_name]["risk_gate"] = dict(selected_gate)
+            self.last_selected_delayed_risk_shadow_candidates = selected
         self.last_selected_delayed_reappearance_candidates = outputs
         self.last_selected_delayed_reappearance_stats = stats
 

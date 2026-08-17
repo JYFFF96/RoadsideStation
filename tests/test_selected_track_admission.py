@@ -214,6 +214,37 @@ class SelectedTrackAdmissionTest(unittest.TestCase):
         self.assertAlmostEqual(.7, delayed[0][
             "selected_delayed_reappearance_time_gap"])
 
+    def test_selected_delayed_risk_policy_is_shadow_only(self):
+        fusion = SimpleFusion("test", {
+            "selected_track_admission_enabled": True,
+            "selected_track_admission_shadow_mode": True,
+            "selected_track_admission_required_frames": 2,
+            "selected_track_admission_match_gate": 2.5,
+            "selected_track_admission_ttl": .5,
+            "selected_track_admission_delayed_reappearance_shadow": True,
+            "selected_track_admission_delayed_reappearance_ablations": [
+                {"name":"selected", "ttl":.75, "match_gate":2.5}],
+            "selected_delayed_reappearance_selected_rule":"selected",
+            "selected_delayed_reappearance_selected_risk_gate":{
+                "max_score":.4, "max_origin_score":.4, "max_points":4,
+                "max_origin_points":4, "max_height":.25,
+                "max_apparent_speed":.5}})
+        first = self._selected();first.update({
+            "candidate_score":.3, "current_point_count":2,
+            "extent":[.2,.2,.15]})
+        fusion._gate_selected_new_tracks([first], [], 10.0, frame_id=1)
+        second = dict(first);second["x"] = 10.2
+        admitted, rejected, unused = fusion._gate_selected_new_tracks(
+            [second], [], 10.7, frame_id=2)
+        self.assertEqual(0, len(admitted))
+        self.assertEqual(1, len(rejected))
+        self.assertEqual(1, len(fusion._selected_admission_tracker_candidates(
+            [second], admitted)))
+        self.assertEqual(1, fusion.last_selected_delayed_reappearance_stats[
+            "selected"]["would_keep"])
+        self.assertTrue(fusion.last_selected_delayed_risk_shadow_candidates[0][
+            "selected_delayed_risk_shadow_would_keep"])
+
     def test_delayed_reappearance_evaluator_reports_expired_only_actor(self):
         center = type("Center", (), {"x": 0.0, "y": 0.0})()
         evaluator = GroundTruthEvaluator(None, lambda: center, {

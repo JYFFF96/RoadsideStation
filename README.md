@@ -374,6 +374,14 @@ rules report precision, truth retention, false-positive rejection, class/actor
 coverage and final Expired-Only rescue. All gates remain evaluation-only and
 cannot alter Fusion or Tracker input. Town05 startup selection remains enabled.
 
+V0.6.12.8.2.2.33 selects the lowest-risk observed delayed combination as an
+operational shadow policy: `ttl075_gate25` plus the `sparse_slow` sensor gate
+(score/origin score <= 0.40, current/origin points <= 4, height <= 0.25m and
+apparent speed <= 0.50m/s). Each LiDAR frame now reports `WouldKeep` and
+`WouldReject` for this exact policy while Tracker, Fusion and ObjectList remain
+unchanged. The other delayed windows and risk gates remain parallel evaluator
+ablations so subsequent runs can verify that the selection is stable.
+
 ## Current scope
 
 - Fixed roadside RGB camera
