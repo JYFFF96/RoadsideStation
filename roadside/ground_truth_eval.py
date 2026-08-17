@@ -760,7 +760,13 @@ class GroundTruthEvaluator(object):
         values = {
             "expired_person_samples": int(value.get(
                 "expired_person_samples", 0)),
+            "visible_person_samples": int(value.get(
+                "expired_person_visible_samples", 0)),
             "kept_person_samples": kept_person,
+            "person_opportunity_rate": (
+                float(value.get("expired_person_visible_samples", 0)) /
+                int(value.get("expired_person_samples", 0))
+                if int(value.get("expired_person_samples", 0)) else None),
             "kept_precision": (float(kept_person) / (kept_person + kept_fp)
                                if kept_person + kept_fp else None),
             "expired_fp_rejection": (1.0 - float(kept_fp) / expired_fp
@@ -776,6 +782,8 @@ class GroundTruthEvaluator(object):
                 "selected_camera_rescue_min_expired_person_samples", 20)),
             "min_kept_person_samples": int(self.config.get(
                 "selected_camera_rescue_min_kept_person_samples", 5)),
+            "min_visible_person_samples": int(self.config.get(
+                "selected_camera_rescue_min_visible_person_samples", 5)),
             "min_kept_precision": float(self.config.get(
                 "selected_camera_rescue_min_kept_precision", .80)),
             "min_expired_fp_rejection": float(self.config.get(
@@ -790,6 +798,8 @@ class GroundTruthEvaluator(object):
                 "min_expired_person_samples"]:reasons.append("samples")
         if values["kept_person_samples"] < criteria[
                 "min_kept_person_samples"]:reasons.append("kept_person_samples")
+        if values["visible_person_samples"] < criteria[
+                "min_visible_person_samples"]:reasons.append("visible_person_samples")
         for name in ("kept_precision", "expired_fp_rejection",
                      "expired_only_person_actor_coverage",
                      "confirm_fp_rejection"):
@@ -1111,6 +1121,9 @@ class GroundTruthEvaluator(object):
                 "expired_only_person_actors_rescued": len(
                     rescued_actor_ids & expired_only_person),
                 "expired_person_samples": len(expired_person),
+                "expired_person_visible_samples": sum(
+                    1 for item in expired_person if item.get(
+                        "selected_track_admission_camera_visible", False)),
                 "expired_person_samples_kept": len(kept_expired_person),
                 "expired_fp_samples": len(expired_fp),
                 "expired_fp_samples_kept": len(kept_expired_fp),
