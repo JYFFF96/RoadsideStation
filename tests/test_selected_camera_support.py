@@ -49,6 +49,19 @@ class SelectedCameraSupportTest(unittest.TestCase):
         vehicle = dict(overlap);vehicle["selected_track_admission_camera_class"] = "car"
         self.assertFalse(selected_camera_rescue_passes(vehicle, .05, 30.0))
 
+    def test_detector_calibration_shadows_separate_observed_distances(self):
+        person = {"selected_track_admission_camera_supported":True,
+                  "selected_track_admission_camera_class":"person",
+                  "selected_track_admission_camera_center_distance":94.74,
+                  "selected_track_admission_camera_iou":0.0}
+        first_fp = {"selected_track_admission_camera_supported":True,
+                    "selected_track_admission_camera_class":"person",
+                    "selected_track_admission_camera_center_distance":107.56,
+                    "selected_track_admission_camera_iou":0.0}
+        self.assertFalse(selected_camera_rescue_passes(person, .05, 90.0))
+        self.assertTrue(selected_camera_rescue_passes(person, .05, 100.0))
+        self.assertFalse(selected_camera_rescue_passes(first_fp, .05, 100.0))
+
 
 if __name__ == "__main__":
     unittest.main()
