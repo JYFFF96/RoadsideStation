@@ -116,6 +116,10 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,len(shadow.last_temporal_candidates))
         self.assertEqual(2,shadow.last_temporal_candidates[0][
             "camera_ground_temporal_hits"])
+        self.assertIn("camera_ground_temporal_motion_dx",
+                      shadow.last_temporal_candidates[0])
+        self.assertIn("camera_ground_temporal_motion_distance",
+                      shadow.last_temporal_candidates[0])
         report=shadow.report()["temporal"]
         self.assertEqual(1,report["seeded"]);self.assertEqual(1,report["matched"])
         self.assertEqual(1,report["confirmed"])
@@ -327,6 +331,7 @@ class CameraGroundInitiationTests(unittest.TestCase):
         tracker=NearestTracker(max_distance=2.0)
         first=tracker.update([{
             "x":16.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_id":"CAM_NORTH",
             "camera_ground_tracker_enforced":True}],timestamp=1.0)[0]
         self.assertEqual("no_active_tracks",first[
             "track_association_birth_reason"])
@@ -411,6 +416,7 @@ class CameraGroundInitiationTests(unittest.TestCase):
         tracker=NearestTracker(max_distance=2.0,max_age=.5)
         first=tracker.update([{
             "x":16.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_id":"CAM_NORTH",
             "camera_ground_tracker_enforced":True}],timestamp=1.0)[0]
         tracker.update([],timestamp=2.0)
         self.assertNotIn(first["id"],tracker._tracks)
@@ -425,6 +431,8 @@ class CameraGroundInitiationTests(unittest.TestCase):
                 "track_camera_tombstone_%s_distance"%mode])
             self.assertAlmostEqual(1.1,born[
                 "track_camera_tombstone_%s_gap"%mode])
+            self.assertEqual("CAM_NORTH",born[
+                "track_camera_tombstone_%s_camera_id"%mode])
 
     def test_quality_stale_cleanup_also_keeps_camera_tombstone(self):
         tracker=NearestTracker(max_age=10.0)
@@ -453,12 +461,18 @@ class CameraGroundInitiationTests(unittest.TestCase):
         report=evaluator.observe_camera_ground_enforcement([{
             "id":"vehicle_2","x":17.0,"y":0.0,"track_state":"new",
             "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "camera_id":"CAM_NORTH",
+            "camera_ground_temporal_motion_dx":.5,
+            "camera_ground_temporal_motion_dy":0.0,
             "track_camera_tombstone_frozen_id":"vehicle_1",
             "track_camera_tombstone_frozen_distance":1.0,
             "track_camera_tombstone_frozen_gap":2.0,
             "track_camera_tombstone_predicted_id":"vehicle_1",
             "track_camera_tombstone_predicted_distance":1.5,
-            "track_camera_tombstone_predicted_gap":2.0}],frame_id=11)
+            "track_camera_tombstone_predicted_gap":2.0,
+            "track_camera_tombstone_predicted_camera_id":"CAM_NORTH",
+            "track_camera_tombstone_predicted_vx":1.0,
+            "track_camera_tombstone_predicted_vy":0.0}],frame_id=11)
         for name in ("frozen_2","frozen_3.5","frozen_5",
                      "predicted_2","predicted_3.5","predicted_5"):
             value=report["tombstone_gates"][name]
@@ -467,6 +481,14 @@ class CameraGroundInitiationTests(unittest.TestCase):
             self.assertEqual(1,value["safe_recovery"])
             self.assertEqual(1.0,value["identity_precision"])
             self.assertAlmostEqual(2.0,value["gap"]["p50"])
+        feature=report["tombstone_feature"]
+        self.assertEqual("predicted",feature["mode"])
+        self.assertEqual(2.0,feature["gate"])
+        same=feature["labels"]["same_actor"]
+        self.assertEqual(1,same["samples"])
+        self.assertEqual(1,same["same_camera"])
+        self.assertEqual(1.0,same["same_camera_rate"])
+        self.assertAlmostEqual(1.0,same["heading_cos"]["p50"])
 
 
 if __name__ == "__main__":unittest.main()

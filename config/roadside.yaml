@@ -495,6 +495,9 @@ evaluation:
   # camera births outside the production 3.5 m Tracker association gate.
   camera_ground_reassociation_shadow_gates: [4.0, 5.0, 6.0, 8.0]
   camera_ground_tombstone_shadow_gates: [2.0, 3.5, 5.0]
+  # V0.6.12.8.2.2.72: feature profiling on the best .71 variant.
+  camera_ground_tombstone_feature_mode: predicted
+  camera_ground_tombstone_feature_gate: 2.0
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]

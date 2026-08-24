@@ -77,11 +77,13 @@ class NearestTracker(object):
 
     def _remember_camera_tombstone(self, tid, track, now):
         if not track or not track.get("camera_ground_origin",False):return
+        last_det=track.get("last_det",{}) or {}
         self._camera_tombstones[str(tid)]={
             "x":float(track.get("x",0.0)),"y":float(track.get("y",0.0)),
             "vx":float(track.get("vx",0.0)),"vy":float(track.get("vy",0.0)),
             "last_seen":float(track.get("timestamp",now)),
-            "expired_at":float(now)}
+            "expired_at":float(now),
+            "camera_id":str(last_det.get("camera_id","unknown"))}
 
     def _prune_camera_tombstones(self, now):
         stale=[tid for tid,item in self._camera_tombstones.items()
@@ -100,7 +102,8 @@ class NearestTracker(object):
             for mode,(px,py) in points.items():
                 distance=math.hypot(float(det["x"])-px,float(det["y"])-py)
                 if best[mode] is None or distance<best[mode][0]:
-                    best[mode]=(distance,tid,gap)
+                    best[mode]=(distance,tid,gap,str(item.get("camera_id","unknown")),
+                                float(item.get("vx",0.0)),float(item.get("vy",0.0)))
         return best
 
     def _clamp_velocity(self, vx, vy):
@@ -496,6 +499,12 @@ class NearestTracker(object):
                     tombstone[0] if tombstone is not None else None)
                 item["track_camera_tombstone_%s_gap"%mode] = (
                     tombstone[2] if tombstone is not None else None)
+                item["track_camera_tombstone_%s_camera_id"%mode] = (
+                    tombstone[3] if tombstone is not None else None)
+                item["track_camera_tombstone_%s_vx"%mode] = (
+                    tombstone[4] if tombstone is not None else None)
+                item["track_camera_tombstone_%s_vy"%mode] = (
+                    tombstone[5] if tombstone is not None else None)
             if old is None:
                 if meta.get("nearest") is None:
                     reason = "no_active_tracks"

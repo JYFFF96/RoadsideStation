@@ -778,3 +778,16 @@ matches, safe recovery count, identity precision, distance, and last-seen gap.
 Both normal max-age deletion and the quality-based stale-cleanup path populate
 the tombstone memory. Tombstones never enter matching, never resurrect an ID,
 and do not change admission, Tracker output, or ObjectList.
+
+V0.6.12.8.2.2.72 profiles sensor-side features for the best tombstone variant.
+The V0.6.12.8.2.2.71 run found two truth-consistent expired-track recoveries,
+but the best velocity-predicted 2 m gate also contained one conflicting and one
+ambiguous identity, for only 50 percent identity precision. It is therefore not
+enabled. Camera temporal admission now carries a smoothed two-frame ground-
+motion vector, while tombstones retain their last camera ID and velocity. The
+evaluator separates same-actor, conflicting, ambiguous, and unknown candidates
+and reports same-camera rate, heading cosine, tombstone speed, new temporal
+motion, distance, and gap distributions for the predicted 2 m variant. These
+features use detector and tracker metadata available on real equipment; CARLA
+actor identity remains evaluation-only. Production association, tombstone
+recovery, Tracker IDs, and ObjectList are unchanged.

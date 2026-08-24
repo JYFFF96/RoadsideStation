@@ -32,6 +32,10 @@ class GroundTruthEvaluator(object):
             float(x) for x in self.config.get(
                 "camera_ground_tombstone_shadow_gates", [2.0,3.5,5.0])
             if float(x)>0.0))
+        self.camera_ground_tombstone_feature_mode = str(self.config.get(
+            "camera_ground_tombstone_feature_mode","predicted"))
+        self.camera_ground_tombstone_feature_gate = float(self.config.get(
+            "camera_ground_tombstone_feature_gate",2.0))
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
@@ -84,6 +88,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_reassociation_gates()
         self._camera_ground_enforcement_totals["tombstone_gates"] = \
             self._empty_camera_tombstone_gates()
+        self._camera_ground_enforcement_totals["tombstone_feature"] = \
+            self._empty_camera_tombstone_feature()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
@@ -160,6 +166,13 @@ class GroundTruthEvaluator(object):
                     for mode in ("frozen","predicted")
                     for gate in self.camera_ground_tombstone_shadow_gates)
 
+    @staticmethod
+    def _empty_camera_tombstone_feature():
+        return dict((label,{"samples":0,"same_camera":0,"camera_known":0,
+                            "heading_cos":[],"tombstone_speed":[],
+                            "temporal_motion":[],"distances":[],"gaps":[]})
+                    for label in ("same_actor","conflict","ambiguous","unknown"))
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -206,6 +219,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_reassociation_gates()
         self._camera_ground_enforcement_totals["tombstone_gates"] = \
             self._empty_camera_tombstone_gates()
+        self._camera_ground_enforcement_totals["tombstone_feature"] = \
+            self._empty_camera_tombstone_feature()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
@@ -669,12 +684,46 @@ class GroundTruthEvaluator(object):
                                 bucket["gaps"].append(float(tombstone_gap))
                             if not previous_actors:
                                 bucket["unknown"]+=1
+                                label="unknown"
                             elif actor_key in previous_actors:
                                 if len(previous_actors)==1:
                                     bucket["consistent"]+=1
                                     bucket["safe_recovery"]+=1
-                                else:bucket["ambiguous"]+=1
-                            else:bucket["conflict"]+=1
+                                    label="same_actor"
+                                else:
+                                    bucket["ambiguous"]+=1;label="ambiguous"
+                            else:
+                                bucket["conflict"]+=1;label="conflict"
+                            if (mode==self.camera_ground_tombstone_feature_mode and
+                                    abs(float(gate)-self.camera_ground_tombstone_feature_gate)<1e-6):
+                                feature=totals["tombstone_feature"][label]
+                                feature["samples"]+=1
+                                feature["distances"].append(float(tombstone_distance))
+                                if tombstone_gap is not None:
+                                    feature["gaps"].append(float(tombstone_gap))
+                                current_camera=str(detection.get("camera_id","unknown"))
+                                prior_camera=str(detection.get(
+                                    "track_camera_tombstone_%s_camera_id"%mode,
+                                    "unknown"))
+                                if current_camera!="unknown" and prior_camera!="unknown":
+                                    feature["camera_known"]+=1
+                                    if current_camera==prior_camera:
+                                        feature["same_camera"]+=1
+                                tvx=detection.get(
+                                    "track_camera_tombstone_%s_vx"%mode)
+                                tvy=detection.get(
+                                    "track_camera_tombstone_%s_vy"%mode)
+                                mdx=detection.get("camera_ground_temporal_motion_dx")
+                                mdy=detection.get("camera_ground_temporal_motion_dy")
+                                if None not in (tvx,tvy,mdx,mdy):
+                                    tombstone_speed=math.hypot(float(tvx),float(tvy))
+                                    temporal_motion=math.hypot(float(mdx),float(mdy))
+                                    feature["tombstone_speed"].append(tombstone_speed)
+                                    feature["temporal_motion"].append(temporal_motion)
+                                    if tombstone_speed>1e-3 and temporal_motion>1e-3:
+                                        feature["heading_cos"].append(
+                                            (float(tvx)*float(mdx)+float(tvy)*float(mdy))/
+                                            (tombstone_speed*temporal_motion))
                 actor_tracks=totals["actor_tracks"].setdefault(actor_key,{})
                 actor_tracks[track_key]=1
                 track_actors=totals["track_actors"].setdefault(track_key,{})
@@ -786,6 +835,24 @@ class GroundTruthEvaluator(object):
                 "distance":self._distribution(bucket["distances"]),
                 "gap":self._distribution(bucket["gaps"])}
         item["tombstone_gates"]=tombstone_gates
+        tombstone_feature={}
+        for label,bucket in totals["tombstone_feature"].items():
+            tombstone_feature[label]={
+                "samples":bucket["samples"],
+                "camera_known":bucket["camera_known"],
+                "same_camera":bucket["same_camera"],
+                "same_camera_rate":(
+                    float(bucket["same_camera"])/bucket["camera_known"]
+                    if bucket["camera_known"] else None),
+                "heading_cos":self._distribution(bucket["heading_cos"]),
+                "tombstone_speed":self._distribution(bucket["tombstone_speed"]),
+                "temporal_motion":self._distribution(bucket["temporal_motion"]),
+                "distance":self._distribution(bucket["distances"]),
+                "gap":self._distribution(bucket["gaps"])}
+        item["tombstone_feature"]={
+            "mode":self.camera_ground_tombstone_feature_mode,
+            "gate":self.camera_ground_tombstone_feature_gate,
+            "labels":tombstone_feature}
         item["association"]={
             "updates":len(totals["association_distances"]),
             "match_distance":self._distribution(totals["association_distances"]),

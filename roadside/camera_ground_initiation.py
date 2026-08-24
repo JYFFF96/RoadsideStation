@@ -111,11 +111,20 @@ class CameraGroundInitiationShadow(object):
             if best is None:
                 state={"x":float(candidate["x"]),"y":float(candidate["y"]),
                        "object_type":candidate.get("object_type"),
+                       "motion_dx":0.0,"motion_dy":0.0,
                        "hits":1,"last_frame":frame_index};stats["seeded"]+=1
             else:
                 unused.remove(best);old=self._temporal_states[best]
+                raw_dx=float(candidate["x"])-float(old["x"])
+                raw_dy=float(candidate["y"])-float(old["y"])
+                if int(old.get("hits",1))<=1:
+                    motion_dx,motion_dy=raw_dx,raw_dy
+                else:
+                    motion_dx=.5*float(old.get("motion_dx",raw_dx))+.5*raw_dx
+                    motion_dy=.5*float(old.get("motion_dy",raw_dy))+.5*raw_dy
                 state={"x":float(candidate["x"]),"y":float(candidate["y"]),
                        "object_type":candidate.get("object_type"),
+                       "motion_dx":motion_dx,"motion_dy":motion_dy,
                        "hits":int(old["hits"])+1,"last_frame":frame_index}
                 stats["matched"]+=1
             next_states.append(state)
@@ -123,6 +132,10 @@ class CameraGroundInitiationShadow(object):
                 item=dict(candidate);item["camera_ground_temporal_confirmed"]=True
                 item["camera_ground_temporal_hits"]=state["hits"]
                 item["camera_ground_temporal_vru_margin"]=self.temporal_vru_margin
+                item["camera_ground_temporal_motion_dx"]=state["motion_dx"]
+                item["camera_ground_temporal_motion_dy"]=state["motion_dy"]
+                item["camera_ground_temporal_motion_distance"]=math.hypot(
+                    state["motion_dx"],state["motion_dy"])
                 self.last_temporal_candidates.append(item);stats["confirmed"]+=1
         for index in unused:
             state=self._temporal_states[index]
