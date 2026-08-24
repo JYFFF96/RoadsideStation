@@ -210,12 +210,12 @@ class NearestTracker(object):
     def _sensor_string(self, t, now=None):
         if now is None:
             now = time.time()
-        s = "L"
+        s = "L" if int(t.get("lidar_hits", 0)) > 0 else ""
         if self._sensor_recent(t, "last_radar_time", now):
             s += "R"
         if self._sensor_recent(t, "last_camera_time", now):
             s += "C"
-        return s
+        return s or "-"
 
     def _decorate_quality(self, item, t, now):
         q = self._quality_value(t, now)
@@ -356,6 +356,8 @@ class NearestTracker(object):
             last_det = dict(det)
             last_det.pop("id", None)
             selected_current = bool(det.get("road_object_selected_enforced", False))
+            detection_sources = list(det.get("sources", ["lidar"]))
+            has_lidar = "lidar" in detection_sources
             selected_hits = int(old.get("selected_enforced_hits", 0) if old else 0)
             non_selected_hits = int(old.get("non_selected_hits", 0) if old else 0)
             if selected_current:
@@ -368,7 +370,7 @@ class NearestTracker(object):
                 "history": hist, "misses": 0, "last_det": last_det,
                 "size_stability": size_stability,
                 "velocity_stability": velocity_stability,
-                "lidar_hits": int(old.get("lidar_hits", 0) if old else 0) + 1,
+                "lidar_hits": int(old.get("lidar_hits", 0) if old else 0) + (1 if has_lidar else 0),
                 "radar_confirmations": int(old.get("radar_confirmations", 0) if old else 0),
                 "camera_confirmations": int(old.get("camera_confirmations", 0) if old else 0),
                 "last_radar_time": old.get("last_radar_time") if old else None,

@@ -545,3 +545,14 @@ the level-mount LiDAR blind ranges; at the configured 8.5m sensor height and
 seconds, after which newly spawned stationary hazards remain eligible. A
 periodic `[FUSED OUTPUT SAMPLE]` exposes the real public JSON fields in logs.
 Ground Truth remains evaluation-only and cannot initiate or modify tracks.
+
+V0.6.12.8.2.2.51 adds enforced near-field radar track initiation for the
+configured 48TX blind zone. Cartesian radar returns between 2m and 30m are
+spatially clustered and must repeat on two distinct radar frames. Only moving
+clusters with at least 0.6m/s absolute radial speed, a valid road ROI and no
+nearby LiDAR candidate enter the common tracker; static radar clusters remain
+diagnostic-only. Radar-only tracks expose source `radar` and may subsequently
+receive camera class evidence through the existing dual-camera association.
+The implementation uses only scalar radar data and is independent of CARLA
+actors so an MR76 adapter can reuse the same fusion boundary. Runtime logs
+report the complete decision funnel in `[RADAR INIT]`.

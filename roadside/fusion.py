@@ -8,6 +8,7 @@ from .models import DetectedObject, ObjectList
 from .perception import voxel_cluster_lidar, adaptive_voxel_cluster_lidar, merge_lidar_clusters
 from .sparse_geometry_rescue import track_guided_sparse_rescue
 from .road_object_geometry_recovery import RoadObjectGeometryRecovery
+from .radar_initiation import NearRadarTrackInitiator
 from .tracking import NearestTracker
 from .selected_delayed_risk import selected_delayed_risk_gate_passes
 
@@ -88,6 +89,7 @@ class SimpleFusion(object):
             moving_radar_speed=config.get("background_moving_radar_speed",1.2),
             neighbor_radius_cells=config.get("background_neighbor_radius_cells",2))
         self.road_object_recovery = RoadObjectGeometryRecovery()
+        self.radar_initiator = NearRadarTrackInitiator(config)
         self.world_transform = None
         self.radar_matrix = None
         self.radar_origin = None
@@ -121,6 +123,7 @@ class SimpleFusion(object):
         self.last_selected_delayed_reappearance_candidates = {}
         self.last_selected_delayed_reappearance_stats = {}
         self.last_selected_delayed_risk_shadow_candidates = []
+        self.last_radar_initiation_candidates = []
 
     def set_world_transform(self, t):
         if t is None:
@@ -206,7 +209,8 @@ class SimpleFusion(object):
         if n < 1e-3:
             return None
         return {"x": wx, "y": wy, "z": wz, "velocity": float(d.get("velocity", 0.0)),
-                "los_x": dx / n, "los_y": dy / n, "los_z": dz / n}
+                "los_x": dx / n, "los_y": dy / n, "los_z": dz / n,
+                "sensor_range": math.hypot(dx, dy), "sensor_range_3d": n}
 
     def _associate_radar_world(self, clusters, radar_detections):
         points = []
@@ -247,7 +251,12 @@ class SimpleFusion(object):
                 item["radar_hits"] = len(near)
                 matched += 1
             out.append(item)
-        return out, len(points), matched
+        return out, points, matched
+
+    def _validate_radar_initiation_candidate(self, item):
+        ok, unused_reason, unused_details = self._validate_candidate(
+            item["x"], item["y"], item["z"], item.get("extent", [0, 0, 0]), item)
+        return ok
 
     def _looks_like_pole(self, e):
         ex, ey, ez = [float(v) for v in e]
@@ -848,7 +857,8 @@ class SimpleFusion(object):
             self.last_tracked_candidates, timestamp=timestamp)
         self._refresh_quality_stats()
 
-    def fuse(self, lidar_points, radar_detections, timestamp=None, frame_id=None):
+    def fuse(self, lidar_points, radar_detections, timestamp=None, frame_id=None,
+             radar_frame_id=None):
         now = time.time() if timestamp is None else float(timestamp)
         c = self.config
         previous_tracks = [dict(x) for x in self.last_tracked_candidates]
@@ -933,7 +943,9 @@ class SimpleFusion(object):
         self.last_scored_candidates = [dict(x) for x in scored]
         self.last_score_rejections = [dict(x) for x in score_rejections]
 
-        assoc, radar_world_count, radar_matched = self._associate_radar_world(scored, radar_detections)
+        assoc, radar_world_points, radar_matched = self._associate_radar_world(
+            scored, radar_detections)
+        radar_world_count = len(radar_world_points)
         quality_pass, quality_rejections = self._gate_recovery_candidates(assoc)
         self.last_recovery_quality_candidates = [dict(x) for x in quality_pass
                                                  if x.get("far_geometry_recovered", False)]
@@ -955,6 +967,17 @@ class SimpleFusion(object):
             background_ready = True
             background_remaining = 0.0
             background_cells = 0
+
+        if background_ready:
+            radar_initiated = self.radar_initiator.update(
+                radar_world_points, list(roi) + list(previous_tracks), now,
+                frame_id=radar_frame_id,
+                validator=self._validate_radar_initiation_candidate)
+        else:
+            radar_initiated = []
+        self.last_radar_initiation_candidates = [dict(x) for x in radar_initiated]
+        if radar_initiated:
+            dyn = list(dyn) + list(radar_initiated)
 
         admitted, admission_rejections, admission_stats = self._gate_far_new_tracks(
             dyn, previous_tracks, now, frame_id=frame_id)
@@ -992,6 +1015,7 @@ class SimpleFusion(object):
         sparse_score = sum(1 for x in scored if x.get("sparse_rescued", False))
         sparse_dynamic = sum(1 for x in tracker_candidates if x.get("sparse_rescued", False))
         road_stats=dict(self.road_object_recovery.last_stats or {})
+        radar_init_stats=dict(self.radar_initiator.last_stats or {})
         ts = dict(getattr(self.tracker, "last_stats", {}) or {})
         self.last_stats = {
             "lidar_points": 0 if lidar_points is None else len(lidar_points),
@@ -1080,6 +1104,17 @@ class SimpleFusion(object):
             "range_adaptive_clustering": bool(c.get("range_adaptive_clustering", False)),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "radar_world_points": radar_world_count, "radar_matched_objects": radar_matched,
+            "radar_initiation_enabled": bool(self.radar_initiator.enabled),
+            "radar_initiation_shadow_mode": bool(self.radar_initiator.shadow_mode),
+            "radar_initiation_range_points": int(radar_init_stats.get("range_points",0)),
+            "radar_initiation_clusters": int(radar_init_stats.get("clusters",0)),
+            "radar_initiation_pending": int(radar_init_stats.get("pending",0)),
+            "radar_initiation_confirmed": int(radar_init_stats.get("confirmed",0)),
+            "radar_initiation_moving": int(radar_init_stats.get("moving_confirmed",0)),
+            "radar_initiation_static_rejected": int(radar_init_stats.get("static_rejected",0)),
+            "radar_initiation_dedupe_rejected": int(radar_init_stats.get("dedupe_rejected",0)),
+            "radar_initiation_roi_rejected": int(radar_init_stats.get("roi_rejected",0)),
+            "radar_initiation_emitted": int(radar_init_stats.get("emitted",0)),
             "radar_nearest_min": min(nearest) if nearest else None,
             "tracked_objects": len(objs), "track_new": int(ts.get("new", 0)),
             "track_update": int(ts.get("update", 0)), "track_coast": int(ts.get("coast", 0)),

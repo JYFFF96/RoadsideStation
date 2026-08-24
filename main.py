@@ -513,7 +513,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.50 Dual-Camera Coverage Baseline starting...")
+ print("RoadsideStation V0.6.12.8.2.2.51 Near-Radar Track Initiation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -525,6 +525,12 @@ def main():
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  near_band=(fc.get("range_bands") or [{}])[0]
  print("LiDAR near-band geometry: 0-30m L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | physical blind zone is reported separately; cameras/radar cover it"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6))))
+ radar_init_mode="shadow" if fc.get("radar_initiation_shadow_mode",True) else "enforcing"
+ print("Near Radar Track Initiation: %s/%s | range=%.0f..%.0fm points>=%d frames>=%d | |radial speed|>=%.2fm/s | LiDAR dedupe<=%.1fm"%(
+  "enabled" if fc.get("radar_initiation_enabled",False) else "disabled",radar_init_mode,
+  float(fc.get("radar_initiation_min_range",2.0)),float(fc.get("radar_initiation_max_range",30.0)),
+  int(fc.get("radar_initiation_min_points",2)),int(fc.get("radar_initiation_required_frames",2)),
+  float(fc.get("radar_initiation_min_abs_speed",.6)),float(fc.get("radar_initiation_dedupe_distance",3.0))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -600,7 +606,7 @@ def main():
  last=0.0;last_eval=0.0;last_json_sample=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
  try:
   while not _STOP_REQUESTED:
-   cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
+   cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None,radar_frame_id=radar[0] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
    if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
    for camera_id,runtime in camera_runtimes.items():
@@ -650,6 +656,13 @@ def main():
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
     print("  [BACKGROUND] Status:%s Remaining:%.1fs Cells:%d Rejected:%d"%(
      "READY" if s.get("background_ready",False) else "LEARNING",float(s.get("background_remaining",0.0)),int(s.get("background_cells",0)),int(s.get("background_rejected",0))))
+    print("  [RADAR INIT] Mode:%s RangePts:%d Clusters:%d Pending:%d Confirmed:%d Moving:%d StaticReject:%d DedupeReject:%d ROIReject:%d Emitted:%d"%(
+     "SHADOW" if s.get("radar_initiation_shadow_mode",True) else "ENFORCE",
+     s.get("radar_initiation_range_points",0),s.get("radar_initiation_clusters",0),
+     s.get("radar_initiation_pending",0),s.get("radar_initiation_confirmed",0),
+     s.get("radar_initiation_moving",0),s.get("radar_initiation_static_rejected",0),
+     s.get("radar_initiation_dedupe_rejected",0),s.get("radar_initiation_roi_rejected",0),
+     s.get("radar_initiation_emitted",0)))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
