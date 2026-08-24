@@ -12,6 +12,7 @@ from roadside.camera_lidar_association import associate_camera_to_lidar
 from roadside.camera_detector import create_camera_detector
 from roadside.camera_runtime_config import apply_camera_runtime_overrides
 from roadside.camera_objects import CameraObjectList
+from roadside.camera_ground_initiation import CameraGroundInitiationShadow
 from roadside.fused_objects import build_fused_object_list
 from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.lidar_projection import project_lidar_tracks
@@ -515,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.58 Radar-Camera Support Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.59 Camera Ground Initiation Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -548,6 +549,10 @@ def main():
   fc.get("radar_initiation_seed_to_component_match_gates",[2.5,4.0])))
  print("Radar Singleton Camera Support: %s | both cameras, generic 2D association | Shadow only"%(
   "enabled" if fc.get("radar_initiation_camera_support_shadow_enabled",False) else "disabled"))
+ print("Camera Ground Initiation: %s | range=%.0f..%.0fm bottom-center ray/ground plane | Shadow only"%(
+  "enabled" if fc.get("camera_ground_initiation_shadow_enabled",False) else "disabled",
+  float(fc.get("camera_ground_initiation_min_range",2.0)),
+  float(fc.get("camera_ground_initiation_max_range",30.0))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -617,6 +622,7 @@ def main():
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
+ camera_ground_shadow=CameraGroundInitiationShadow(fc)
  print("V2X Event Engine: %s | AVW + SLW | canonical FusedObjectList input"%("enabled" if event_engine.enabled else "disabled"))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
@@ -650,7 +656,8 @@ def main():
     radar_camera_views.append({"camera_id":camera_id,
      "projector":runtime["projector"],"width":runtime["width"],
      "height":runtime["height"],
-     "camera_objects":camera_objects_by_id.get(camera_id,[])})
+     "camera_objects":camera_objects_by_id.get(camera_id,[]),
+     "camera_source":camera_source,"frame_id":cameras.get(camera_id)[0]})
    radar_camera_candidates=annotate_radar_camera_support(
     fusion.last_radar_camera_support_shadow_candidates,radar_camera_views,
     camera_source=camera_source,min_iou=assoc_cfg.get("min_iou",.05),
@@ -658,6 +665,15 @@ def main():
    if evaluator is not None and radar is not None:
     evaluator.observe_radar_camera_support(
      radar_camera_candidates,frame_id=radar[0])
+   camera_ground_token=tuple((view["camera_id"],view["frame_id"])
+                             for view in radar_camera_views)
+   camera_ground_candidates=camera_ground_shadow.update(
+    radar_camera_views,list(fusion.last_roi_candidates)+list(fusion.last_tracked_candidates),
+    station.junction_center.z if station.junction_center is not None else 0.0,
+    validator=station.validate_driving_roi,frame_token=camera_ground_token)
+   if evaluator is not None:
+    evaluator.observe_camera_ground_initiation(
+     camera_ground_candidates,frame_id=camera_ground_token)
    selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
    selected_held=fusion.last_selected_track_admission_rejections
    if eval_cfg.get("selected_track_admission_camera_profiling",False):
@@ -738,6 +754,9 @@ def main():
     radar_camera=s.get("radar_camera_support_shadow",{}) or {};radar_camera_eval=evaluator.report_radar_camera_support() if evaluator is not None else {}
     print("    [RADAR CAMERA SUPPORT SHADOW] Raw:%d DedupeReject:%d ROIReject:%d Eligible:%d | Visible:%d Supported:%d Rate:%s SupportedTruth:%d FP:%d Precision:%s Source:%s | TrackerInput:UNCHANGED"%(
      radar_camera.get("raw",0),radar_camera.get("dedupe_rejected",0),radar_camera.get("roi_rejected",0),radar_camera.get("eligible",0),radar_camera_eval.get("visible",0),radar_camera_eval.get("supported",0),_pct(radar_camera_eval.get("support_rate")),radar_camera_eval.get("supported_truth",0),radar_camera_eval.get("supported_fp",0),_pct(radar_camera_eval.get("supported_precision")),radar_camera_eval.get("sources",{})))
+    camera_ground=camera_ground_shadow.report();camera_ground_eval=evaluator.report_camera_ground_initiation() if evaluator is not None else {}
+    print("    [CAMERA GROUND INIT SHADOW] Frames:%d Det:%d ClassReject:%d ConfReject:%d ProjectionReject:%d RangeReject:%d CrossCamDedupe:%d LiDARDedupe:%d ROIReject:%d WouldEmit:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s | TrackerInput:UNCHANGED"%(
+     camera_ground.get("frames",0),camera_ground.get("detections",0),camera_ground.get("class_rejected",0),camera_ground.get("confidence_rejected",0),camera_ground.get("projection_rejected",0),camera_ground.get("range_rejected",0),camera_ground.get("cross_camera_deduped",0),camera_ground.get("lidar_deduped",0),camera_ground.get("roi_rejected",0),camera_ground.get("would_emit",0),camera_ground_eval.get("matched",0),camera_ground_eval.get("fp",0),_pct(camera_ground_eval.get("precision")),camera_ground_eval.get("classes",{}),camera_ground_eval.get("sources",{})))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))

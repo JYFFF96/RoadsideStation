@@ -371,6 +371,15 @@ fusion:
   # V0.6.12.8.2.2.58: profile whether either camera can confirm a moving
   # radar singleton that is not already covered by LiDAR and passes road ROI.
   radar_initiation_camera_support_shadow_enabled: true
+  # V0.6.12.8.2.2.59: locate generic camera detections on the road plane to
+  # study camera-only initiation inside the level-mounted LiDAR blind zone.
+  camera_ground_initiation_shadow_enabled: true
+  camera_ground_initiation_min_range: 2.0
+  camera_ground_initiation_max_range: 30.0
+  camera_ground_initiation_min_confidence: 0.25
+  camera_ground_initiation_dedupe_distance: 3.0
+  camera_ground_initiation_cross_camera_distance: 2.0
+  camera_ground_initiation_allowed_classes: [person, pedestrian, bicycle, motorcycle, car, truck, bus]
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

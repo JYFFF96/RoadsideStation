@@ -627,3 +627,14 @@ associated with generic camera objects. Cumulative visibility, support rate,
 supported truth/false positives, precision, camera classes and source are
 reported. CARLA camera truth remains an evaluation proxy, the identical path
 accepts real detector boxes, and no Shadow result enters Tracker or ObjectList.
+
+V0.6.12.8.2.2.59 adds dual-camera ground-plane initiation in Shadow. The
+V0.6.12.8.2.2.58 run showed all five moving radar singleton observations were
+already within the LiDAR/track deduplication radius, while average 0--30m track
+recall was only about 9.7 percent and missed objects were dominated by missing
+geometry. For each generic camera detection, the bottom-centre pixel ray is
+intersected with the configured road plane to estimate a world position. The
+2--30m candidates then pass cross-camera deduplication, LiDAR/track deduplication
+and the normal road ROI. Counts and CARLA truth precision are evaluation-only.
+This is the same calibration-matrix operation needed by a Qt/C++ detector path;
+CARLA actors are never read by the positioning algorithm or runtime policy.

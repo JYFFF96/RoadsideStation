@@ -51,6 +51,9 @@ class GroundTruthEvaluator(object):
             "candidates":0,"visible":0,"supported":0,
             "truth":0,"fp":0,"supported_truth":0,"supported_fp":0,
             "truth_classes":{},"camera_classes":{},"sources":{}}
+        self._camera_ground_last_frame = None
+        self._camera_ground_totals = {
+            "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -115,6 +118,9 @@ class GroundTruthEvaluator(object):
             "candidates":0,"visible":0,"supported":0,
             "truth":0,"fp":0,"supported_truth":0,"supported_fp":0,
             "truth_classes":{},"camera_classes":{},"sources":{}}
+        self._camera_ground_last_frame = None
+        self._camera_ground_totals = {
+            "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -338,6 +344,32 @@ class GroundTruthEvaluator(object):
         item["supported_precision"]=(
             float(item["supported_truth"])/item["supported"]
             if item["supported"] else None)
+        return item
+
+    def observe_camera_ground_initiation(self, candidates, frame_id=None):
+        if frame_id is not None and frame_id==self._camera_ground_last_frame:
+            return self.report_camera_ground_initiation()
+        self._camera_ground_last_frame=frame_id
+        detected=self._detected_with_range(candidates or [])
+        if not detected:return self.report_camera_ground_initiation()
+        truth=self.truth_objects();pairs=self._match(truth,detected)
+        totals=self._camera_ground_totals
+        totals["candidates"]+=len(detected);totals["matched"]+=len(pairs)
+        totals["fp"]+=len(detected)-len(pairs)
+        for truth_index,unused_detected,unused_distance in pairs:
+            name=str(truth[truth_index].get("object_type","unknown_obstacle"))
+            totals["classes"][name]=totals["classes"].get(name,0)+1
+        for item in detected:
+            source=str(item.get("camera_source","none"))
+            totals["sources"][source]=totals["sources"].get(source,0)+1
+        return self.report_camera_ground_initiation()
+
+    def report_camera_ground_initiation(self):
+        item=dict(self._camera_ground_totals)
+        item["classes"]=dict(self._camera_ground_totals["classes"])
+        item["sources"]=dict(self._camera_ground_totals["sources"])
+        item["precision"]=(float(item["matched"])/item["candidates"]
+                           if item["candidates"] else None)
         return item
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
