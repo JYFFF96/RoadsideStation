@@ -58,6 +58,11 @@ class CameraGroundInitiationShadow(object):
         self.allowed_classes=set(str(x).lower() for x in c.get(
             "camera_ground_initiation_allowed_classes",
             ["person","pedestrian","bicycle","motorcycle","car","truck","bus"]))
+        self.vru_roi_extra_margins=sorted(set(
+            float(x) for x in c.get("camera_ground_vru_roi_extra_margin_shadow",[1.0,2.0,3.0])
+            if float(x)>0.0))
+        self.last_vru_roi_ablation_candidates=dict(
+            (margin,[]) for margin in self.vru_roi_extra_margins)
         self._last_token=None
         self.stats={"frames":0,"detections":0,"class_rejected":0,
                     "confidence_rejected":0,"projection_rejected":0,
@@ -79,6 +84,8 @@ class CameraGroundInitiationShadow(object):
         if not self.enabled:return []
         if frame_token is not None and frame_token==self._last_token:return []
         self._last_token=frame_token;self.stats["frames"]+=1;candidates=[]
+        self.last_vru_roi_ablation_candidates=dict(
+            (margin,[]) for margin in self.vru_roi_extra_margins)
         for view in camera_views or []:
             projector=view.get("projector")
             try:matrix=np.asarray(projector.transform.get_matrix(),dtype=np.float64)
@@ -114,7 +121,7 @@ class CameraGroundInitiationShadow(object):
                 if self._near(item,existing,self.dedupe_distance):
                     self.stats["lidar_deduped"]+=1;continue
                 if validator is not None:
-                    reason="rejected"
+                    reason="rejected";details={}
                     group=("vru" if class_name in
                            ("person","pedestrian","bicycle","motorcycle")
                            else "vehicle")
@@ -124,6 +131,8 @@ class CameraGroundInitiationShadow(object):
                         if isinstance(validation,(tuple,list)):
                             valid=bool(validation[0])
                             if len(validation)>1:reason=str(validation[1])
+                            if len(validation)>2 and isinstance(validation[2],dict):
+                                details=validation[2]
                         else:
                             valid=bool(validation)
                     except Exception as exc:
@@ -134,6 +143,20 @@ class CameraGroundInitiationShadow(object):
                         self.stats["roi_groups"][group]["rejected"]+=1
                         reasons=self.stats["roi_rejection_reasons"]
                         reasons[reason]=reasons.get(reason,0)+1
+                        if group=="vru" and reason=="lateral":
+                            try:
+                                excess=max(0.0,float(details["lateral"])-
+                                           float(details["allowed_lateral"]))
+                            except Exception:
+                                excess=None
+                            if excess is not None:
+                                for margin in self.vru_roi_extra_margins:
+                                    variant=self.last_vru_roi_ablation_candidates[margin]
+                                    if excess<=margin and not self._near(
+                                            item,variant,self.cross_camera_distance):
+                                        copy=dict(item);copy["vru_roi_extra_margin"]=margin
+                                        copy["vru_roi_lateral_excess"]=excess
+                                        variant.append(copy)
                         continue
                     self.stats["roi_groups"][group]["accepted"]+=1
                 candidates.append(item);self.stats["would_emit"]+=1
@@ -145,4 +168,5 @@ class CameraGroundInitiationShadow(object):
         result["roi_rejection_reasons"]=dict(self.stats["roi_rejection_reasons"])
         result["roi_groups"]=dict((name,dict(value))
                                   for name,value in self.stats["roi_groups"].items())
+        result["vru_roi_extra_margins"]=list(self.vru_roi_extra_margins)
         return result

@@ -1,12 +1,10 @@
 from __future__ import print_function
 
 
-def background_ready_banner(width=72):
+def background_ready_banner(height=8):
     """Return a conspicuous, terminal-friendly background READY block."""
-    separator = "-" * max(36, int(width))
-    return [
-        separator,
+    marker = ["|"] * max(4, int(height))
+    return marker + [
         "[BACKGROUND] Status:READY",
         ">>> BACKGROUND LEARNING COMPLETE - START TEST TARGETS NOW <<<",
-        separator,
-    ]
+    ] + marker

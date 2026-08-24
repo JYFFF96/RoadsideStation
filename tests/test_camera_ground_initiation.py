@@ -83,6 +83,21 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,report["validator_errors"])
         self.assertEqual(1,report["roi_rejection_reasons"]["validator_error:TypeError"])
 
+    def test_vru_lateral_margin_ablation_stays_separate_from_output(self):
+        config=self._config()
+        config["camera_ground_vru_roi_extra_margin_shadow"]=[1.0,2.0,3.0]
+        shadow=CameraGroundInitiationShadow(config)
+        result=shadow.update(
+            [self._view()],[],0.0,
+            validator=lambda item:(False,"lateral",{
+                "lateral":6.25,"allowed_lateral":4.5}),frame_token=10)
+        self.assertEqual([],result)
+        self.assertEqual([],shadow.last_vru_roi_ablation_candidates[1.0])
+        self.assertEqual(1,len(shadow.last_vru_roi_ablation_candidates[2.0]))
+        self.assertEqual(1,len(shadow.last_vru_roi_ablation_candidates[3.0]))
+        self.assertAlmostEqual(1.75,shadow.last_vru_roi_ablation_candidates[2.0][0][
+            "vru_roi_lateral_excess"])
+
     def test_truth_evaluation_is_isolated_and_counts_precision(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
             "radius":80.0,"match_distance":2.0})
@@ -93,6 +108,19 @@ class CameraGroundInitiationTests(unittest.TestCase):
             {"x":25.0,"y":0.0,"camera_source":"detector"}],frame_id=10)
         self.assertEqual(2,report["candidates"]);self.assertEqual(1,report["matched"])
         self.assertEqual(1,report["fp"]);self.assertEqual(.5,report["precision"])
+
+    def test_vru_roi_ablation_truth_is_reported_per_margin(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[
+            {"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_vru_roi_ablation({
+            1.0:[],2.0:[{"x":16.2,"y":0.0}],
+            3.0:[{"x":16.2,"y":0.0},{"x":25.0,"y":0.0}]},frame_id=10)
+        self.assertEqual(1,report["2"]["matched"])
+        self.assertEqual(1.0,report["2"]["precision"])
+        self.assertEqual(1,report["3"]["fp"])
+        self.assertEqual(.5,report["3"]["precision"])
 
 
 if __name__ == "__main__":unittest.main()

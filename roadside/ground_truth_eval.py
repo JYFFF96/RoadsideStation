@@ -54,6 +54,8 @@ class GroundTruthEvaluator(object):
         self._camera_ground_last_frame = None
         self._camera_ground_totals = {
             "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
+        self._camera_ground_vru_roi_last_frame = None
+        self._camera_ground_vru_roi_totals = {}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -121,6 +123,8 @@ class GroundTruthEvaluator(object):
         self._camera_ground_last_frame = None
         self._camera_ground_totals = {
             "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
+        self._camera_ground_vru_roi_last_frame = None
+        self._camera_ground_vru_roi_totals = {}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -371,6 +375,33 @@ class GroundTruthEvaluator(object):
         item["precision"]=(float(item["matched"])/item["candidates"]
                            if item["candidates"] else None)
         return item
+
+    def observe_camera_ground_vru_roi_ablation(self, variants, frame_id=None):
+        """Truth-attribute wider VRU road margins without changing runtime."""
+        if frame_id is not None and frame_id==self._camera_ground_vru_roi_last_frame:
+            return self.report_camera_ground_vru_roi_ablation()
+        self._camera_ground_vru_roi_last_frame=frame_id
+        truth=self.truth_objects()
+        for margin,candidates in (variants or {}).items():
+            key="%g"%float(margin);detected=self._detected_with_range(candidates or [])
+            totals=self._camera_ground_vru_roi_totals.setdefault(
+                key,{"candidates":0,"matched":0,"fp":0,"classes":{}})
+            pairs=self._match(truth,detected)
+            totals["candidates"]+=len(detected);totals["matched"]+=len(pairs)
+            totals["fp"]+=len(detected)-len(pairs)
+            for truth_index,unused_detected,unused_distance in pairs:
+                name=str(truth[truth_index].get("object_type","unknown_obstacle"))
+                totals["classes"][name]=totals["classes"].get(name,0)+1
+        return self.report_camera_ground_vru_roi_ablation()
+
+    def report_camera_ground_vru_roi_ablation(self):
+        result={}
+        for key,value in self._camera_ground_vru_roi_totals.items():
+            item=dict(value);item["classes"]=dict(value["classes"])
+            item["precision"]=(float(item["matched"])/item["candidates"]
+                               if item["candidates"] else None)
+            result[key]=item
+        return result
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
         """Measure selected-output contribution without feeding truth to runtime.

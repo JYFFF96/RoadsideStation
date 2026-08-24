@@ -647,3 +647,12 @@ adapter now supplies the correct arguments, understands the validator's
 `(accepted, reason, details)` result, exposes validator errors explicitly, and
 reports vehicle versus VRU ROI outcomes plus rejection reasons. The branch
 remains Shadow-only and does not change Tracker or ObjectList input.
+
+V0.6.12.8.2.2.61 adds evaluator-only VRU road-ROI margin ablations. The fixed
+V0.6.12.8.2.2.60 run produced zero validator errors, 585 accepted camera-ground
+samples (581 truth matches and zero false positives), and 156 VRU samples
+rejected only for lateral distance. The rejected samples are now compared at
+additional 1 m, 2 m, and 3 m margins, with cumulative truth/false-positive
+precision reported independently for each margin. No variant enters Tracker or
+ObjectList. The background READY banner also uses eight vertical `|` lines above
+and below the message so the target-spawn point is easier to spot in the log.

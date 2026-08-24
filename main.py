@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.60 Camera Ground ROI Adapter Fix starting...")
+ print("RoadsideStation V0.6.12.8.2.2.61 Camera VRU ROI Ablation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -676,6 +676,9 @@ def main():
    if evaluator is not None:
     evaluator.observe_camera_ground_initiation(
      camera_ground_candidates,frame_id=camera_ground_token)
+    evaluator.observe_camera_ground_vru_roi_ablation(
+     camera_ground_shadow.last_vru_roi_ablation_candidates,
+     frame_id=camera_ground_token)
    selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
    selected_held=fusion.last_selected_track_admission_rejections
    if eval_cfg.get("selected_track_admission_camera_profiling",False):
@@ -761,6 +764,10 @@ def main():
      camera_ground.get("frames",0),camera_ground.get("detections",0),camera_ground.get("class_rejected",0),camera_ground.get("confidence_rejected",0),camera_ground.get("projection_rejected",0),camera_ground.get("range_rejected",0),camera_ground.get("cross_camera_deduped",0),camera_ground.get("lidar_deduped",0),camera_ground.get("roi_rejected",0),camera_ground.get("validator_errors",0),camera_ground.get("would_emit",0),camera_ground_eval.get("matched",0),camera_ground_eval.get("fp",0),_pct(camera_ground_eval.get("precision")),camera_ground_eval.get("classes",{}),camera_ground_eval.get("sources",{})))
     print("      [CAMERA GROUND ROI] Groups:%s RejectReasons:%s | callback=x/y/z/extent/candidate"%(
      camera_ground.get("roi_groups",{}),camera_ground.get("roi_rejection_reasons",{})))
+    camera_vru_roi=evaluator.report_camera_ground_vru_roi_ablation() if evaluator is not None else {}
+    for margin,value in sorted(camera_vru_roi.items(),key=lambda item:float(item[0])):
+     print("      [CAMERA VRU ROI +%sm SHADOW] Candidates:%d Truth:%d FP:%d Precision:%s Classes:%s | TrackerInput:UNCHANGED"%(
+      margin,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("classes",{})))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
