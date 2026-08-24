@@ -151,5 +151,33 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,report["matched"]);self.assertEqual(0,report["fp"])
         self.assertEqual(1.0,report["precision"])
 
+    def test_counterfactual_reports_incremental_recall(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[
+            {"x":10.0,"y":0.0,"object_type":"car"},
+            {"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_counterfactual(
+            [{"x":10.1,"y":0.0}],
+            [{"x":16.2,"y":0.0,"camera_source":"detector"}],frame_id=11)
+        self.assertEqual(1,report["base_matched"])
+        self.assertEqual(1,report["incremental_matched"])
+        self.assertEqual(1.0,report["combined_recall"])
+        self.assertEqual(.5,report["recall_gain"])
+
+    def test_deployment_verdict_blocks_carla_truth_source(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0,
+            "camera_ground_deployment_min_candidates":1,
+            "camera_ground_deployment_min_precision":.9,
+            "camera_ground_deployment_min_recall_gain":.1})
+        evaluator.truth_objects=lambda:[
+            {"x":16.0,"y":0.0,"object_type":"person"}]
+        evaluator.observe_camera_ground_counterfactual([], [
+            {"x":16.1,"y":0.0,"camera_source":"carla_truth"}],frame_id=11)
+        verdict=evaluator.camera_ground_deployment_verdict()
+        self.assertEqual("BLOCKED_CARLA_TRUTH",verdict["status"])
+        self.assertFalse(verdict["checks"]["detector_source"])
+
 
 if __name__ == "__main__":unittest.main()

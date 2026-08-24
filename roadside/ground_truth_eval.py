@@ -59,6 +59,11 @@ class GroundTruthEvaluator(object):
         self._camera_ground_temporal_last_frame = None
         self._camera_ground_temporal_totals = {
             "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
+        self._camera_ground_counterfactual_last_frame = None
+        self._camera_ground_counterfactual_totals = {
+            "frames":0,"truth":0,"base_matched":0,"camera_candidates":0,
+            "camera_truth":0,"camera_fp":0,"incremental_matched":0,
+            "combined_matched":0,"classes":{},"sources":{}}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -131,6 +136,11 @@ class GroundTruthEvaluator(object):
         self._camera_ground_temporal_last_frame = None
         self._camera_ground_temporal_totals = {
             "candidates":0,"matched":0,"fp":0,"classes":{},"sources":{}}
+        self._camera_ground_counterfactual_last_frame = None
+        self._camera_ground_counterfactual_totals = {
+            "frames":0,"truth":0,"base_matched":0,"camera_candidates":0,
+            "camera_truth":0,"camera_fp":0,"incremental_matched":0,
+            "combined_matched":0,"classes":{},"sources":{}}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -433,6 +443,64 @@ class GroundTruthEvaluator(object):
         item["precision"]=(float(item["matched"])/item["candidates"]
                            if item["candidates"] else None)
         return item
+
+    def observe_camera_ground_counterfactual(self, tracks, camera_candidates,
+                                             frame_id=None):
+        """Measure recall gain if confirmed camera candidates joined Tracker."""
+        if frame_id is not None and frame_id==self._camera_ground_counterfactual_last_frame:
+            return self.report_camera_ground_counterfactual()
+        self._camera_ground_counterfactual_last_frame=frame_id
+        truth=self.truth_objects();base=self._detected_with_range(tracks or [])
+        camera=self._detected_with_range(camera_candidates or [])
+        base_pairs=self._match(truth,base);base_truth=set(x[0] for x in base_pairs)
+        remaining=[item for index,item in enumerate(truth) if index not in base_truth]
+        incremental_pairs=self._match(remaining,camera)
+        camera_pairs=self._match(truth,camera)
+        totals=self._camera_ground_counterfactual_totals;totals["frames"]+=1
+        totals["truth"]+=len(truth);totals["base_matched"]+=len(base_pairs)
+        totals["camera_candidates"]+=len(camera)
+        totals["camera_truth"]+=len(camera_pairs)
+        totals["camera_fp"]+=len(camera)-len(camera_pairs)
+        totals["incremental_matched"]+=len(incremental_pairs)
+        totals["combined_matched"]+=len(base_pairs)+len(incremental_pairs)
+        for truth_index,unused_detected,unused_distance in incremental_pairs:
+            name=str(remaining[truth_index].get("object_type","unknown_obstacle"))
+            totals["classes"][name]=totals["classes"].get(name,0)+1
+        for item in camera:
+            source=str(item.get("camera_source","none"))
+            totals["sources"][source]=totals["sources"].get(source,0)+1
+        return self.report_camera_ground_counterfactual()
+
+    def report_camera_ground_counterfactual(self):
+        item=dict(self._camera_ground_counterfactual_totals)
+        item["classes"]=dict(self._camera_ground_counterfactual_totals["classes"])
+        item["sources"]=dict(self._camera_ground_counterfactual_totals["sources"])
+        truth=item["truth"];candidates=item["camera_candidates"]
+        item["base_recall"]=(float(item["base_matched"])/truth if truth else None)
+        item["combined_recall"]=(float(item["combined_matched"])/truth if truth else None)
+        item["recall_gain"]=(float(item["incremental_matched"])/truth if truth else None)
+        item["camera_precision"]=(float(item["camera_truth"])/candidates
+                                  if candidates else None)
+        return item
+
+    def camera_ground_deployment_verdict(self):
+        item=self.report_camera_ground_counterfactual();cfg=self.config
+        sources=item.get("sources",{});source=(max(sources,key=sources.get)
+                                               if sources else "none")
+        checks={
+            "detector_source":source=="detector",
+            "samples":item["camera_candidates"]>=int(cfg.get(
+                "camera_ground_deployment_min_candidates",100)),
+            "precision":(item["camera_precision"] is not None and
+                         item["camera_precision"]>=float(cfg.get(
+                             "camera_ground_deployment_min_precision",.95))),
+            "recall_gain":(item["recall_gain"] is not None and
+                           item["recall_gain"]>=float(cfg.get(
+                               "camera_ground_deployment_min_recall_gain",.05)))}
+        if not checks["detector_source"]:status="BLOCKED_CARLA_TRUTH"
+        elif all(checks.values()):status="READY"
+        else:status="MORE_EVIDENCE"
+        return {"status":status,"source":source,"checks":checks}
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
         """Measure selected-output contribution without feeding truth to runtime.

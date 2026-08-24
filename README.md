@@ -664,3 +664,12 @@ extra 3 m recovered 11; every recovered CARLA-truth sample matched a person.
 Normal-ROI candidates plus only the extra-1-m VRU candidates now require two
 distinct camera frames within a 2 m association gate. Confirmed candidates are
 truth-attributed and reported, but remain isolated from Tracker and ObjectList.
+
+V0.6.12.8.2.2.63 measures the end-to-end value of that confirmed camera path
+without enabling it. The V0.6.12.8.2.2.62 run temporally confirmed 490 of 506
+camera inputs; all 490 matched CARLA pedestrians and none was a false positive.
+Each frame now compares current Tracker truth coverage with a counterfactual
+Tracker-plus-camera result, reporting incremental matches, combined recall,
+recall gain, camera precision and class attribution. A deployment verdict is
+also explicit: `carla_truth` is always blocked, while a real detector must
+provide at least 100 samples, 95 percent precision and 5 percent recall gain.
