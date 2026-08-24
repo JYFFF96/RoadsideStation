@@ -63,6 +63,26 @@ class CameraGroundInitiationTests(unittest.TestCase):
                         frame_token=10)
         self.assertEqual(1,rejected.report()["roi_rejected"])
 
+    def test_tuple_roi_result_is_unwrapped_and_grouped(self):
+        shadow=CameraGroundInitiationShadow(self._config())
+        result=shadow.update(
+            [self._view()],[],0.0,
+            validator=lambda item:(True,"ok",{"lateral":0.2}),frame_token=10)
+        self.assertEqual(1,len(result))
+        report=shadow.report()
+        self.assertEqual(1,report["roi_groups"]["vru"]["accepted"])
+        self.assertEqual(0,report["validator_errors"])
+
+    def test_validator_error_is_visible_instead_of_silent(self):
+        shadow=CameraGroundInitiationShadow(self._config())
+        def broken(unused):
+            raise TypeError("wrong callback signature")
+        self.assertEqual([],shadow.update(
+            [self._view()],[],0.0,validator=broken,frame_token=10))
+        report=shadow.report()
+        self.assertEqual(1,report["validator_errors"])
+        self.assertEqual(1,report["roi_rejection_reasons"]["validator_error:TypeError"])
+
     def test_truth_evaluation_is_isolated_and_counts_precision(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
             "radius":80.0,"match_distance":2.0})

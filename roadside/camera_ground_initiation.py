@@ -62,8 +62,11 @@ class CameraGroundInitiationShadow(object):
         self.stats={"frames":0,"detections":0,"class_rejected":0,
                     "confidence_rejected":0,"projection_rejected":0,
                     "range_rejected":0,"cross_camera_deduped":0,
-                    "lidar_deduped":0,"roi_rejected":0,"would_emit":0,
-                    "classes":{}}
+                    "lidar_deduped":0,"roi_rejected":0,
+                    "validator_errors":0,"would_emit":0,
+                    "classes":{},"roi_rejection_reasons":{},
+                    "roi_groups":{"vehicle":{"tested":0,"accepted":0,"rejected":0},
+                                  "vru":{"tested":0,"accepted":0,"rejected":0}}}
 
     @staticmethod
     def _near(item, others, distance):
@@ -111,14 +114,35 @@ class CameraGroundInitiationShadow(object):
                 if self._near(item,existing,self.dedupe_distance):
                     self.stats["lidar_deduped"]+=1;continue
                 if validator is not None:
-                    try:valid=bool(validator(item))
-                    except Exception:valid=False
+                    reason="rejected"
+                    group=("vru" if class_name in
+                           ("person","pedestrian","bicycle","motorcycle")
+                           else "vehicle")
+                    self.stats["roi_groups"][group]["tested"]+=1
+                    try:
+                        validation=validator(item)
+                        if isinstance(validation,(tuple,list)):
+                            valid=bool(validation[0])
+                            if len(validation)>1:reason=str(validation[1])
+                        else:
+                            valid=bool(validation)
+                    except Exception as exc:
+                        valid=False;reason="validator_error:%s"%type(exc).__name__
+                        self.stats["validator_errors"]+=1
                     if not valid:
-                        self.stats["roi_rejected"]+=1;continue
+                        self.stats["roi_rejected"]+=1
+                        self.stats["roi_groups"][group]["rejected"]+=1
+                        reasons=self.stats["roi_rejection_reasons"]
+                        reasons[reason]=reasons.get(reason,0)+1
+                        continue
+                    self.stats["roi_groups"][group]["accepted"]+=1
                 candidates.append(item);self.stats["would_emit"]+=1
                 self.stats["classes"][class_name]=self.stats["classes"].get(class_name,0)+1
         return candidates
 
     def report(self):
         result=dict(self.stats);result["classes"]=dict(self.stats["classes"])
+        result["roi_rejection_reasons"]=dict(self.stats["roi_rejection_reasons"])
+        result["roi_groups"]=dict((name,dict(value))
+                                  for name,value in self.stats["roi_groups"].items())
         return result

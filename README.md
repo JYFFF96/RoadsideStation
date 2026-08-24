@@ -638,3 +638,12 @@ intersected with the configured road plane to estimate a world position. The
 and the normal road ROI. Counts and CARLA truth precision are evaluation-only.
 This is the same calibration-matrix operation needed by a Qt/C++ detector path;
 CARLA actors are never read by the positioning algorithm or runtime policy.
+
+V0.6.12.8.2.2.60 fixes the camera-ground road-ROI adapter. V0.6.12.8.2.2.59
+passed the complete candidate dictionary to an API that requires separate
+`x`, `y`, `z`, `extent`, and candidate arguments; its fail-closed exception
+handling therefore reported every tested candidate as an ROI rejection. The
+adapter now supplies the correct arguments, understands the validator's
+`(accepted, reason, details)` result, exposes validator errors explicitly, and
+reports vehicle versus VRU ROI outcomes plus rejection reasons. The branch
+remains Shadow-only and does not change Tracker or ObjectList input.
