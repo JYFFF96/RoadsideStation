@@ -489,6 +489,9 @@ evaluation:
   # V0.6.12.8.2.2.68: evaluator-only identity association comparison for
   # dense camera-origin pedestrian tracks. Never changes Tracker matching.
   camera_ground_identity_match_gates: [1.0, 2.0, 3.0, 4.0]
+  # V0.6.12.8.2.2.70: evaluator-only source-aware recovery comparison for
+  # camera births outside the production 3.5 m Tracker association gate.
+  camera_ground_reassociation_shadow_gates: [4.0, 5.0, 6.0, 8.0]
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]

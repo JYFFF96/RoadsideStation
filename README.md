@@ -749,3 +749,18 @@ gate, or assignment conflict when an eligible track was claimed by another
 detection. It also reports the nearest active and nearest camera-origin track
 distances plus candidate multiplicity. All fields are diagnostic-only; greedy
 assignment, gates, track IDs, admission, and ObjectList output are unchanged.
+
+V0.6.12.8.2.2.70 adds source-aware camera reassociation gates in Shadow mode.
+The V0.6.12.8.2.2.69 run produced 21 camera-origin track births: 19 had no
+active track inside the production 3.5 m gate and only two were assignment
+conflicts. Normal updates stayed well inside the gate, with 0.81 m average,
+1.51 m P90, and 2.46 m maximum association distance, while a new track's
+nearest camera-origin track averaged 7.46 m. A global gate increase would
+therefore create dense-pedestrian identity risk. For each outside-gate birth,
+this version compares 4 m, 5 m, 6 m, and 8 m camera-origin-only recovery gates.
+CARLA truth then labels the nearest prior track as the same actor, a conflicting
+actor, ambiguous, or previously unknown; the diagnostic also rejects a simple
+recovery when that prior track is already claimed by another detection. Only
+an available, single-actor-consistent association is counted as safe recovery.
+The experiment does not change production assignment, the 3.5 m gate, Tracker
+IDs, camera admission, or ObjectList output.

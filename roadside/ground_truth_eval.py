@@ -24,6 +24,10 @@ class GroundTruthEvaluator(object):
             float(x) for x in self.config.get(
                 "camera_ground_identity_match_gates", [1.0,2.0,3.0,4.0])
             if float(x)>0.0))
+        self.camera_ground_reassociation_shadow_gates = sorted(set(
+            float(x) for x in self.config.get(
+                "camera_ground_reassociation_shadow_gates", [4.0,5.0,6.0,8.0])
+            if float(x)>0.0))
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
@@ -72,6 +76,8 @@ class GroundTruthEvaluator(object):
         self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
         self._camera_ground_enforcement_totals["identity_gates"] = \
             self._empty_camera_identity_gates()
+        self._camera_ground_enforcement_totals["reassociation_gates"] = \
+            self._empty_camera_reassociation_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
@@ -135,6 +141,12 @@ class GroundTruthEvaluator(object):
                                 "track_actors":{},"actor_ids":{}})
                     for gate in self.camera_ground_identity_match_gates)
 
+    def _empty_camera_reassociation_gates(self):
+        return dict(("%g"%gate,{"eligible":0,"available":0,"claimed":0,
+                                "consistent":0,"conflict":0,"ambiguous":0,
+                                "unknown":0,"safe_recovery":0,"distances":[]})
+                    for gate in self.camera_ground_reassociation_shadow_gates)
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -177,6 +189,8 @@ class GroundTruthEvaluator(object):
         self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
         self._camera_ground_enforcement_totals["identity_gates"] = \
             self._empty_camera_identity_gates()
+        self._camera_ground_enforcement_totals["reassociation_gates"] = \
+            self._empty_camera_reassociation_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
@@ -590,6 +604,34 @@ class GroundTruthEvaluator(object):
             if actor_id is not None:
                 actor_key=int(actor_id);totals["actor_ids"][actor_key]=name
                 track_key=str(detected[detected_index].get("id","unknown"))
+                detection=detected[detected_index]
+                nearest_id=detection.get(
+                    "track_association_nearest_camera_origin_id")
+                nearest_distance=detection.get(
+                    "track_association_nearest_camera_origin_distance")
+                if (str(detection.get("track_state",""))=="new" and
+                        str(detection.get("track_association_birth_reason",""))==
+                        "outside_gate" and nearest_id is not None and
+                        nearest_distance is not None):
+                    previous_actors=totals["track_actors"].get(
+                        str(nearest_id),{})
+                    claimed=bool(detection.get(
+                        "track_association_nearest_camera_origin_claimed",False))
+                    for gate in self.camera_ground_reassociation_shadow_gates:
+                        if float(nearest_distance)>gate:continue
+                        bucket=totals["reassociation_gates"]["%g"%gate]
+                        bucket["eligible"]+=1
+                        bucket["distances"].append(float(nearest_distance))
+                        bucket["claimed" if claimed else "available"]+=1
+                        if not previous_actors:
+                            bucket["unknown"]+=1
+                        elif actor_key in previous_actors:
+                            if len(previous_actors)==1:
+                                bucket["consistent"]+=1
+                                if not claimed:bucket["safe_recovery"]+=1
+                            else:bucket["ambiguous"]+=1
+                        else:
+                            bucket["conflict"]+=1
                 actor_tracks=totals["actor_tracks"].setdefault(actor_key,{})
                 actor_tracks[track_key]=1
                 track_actors=totals["track_actors"].setdefault(track_key,{})
@@ -671,6 +713,20 @@ class GroundTruthEvaluator(object):
                 "error_avg":(sum(errors)/len(errors) if errors else None),
                 "error_max":(max(errors) if errors else None)}
         item["identity_gates"]=identity_gates
+        reassociation_gates={}
+        for key,bucket in totals["reassociation_gates"].items():
+            known=(bucket["consistent"]+bucket["conflict"]+
+                   bucket["ambiguous"])
+            reassociation_gates[key]={
+                "eligible":bucket["eligible"],"available":bucket["available"],
+                "claimed":bucket["claimed"],"consistent":bucket["consistent"],
+                "conflict":bucket["conflict"],"ambiguous":bucket["ambiguous"],
+                "unknown":bucket["unknown"],
+                "safe_recovery":bucket["safe_recovery"],
+                "identity_precision":(
+                    float(bucket["consistent"])/known if known else None),
+                "distance":self._distribution(bucket["distances"])}
+        item["reassociation_gates"]=reassociation_gates
         item["association"]={
             "updates":len(totals["association_distances"]),
             "match_distance":self._distribution(totals["association_distances"]),

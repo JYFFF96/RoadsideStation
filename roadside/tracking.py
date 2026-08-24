@@ -305,6 +305,7 @@ class NearestTracker(object):
         for di, det in enumerate(detections):
             nearest = None
             nearest_camera = None
+            nearest_camera_id = None
             candidate_count = 0
             camera_candidate_count = 0
             for tid in unmatched:
@@ -317,12 +318,14 @@ class NearestTracker(object):
                 camera_origin = bool(t.get("camera_ground_origin", False))
                 if camera_origin and (nearest_camera is None or d < nearest_camera):
                     nearest_camera = d
+                    nearest_camera_id = tid
                 if d < self.max_distance:
                     pending.append((d, di, tid))
                     candidate_count += 1
                     if camera_origin:camera_candidate_count += 1
             association_meta[di] = {
                 "nearest": nearest,"nearest_camera": nearest_camera,
+                "nearest_camera_id":nearest_camera_id,
                 "candidates": candidate_count,
                 "camera_candidates": camera_candidate_count}
         pending.sort()
@@ -445,6 +448,10 @@ class NearestTracker(object):
             item["track_association_nearest_distance"] = meta.get("nearest")
             item["track_association_nearest_camera_origin_distance"] = \
                 meta.get("nearest_camera")
+            item["track_association_nearest_camera_origin_id"] = \
+                meta.get("nearest_camera_id")
+            item["track_association_nearest_camera_origin_claimed"] = bool(
+                meta.get("nearest_camera_id") in assigned_track)
             if old is None:
                 if meta.get("nearest") is None:
                     reason = "no_active_tracks"

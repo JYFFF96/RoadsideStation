@@ -343,6 +343,10 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,born[0]["track_association_candidate_count"])
         self.assertEqual(1,born[0][
             "track_association_camera_origin_candidate_count"])
+        self.assertEqual(first["id"],born[0][
+            "track_association_nearest_camera_origin_id"])
+        self.assertTrue(born[0][
+            "track_association_nearest_camera_origin_claimed"])
 
     def test_camera_enforcement_reports_track_birth_causes(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
@@ -362,6 +366,45 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual({"outside_gate":1},association["birth_reasons"])
         self.assertAlmostEqual(4.2,association["birth_nearest"]["mean"])
         self.assertAlmostEqual(4.4,association["birth_nearest_camera"]["mean"])
+
+    def test_camera_reassociation_shadow_requires_available_same_actor_track(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":4.0,
+            "camera_ground_reassociation_shadow_gates":[4.0,5.0,6.0,8.0]})
+        truth=[{"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        evaluator.truth_objects=lambda:list(truth)
+        evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_1","x":16.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_association_birth_reason":"no_active_tracks"}],frame_id=10)
+        truth[:]=[{"actor_id":7,"x":20.5,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_2","x":20.5,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_association_birth_reason":"outside_gate",
+            "track_association_nearest_camera_origin_id":"vehicle_1",
+            "track_association_nearest_camera_origin_distance":4.5,
+            "track_association_nearest_camera_origin_claimed":False}],frame_id=11)
+        self.assertEqual(0,report["reassociation_gates"]["4"]["eligible"])
+        for gate in ("5","6","8"):
+            value=report["reassociation_gates"][gate]
+            self.assertEqual(1,value["eligible"])
+            self.assertEqual(1,value["consistent"])
+            self.assertEqual(1,value["safe_recovery"])
+            self.assertEqual(1.0,value["identity_precision"])
+        truth[:]=[{"actor_id":8,"x":25.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_3","x":25.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_association_birth_reason":"outside_gate",
+            "track_association_nearest_camera_origin_id":"vehicle_1",
+            "track_association_nearest_camera_origin_distance":4.5,
+            "track_association_nearest_camera_origin_claimed":False}],frame_id=12)
+        value=report["reassociation_gates"]["5"]
+        self.assertEqual(1,value["consistent"])
+        self.assertEqual(1,value["conflict"])
+        self.assertEqual(.5,value["identity_precision"])
+        self.assertEqual(1,value["safe_recovery"])
 
 
 if __name__ == "__main__":unittest.main()
