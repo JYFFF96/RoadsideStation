@@ -708,3 +708,16 @@ of current and cumulative matched tracks, false positives, duplicate tracks,
 camera-only samples, LiDAR takeovers, unique tracks, unique truth actors, states,
 and classes. CARLA truth remains confined to the evaluator and cannot influence
 Tracker admission.
+
+V0.6.12.8.2.2.67 corrects dense-pedestrian identity diagnostics. The
+V0.6.12.8.2.2.66 run observed 204 camera-origin track samples, all 204 matched
+to person truth with zero false positives, while 19 unique track IDs covered 11
+truth actors. Its old proximity-based duplicate count was inflated because
+multiple legitimate pedestrians can lie inside the shared 4 m evaluation gate.
+An unmatched track is now classified as duplicate-like only when it remains
+inside a truth gate; other unmatched tracks are spatial false positives.
+Persistent actor-to-track and track-to-actor maps separately report fragmented
+actors, extra ID fragments, identity-switching tracks, and average/maximum
+track lifetime. Cumulative camera-only and LiDAR-takeover samples are also
+printed. These additions remain CARLA evaluator diagnostics and do not alter
+the detector-only person enforcement policy or public object output.

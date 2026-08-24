@@ -270,7 +270,7 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual("C",track["track_sensors"])
         self.assertTrue(track["camera_ground_tracker_enforced"])
 
-    def test_actual_camera_origin_track_attribution_counts_duplicates(self):
+    def test_actual_camera_origin_track_attribution_counts_identity_fragments(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
             "radius":80.0,"match_distance":2.0})
         evaluator.truth_objects=lambda:[
@@ -285,10 +285,19 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(2,report["track_samples"])
         self.assertEqual(1,report["matched"]);self.assertEqual(1,report["fp"])
         self.assertEqual(.5,report["precision"])
-        self.assertEqual(1,report["duplicate_tracks"])
+        self.assertEqual(1,report["duplicate_like_fp"])
+        self.assertEqual(0,report["spatial_fp"])
         self.assertEqual(1,report["unique_actors"])
         self.assertEqual(1,report["current"]["camera_only"])
         self.assertEqual(1,report["current"]["lidar_takeover"])
+        report=evaluator.observe_camera_ground_enforcement([
+            {"id":"vehicle_2","x":16.2,"y":0.0,"track_state":"confirmed",
+             "track_camera_ground_origin":True,"track_lidar_hits":1}],frame_id=11)
+        self.assertEqual(1,report["fragmented_actors"])
+        self.assertEqual(1,report["id_fragments"])
+        self.assertEqual(0,report["identity_switch_tracks"])
+        self.assertAlmostEqual(1.5,report["avg_track_frames"])
+        self.assertEqual(2,report["max_track_frames"])
 
 
 if __name__ == "__main__":unittest.main()
