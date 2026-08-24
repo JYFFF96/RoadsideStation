@@ -456,7 +456,10 @@ class CameraGroundInitiationTests(unittest.TestCase):
                 {"name":"same_camera","require_same_camera":True},
                 {"name":"heading_ge_0","min_heading_cos":0.0},
                 {"name":"combined","require_same_camera":True,
-                 "min_heading_cos":0.5}]})
+                 "min_heading_cos":0.5},
+                {"name":"tight","max_distance":1.5,"max_gap":2.0,
+                 "max_tombstone_speed":1.0,"max_temporal_motion":0.5},
+                {"name":"too_tight","max_distance":1.0}]})
         truth=[{"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
         evaluator.truth_objects=lambda:list(truth)
         evaluator.observe_camera_ground_enforcement([{
@@ -494,12 +497,16 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,same["same_camera"])
         self.assertEqual(1.0,same["same_camera_rate"])
         self.assertAlmostEqual(1.0,same["heading_cos"]["p50"])
-        for name in ("same_camera","heading_ge_0","combined"):
+        for name in ("same_camera","heading_ge_0","combined","tight"):
             rule=report["tombstone_feature_rules"]["rules"][name]
             self.assertEqual(1,rule["base"])
             self.assertEqual(1,rule["passed"])
             self.assertEqual(1,rule["consistent"])
             self.assertEqual(1.0,rule["identity_precision"])
+        rejected=report["tombstone_feature_rules"]["rules"]["too_tight"]
+        self.assertEqual(1,rejected["base"])
+        self.assertEqual(0,rejected["passed"])
+        self.assertEqual(1,rejected["rejected"])
 
     def test_camera_tombstone_rule_missing_feature_fails_closed(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{

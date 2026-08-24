@@ -767,6 +767,22 @@ class GroundTruthEvaluator(object):
                                         if heading_cos is None:missing=True
                                         elif heading_cos<float(rule["min_heading_cos"]):
                                             passed=False
+                                    if rule.get("max_distance") is not None:
+                                        if tombstone_distance is None:missing=True
+                                        elif float(tombstone_distance)>float(
+                                                rule["max_distance"]):passed=False
+                                    if rule.get("max_gap") is not None:
+                                        if tombstone_gap is None:missing=True
+                                        elif float(tombstone_gap)>float(
+                                                rule["max_gap"]):passed=False
+                                    if rule.get("max_tombstone_speed") is not None:
+                                        if None in (tvx,tvy):missing=True
+                                        elif math.hypot(float(tvx),float(tvy))>float(
+                                                rule["max_tombstone_speed"]):passed=False
+                                    if rule.get("max_temporal_motion") is not None:
+                                        if None in (mdx,mdy):missing=True
+                                        elif math.hypot(float(mdx),float(mdy))>float(
+                                                rule["max_temporal_motion"]):passed=False
                                     if missing:
                                         rule_bucket["feature_missing"]+=1;continue
                                     if not passed:

@@ -801,3 +801,12 @@ rules on exactly the same predicted 2 m population. Missing camera or motion
 features fail closed and are reported separately. CARLA actor identity only
 labels each counterfactual result. The rules never alter production matching,
 resurrect track IDs, or change Tracker and ObjectList output.
+
+V0.6.12.8.2.2.74 replaces the rejected camera-ID and heading rule comparison
+with tight distance, gap, and low-motion Shadow gates. In the `.73` run every
+candidate came from the same camera, while heading-based rules retained only a
+conflicting actor. The two same-actor samples instead appeared at 0.12--0.17 m
+after 2.42--2.50 seconds; five conflicts appeared around 0.99--1.25 m after
+4.99--5.91 seconds. This version evaluates 0.20 m and 0.35 m distance limits,
+a 3.0-second gap, and a low-speed combination. Missing features fail closed.
+All rules remain evaluator-only and leave Tracker IDs and ObjectList unchanged.
