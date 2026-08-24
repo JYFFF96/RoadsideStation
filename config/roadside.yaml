@@ -362,6 +362,8 @@ fusion:
   # becomes zero. Neither rule reaches Tracker or the public ObjectList.
   radar_initiation_seed_bridge_shadow_enabled: true
   radar_initiation_seed_bridge_required_frames: [2, 3]
+  # V0.6.12.8.2.2.56: independent Shadow states reveal radar position jumps.
+  radar_initiation_seed_bridge_match_gates: [2.5, 4.0, 6.0]
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

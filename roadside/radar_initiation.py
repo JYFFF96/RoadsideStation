@@ -34,6 +34,9 @@ class NearRadarTrackInitiator(object):
         self.seed_bridge_required_frames = sorted(set(
             max(2, int(value)) for value in c.get(
                 "radar_initiation_seed_bridge_required_frames", [2, 3])))
+        self.seed_bridge_match_gates = sorted(set(
+            float(value) for value in c.get(
+                "radar_initiation_seed_bridge_match_gates", [2.5, 4.0, 6.0])))
         self.required_frames = max(1, int(c.get("radar_initiation_required_frames", 2)))
         self.match_gate = float(c.get("radar_initiation_match_gate", 2.5))
         self.ttl = float(c.get("radar_initiation_ttl", 0.6))
@@ -49,6 +52,9 @@ class NearRadarTrackInitiator(object):
             "radar_initiation_default_extent", [4.5, 1.8, 1.6]))
         self._pending = []
         self._seed_bridge_pending = []
+        self._seed_bridge_gate_pending = dict(
+            ("%.1f" % gate, []) for gate in self.seed_bridge_match_gates
+            if abs(gate - self.match_gate) > 1e-6)
         self._last_frame = None
         self.last_shadow_candidates = []
         self.last_seed_bridge_shadow_candidates = {}
@@ -59,6 +65,19 @@ class NearRadarTrackInitiator(object):
     def _empty_seed_bridge_stats(self):
         return {"frames": 0, "seeds": 0, "matches": 0,
                 "below_speed_matches": 0, "expired": 0,
+                "expired_hits": {"1": 0, "2": 0, "3+": 0},
+                "rules": dict(
+                    (str(frames), {"confirmed": 0, "dedupe_rejected": 0,
+                                   "roi_rejected": 0, "would_emit": 0})
+                    for frames in self.seed_bridge_required_frames),
+                "gate_ablation": dict(
+                    ("%.1f" % gate, self._empty_seed_bridge_gate_stats())
+                    for gate in self.seed_bridge_match_gates
+                    if abs(gate - self.match_gate) > 1e-6)}
+
+    def _empty_seed_bridge_gate_stats(self):
+        return {"seeds": 0, "matches": 0, "below_speed_matches": 0,
+                "expired": 0,
                 "expired_hits": {"1": 0, "2": 0, "3+": 0},
                 "rules": dict(
                     (str(frames), {"confirmed": 0, "dedupe_rejected": 0,
@@ -113,6 +132,13 @@ class NearRadarTrackInitiator(object):
         bridge["rules"] = dict(
             (key, dict(value))
             for key, value in self.seed_bridge_stats["rules"].items())
+        bridge["gate_ablation"] = {}
+        for gate, value in self.seed_bridge_stats["gate_ablation"].items():
+            copied = dict(value)
+            copied["expired_hits"] = dict(value["expired_hits"])
+            copied["rules"] = dict(
+                (key, dict(rule)) for key, rule in value["rules"].items())
+            bridge["gate_ablation"][gate] = copied
         stats["seed_bridge_shadow"] = bridge
 
     def _accumulate(self, stats):
@@ -185,6 +211,12 @@ class NearRadarTrackInitiator(object):
         if not self.seed_bridge_shadow_enabled:
             return
         self.seed_bridge_stats["frames"] += 1
+        for gate in self.seed_bridge_match_gates:
+            if abs(gate - self.match_gate) <= 1e-6:
+                continue
+            self._update_seed_bridge_gate_shadow(
+                "%.1f" % gate, gate, singleton_groups, existing, now,
+                token, validator)
         kept = []
         for old in self._seed_bridge_pending:
             if now - float(old.get("last_time", now)) <= self.single_point_ttl:
@@ -258,6 +290,81 @@ class NearRadarTrackInitiator(object):
                         continue
                 self.seed_bridge_stats["rules"][rule]["would_emit"] += 1
                 self.last_seed_bridge_shadow_candidates[rule].append(item)
+
+    def _update_seed_bridge_gate_shadow(self, gate_key, gate, singleton_groups,
+                                        existing, now, token, validator):
+        pending = self._seed_bridge_gate_pending[gate_key]
+        stats = self.seed_bridge_stats["gate_ablation"][gate_key]
+        kept = []
+        for old in pending:
+            if now - float(old.get("last_time", now)) <= self.single_point_ttl:
+                kept.append(old)
+                continue
+            stats["expired"] += 1
+            hits = int(old.get("hits", 1))
+            stats["expired_hits"]["3+" if hits >= 3 else str(hits)] += 1
+        pending = kept
+        existing_pending = len(pending)
+        used_pending = set()
+        for group in singleton_groups:
+            candidate = self._candidate(group, mode="single_seed_bridge_shadow")
+            speed = abs(float(candidate.get("radar_radial_velocity", 0.0)))
+            best = None
+            for index, old in enumerate(pending[:existing_pending]):
+                if index in used_pending:
+                    continue
+                distance = math.hypot(float(candidate["x"]) - float(old["x"]),
+                                      float(candidate["y"]) - float(old["y"]))
+                if distance <= gate and (best is None or distance < best[0]):
+                    best = (distance, index, old)
+            if best is None:
+                if speed < self.single_point_min_abs_speed:
+                    continue
+                entry = dict(candidate)
+                entry.update({"hits": 1, "last_time": now,
+                              "last_frame": token, "seed_speed": speed,
+                              "confirmed_rules": []})
+                pending.append(entry)
+                stats["seeds"] += 1
+                continue
+            unused_distance, index, old = best
+            used_pending.add(index)
+            stats["matches"] += 1
+            if speed < self.single_point_min_abs_speed:
+                stats["below_speed_matches"] += 1
+            seed_speed = float(old.get("seed_speed", speed))
+            confirmed_rules = list(old.get("confirmed_rules", []))
+            old.update(candidate)
+            old.update({"hits": int(old.get("hits", 1)) + 1,
+                        "last_time": now, "last_frame": token,
+                        "seed_speed": seed_speed,
+                        "confirmed_rules": confirmed_rules})
+            for required in self.seed_bridge_required_frames:
+                rule = str(required)
+                if int(old["hits"]) < required or rule in confirmed_rules:
+                    continue
+                confirmed_rules.append(rule)
+                item = dict(candidate)
+                item["radar_initiation_frames"] = int(old["hits"])
+                item["radar_seed_abs_speed"] = seed_speed
+                value = stats["rules"][rule]
+                value["confirmed"] += 1
+                if self._near_existing(item, existing):
+                    value["dedupe_rejected"] += 1
+                    continue
+                if validator is not None:
+                    try:
+                        valid = bool(validator(item))
+                    except Exception:
+                        valid = False
+                    if not valid:
+                        value["roi_rejected"] += 1
+                        continue
+                value["would_emit"] += 1
+                variant = "g%s_f%s" % (gate_key, rule)
+                self.last_seed_bridge_shadow_candidates.setdefault(
+                    variant, []).append(item)
+        self._seed_bridge_gate_pending[gate_key] = pending
 
     def _near_existing(self, candidate, existing):
         return any(math.hypot(float(candidate["x"]) - float(item["x"]),

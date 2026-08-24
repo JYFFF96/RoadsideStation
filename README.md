@@ -599,3 +599,11 @@ ROI rejection and would-emit totals. CARLA Ground Truth separately attributes
 the would-emit events to matched targets or false positives; those labels never
 enter the sensor pipeline. Static returns cannot create a seed. The branch is
 diagnostic-only and never reaches Tracker or the public ObjectList.
+
+V0.6.12.8.2.2.56 expands the motion-seed bridge into independent 2.5m, 4.0m
+and 6.0m match-gate Shadow states. V0.6.12.8.2.2.55 produced three valid
+motion seeds but no continuation inside 2.5m, so each wider gate now maintains
+its own pending lifecycle and two-frame/three-frame decisions. Every variant
+reports confirmation, LiDAR deduplication, road ROI rejection, would-emit and
+CARLA truth precision independently. The 2.5m production matching boundary is
+unchanged, and all ablation candidates remain outside Tracker and ObjectList.

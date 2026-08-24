@@ -30,6 +30,7 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             "radar_initiation_single_point_ttl": 1.0,
             "radar_initiation_seed_bridge_shadow_enabled": True,
             "radar_initiation_seed_bridge_required_frames": [2, 3],
+            "radar_initiation_seed_bridge_match_gates": [2.5, 4.0, 6.0],
             "radar_initiation_match_gate": 2.5,
             "radar_initiation_ttl": .6,
             "radar_initiation_min_abs_speed": .6,
@@ -200,6 +201,29 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         repeated = evaluator.observe_radar_seed_bridge({
             "2": [{"x": 8.1, "y": 0.0}]}, frame_id=10)
         self.assertEqual(1, repeated["2"]["candidates"])
+
+    def test_motion_seed_bridge_compares_independent_match_gates(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(8.0, velocity=.33), [], 1.0,
+                         frame_id=10, validator=lambda unused: True)
+        initiator.update(self._single(11.5, velocity=.0), [], 1.1,
+                         frame_id=11, validator=lambda unused: True)
+        stats = initiator.last_stats["seed_bridge_shadow"]
+        self.assertEqual(0, stats["rules"]["2"]["confirmed"])
+        self.assertEqual(1, stats["gate_ablation"]["4.0"]["matches"])
+        self.assertEqual(
+            1, stats["gate_ablation"]["4.0"]["rules"]["2"]["would_emit"])
+        self.assertEqual(1, stats["gate_ablation"]["6.0"]["matches"])
+        self.assertEqual(1, len(
+            initiator.last_seed_bridge_shadow_candidates["g4.0_f2"]))
+
+    def test_static_singletons_cannot_seed_any_bridge_gate(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(velocity=.0), [], 1.0, frame_id=10)
+        stats = initiator.last_stats["seed_bridge_shadow"]
+        self.assertEqual(0, stats["seeds"])
+        for value in stats["gate_ablation"].values():
+            self.assertEqual(0, value["seeds"])
 
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())
