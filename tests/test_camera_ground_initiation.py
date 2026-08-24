@@ -6,6 +6,8 @@ import numpy as np
 from roadside.camera_ground_initiation import (
     CameraGroundInitiationShadow, camera_box_ground_point)
 from roadside.ground_truth_eval import GroundTruthEvaluator
+from roadside.fusion import SimpleFusion
+from roadside.tracking import NearestTracker
 
 
 class _Transform(object):
@@ -186,6 +188,78 @@ class CameraGroundInitiationTests(unittest.TestCase):
         evaluator.observe_camera_ground_counterfactual([],[],frame_id=11)
         self.assertEqual("BLOCKED_NO_DETECTOR_EVIDENCE",
                          evaluator.camera_ground_deployment_verdict()["status"])
+
+    def test_tracker_queue_fails_closed_for_carla_truth(self):
+        fusion=SimpleFusion("RSU_TEST",{
+            "camera_ground_temporal_enforce_enabled":True,
+            "camera_ground_temporal_enforce_required_source":"detector"})
+        candidate={"x":16.0,"y":0.0,"camera_source":"carla_truth",
+                   "camera_ground_temporal_confirmed":True}
+        self.assertEqual([],fusion.queue_camera_ground_initiations(
+            [candidate],"carla_truth"))
+        self.assertEqual([],fusion._consume_camera_ground_initiations([]))
+        self.assertEqual(1,fusion.camera_ground_tracker_stats[
+            "source_rejected_total"])
+
+    def test_real_detector_candidate_is_queued_and_lidar_wins_dedupe(self):
+        fusion=SimpleFusion("RSU_TEST",{
+            "camera_ground_temporal_enforce_enabled":True,
+            "camera_ground_temporal_enforce_required_source":"detector",
+            "camera_ground_initiation_dedupe_distance":3.0})
+        candidate={"x":16.0,"y":0.0,"z":.85,"extent":[.6,.6,1.7],
+                   "object_type":"person","camera_source":"detector",
+                   "camera_ground_temporal_confirmed":True}
+        queued=fusion.queue_camera_ground_initiations([candidate],"detector")
+        self.assertEqual(1,len(queued));self.assertEqual(["camera"],queued[0]["sources"])
+        self.assertEqual([],fusion._consume_camera_ground_initiations([
+            {"x":16.2,"y":0.0,"sources":["lidar"]}]))
+        self.assertEqual(1,fusion.camera_ground_tracker_stats[
+            "dedupe_rejected_total"])
+
+    def test_unproven_detector_class_fails_closed(self):
+        fusion=SimpleFusion("RSU_TEST",{
+            "camera_ground_temporal_enforce_enabled":True,
+            "camera_ground_temporal_enforce_required_source":"detector",
+            "camera_ground_temporal_enforce_allowed_classes":["person"]})
+        candidate={"x":16.0,"y":0.0,"object_type":"car",
+                   "camera_source":"detector",
+                   "camera_ground_temporal_confirmed":True}
+        self.assertEqual([],fusion.queue_camera_ground_initiations(
+            [candidate],"detector"))
+        self.assertEqual(1,fusion.camera_ground_tracker_stats[
+            "class_rejected_total"])
+
+    def test_camera_only_measurement_updates_tracker_sensor_quality(self):
+        tracker=NearestTracker()
+        track=tracker.update([{
+            "x":16.0,"y":0.0,"z":.85,"extent":[.6,.6,1.7],
+            "confidence":.9,"sources":["camera"],"object_type":"person",
+            "camera_ground_initiated":True,"candidate_score_bypass":True,
+            "sensor_range":16.0}],timestamp=1.0)[0]
+        self.assertEqual("C",track["track_sensors"])
+        self.assertEqual(1,track["track_camera_hits"])
+        self.assertEqual(0,track["track_lidar_hits"])
+        self.assertEqual("person",track["object_type"])
+
+    def test_fusion_consumes_camera_candidate_into_common_tracker(self):
+        fusion=SimpleFusion("RSU_TEST",{
+            "camera_ground_temporal_enforce_enabled":True,
+            "camera_ground_temporal_enforce_required_source":"detector",
+            "background_filter_enabled":False,"cluster_merge_enabled":False,
+            "range_adaptive_clustering":False,"far_track_admission_enabled":False,
+            "selected_track_admission_enabled":False})
+        candidate={"x":16.0,"y":0.0,"z":.85,"extent":[.6,.6,1.7],
+                   "confidence":.9,"sources":["camera"],"object_type":"person",
+                   "camera_source":"detector","camera_ground_initiated":True,
+                   "camera_ground_temporal_confirmed":True,"sensor_range":16.0}
+        fusion.queue_camera_ground_initiations([candidate],"detector")
+        fusion.fuse([],[],timestamp=1.0,frame_id=1)
+        self.assertEqual(1,len(fusion.last_tracked_candidates))
+        track=fusion.last_tracked_candidates[0]
+        self.assertEqual("person",track["object_type"])
+        self.assertEqual(["camera"],track["sources"])
+        self.assertEqual("C",track["track_sensors"])
+        self.assertTrue(track["camera_ground_tracker_enforced"])
 
 
 if __name__ == "__main__":unittest.main()

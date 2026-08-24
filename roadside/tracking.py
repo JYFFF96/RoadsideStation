@@ -358,6 +358,7 @@ class NearestTracker(object):
             selected_current = bool(det.get("road_object_selected_enforced", False))
             detection_sources = list(det.get("sources", ["lidar"]))
             has_lidar = "lidar" in detection_sources
+            has_camera = "camera" in detection_sources
             selected_hits = int(old.get("selected_enforced_hits", 0) if old else 0)
             non_selected_hits = int(old.get("non_selected_hits", 0) if old else 0)
             if selected_current:
@@ -372,7 +373,7 @@ class NearestTracker(object):
                 "velocity_stability": velocity_stability,
                 "lidar_hits": int(old.get("lidar_hits", 0) if old else 0) + (1 if has_lidar else 0),
                 "radar_confirmations": int(old.get("radar_confirmations", 0) if old else 0),
-                "camera_confirmations": int(old.get("camera_confirmations", 0) if old else 0),
+                "camera_confirmations": int(old.get("camera_confirmations", 0) if old else 0) + (1 if has_camera else 0),
                 "last_radar_time": old.get("last_radar_time") if old else None,
                 "last_camera_time": old.get("last_camera_time") if old else None,
                 "selected_enforced_hits": selected_hits,
@@ -383,6 +384,8 @@ class NearestTracker(object):
             if det.get("radar_radial_velocity") is not None:
                 track["last_radar_time"] = now
                 track["radar_confirmations"] += 1
+            if has_camera:
+                track["last_camera_time"] = now
             self._tracks[tid] = track
 
             state = "new" if old is None else "confirmed"

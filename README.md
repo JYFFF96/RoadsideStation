@@ -681,3 +681,17 @@ camera matches. The ONNX preflight now performs an actual blank-frame inference,
 and runtime reporting includes processed frames, detections, average/maximum
 latency and class counts. No detector evidence reports
 `BLOCKED_NO_DETECTOR_EVIDENCE`; CARLA truth remains explicitly blocked.
+
+V0.6.12.8.2.2.65 starts a controlled real-detector camera track-initiation
+trial. The V0.6.12.8.2.2.64 run processed 362 detector inferences, temporally
+confirmed 121 person candidates, matched all 121 to truth with zero false
+positives, and raised counterfactual recall from about 33.3 percent to 38.5
+percent. Confirmed candidates are now queued for the next fusion cycle and
+enter the common Tracker only when the configured and per-candidate source are
+both `detector`, and this first enforcement step is restricted to the evidenced
+`person` class. `carla_truth`, a missing detector, other classes, unconfirmed
+candidates, and same-position LiDAR observations all fail closed. Camera-
+originated tracks keep receiving camera measurements until LiDAR takes
+precedence; their class and camera source continue through the public fused
+object list. Runtime logs expose queued, consumed, source-rejected, and LiDAR-
+deduplicated counts.

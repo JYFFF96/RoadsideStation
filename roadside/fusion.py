@@ -102,6 +102,15 @@ class SimpleFusion(object):
         self.last_scored_candidates = []
         self.last_dynamic_candidates = []
         self.last_tracked_candidates = []
+        self.last_camera_ground_tracker_candidates = []
+        self._pending_camera_ground_candidates = []
+        self.camera_ground_tracker_stats = {
+            "queued_total": 0, "consumed_total": 0,
+            "source_rejected_total": 0, "dedupe_rejected_total": 0,
+            "class_rejected_total": 0,
+            "last_queued": 0, "last_consumed": 0,
+            "last_source_rejected": 0, "last_dedupe_rejected": 0,
+            "last_class_rejected": 0}
         self.last_roi_rejections = []
         self.last_score_rejections = []
         self.last_recovery_quality_candidates = []
@@ -859,6 +868,73 @@ class SimpleFusion(object):
             self.last_tracked_candidates, timestamp=timestamp)
         self._refresh_quality_stats()
 
+    def queue_camera_ground_initiations(self, candidates, source):
+        """Queue confirmed real-detector candidates for the next fusion cycle.
+
+        The explicit source guard is deliberately independent from CARLA truth
+        evaluation.  A simulator-truth source can therefore never enter Tracker.
+        """
+        stats = self.camera_ground_tracker_stats
+        stats["last_queued"] = 0
+        stats["last_source_rejected"] = 0
+        stats["last_class_rejected"] = 0
+        self._pending_camera_ground_candidates = []
+        items = list(candidates or [])
+        if not self.config.get("camera_ground_temporal_enforce_enabled", False):
+            return []
+        required = str(self.config.get(
+            "camera_ground_temporal_enforce_required_source", "detector"))
+        if str(source) != required:
+            stats["last_source_rejected"] = len(items)
+            stats["source_rejected_total"] += len(items)
+            return []
+        queued = []
+        allowed_classes = set(str(x).lower() for x in self.config.get(
+            "camera_ground_temporal_enforce_allowed_classes", ["person"]))
+        for candidate in items:
+            if not candidate.get("camera_ground_temporal_confirmed", False):
+                continue
+            if str(candidate.get("camera_source", source)) != required:
+                stats["last_source_rejected"] += 1
+                stats["source_rejected_total"] += 1
+                continue
+            if str(candidate.get("object_type", "unknown")).lower() not in allowed_classes:
+                stats["last_class_rejected"] += 1
+                stats["class_rejected_total"] += 1
+                continue
+            item = dict(candidate)
+            item["camera_ground_tracker_enforced"] = True
+            item["sources"] = ["camera"]
+            queued.append(item)
+        self._pending_camera_ground_candidates = queued
+        stats["last_queued"] = len(queued)
+        stats["queued_total"] += len(queued)
+        return [dict(x) for x in queued]
+
+    def _consume_camera_ground_initiations(self, tracker_candidates):
+        stats = self.camera_ground_tracker_stats
+        pending = self._pending_camera_ground_candidates
+        self._pending_camera_ground_candidates = []
+        stats["last_consumed"] = 0
+        stats["last_dedupe_rejected"] = 0
+        accepted = []
+        dedupe_distance = float(self.config.get(
+            "camera_ground_initiation_dedupe_distance", 3.0))
+        for candidate in pending:
+            duplicate = any(math.hypot(
+                float(candidate["x"]) - float(old["x"]),
+                float(candidate["y"]) - float(old["y"])) <= dedupe_distance
+                for old in (tracker_candidates or []))
+            if duplicate:
+                stats["last_dedupe_rejected"] += 1
+                stats["dedupe_rejected_total"] += 1
+            else:
+                accepted.append(dict(candidate))
+        stats["last_consumed"] = len(accepted)
+        stats["consumed_total"] += len(accepted)
+        self.last_camera_ground_tracker_candidates = [dict(x) for x in accepted]
+        return accepted
+
     def fuse(self, lidar_points, radar_detections, timestamp=None, frame_id=None,
              radar_frame_id=None):
         now = time.time() if timestamp is None else float(timestamp)
@@ -1008,6 +1084,12 @@ class SimpleFusion(object):
             dict(x) for x in selected_rejections]
         tracker_candidates = self._selected_admission_tracker_candidates(
             tracker_candidates, selected_admitted)
+        selected_admission_tracker_input = len(tracker_candidates)
+        camera_ground_tracker_candidates = \
+            self._consume_camera_ground_initiations(tracker_candidates)
+        if camera_ground_tracker_candidates:
+            tracker_candidates = (list(tracker_candidates) +
+                                  camera_ground_tracker_candidates)
         self.last_dynamic_candidates = [dict(x) for x in tracker_candidates]
         tracked = self.tracker.update(tracker_candidates, now)
         self.last_tracked_candidates = [dict(x) for x in tracked]
@@ -1109,7 +1191,19 @@ class SimpleFusion(object):
             "selected_track_admission_sensor_bypass": int(selected_admission_stats.get("sensor_bypass", 0)),
             "selected_track_admission_track_bypass": int(selected_admission_stats.get("track_bypass", 0)),
             "selected_track_admission_shadow_mode": selected_admission_shadow,
-            "selected_track_admission_tracker_input": len(tracker_candidates),
+            "selected_track_admission_tracker_input": selected_admission_tracker_input,
+            "camera_ground_tracker_queued_total": int(
+                self.camera_ground_tracker_stats.get("queued_total", 0)),
+            "camera_ground_tracker_consumed_total": int(
+                self.camera_ground_tracker_stats.get("consumed_total", 0)),
+            "camera_ground_tracker_source_rejected_total": int(
+                self.camera_ground_tracker_stats.get("source_rejected_total", 0)),
+            "camera_ground_tracker_dedupe_rejected_total": int(
+                self.camera_ground_tracker_stats.get("dedupe_rejected_total", 0)),
+            "camera_ground_tracker_class_rejected_total": int(
+                self.camera_ground_tracker_stats.get("class_rejected_total", 0)),
+            "camera_ground_tracker_last_consumed": int(
+                self.camera_ground_tracker_stats.get("last_consumed", 0)),
             "range_adaptive_clustering": bool(c.get("range_adaptive_clustering", False)),
             "radar_detections": 0 if not radar_detections else len(radar_detections),
             "radar_world_points": radar_world_count, "radar_matched_objects": radar_matched,

@@ -386,6 +386,11 @@ fusion:
   camera_ground_temporal_required_frames: 2
   camera_ground_temporal_match_distance: 2.0
   camera_ground_temporal_max_missed_frames: 2
+  # V0.6.12.8.2.2.65: controlled Tracker input. Only confirmed candidates
+  # produced by the real detector are accepted; carla_truth fails closed.
+  camera_ground_temporal_enforce_enabled: true
+  camera_ground_temporal_enforce_required_source: detector
+  camera_ground_temporal_enforce_allowed_classes: [person]
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.64 Real Detector Evidence starting...")
+ print("RoadsideStation V0.6.12.8.2.2.65 Detector Camera Track Initiation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -558,6 +558,11 @@ def main():
   int(fc.get("camera_ground_temporal_required_frames",2)),
   float(fc.get("camera_ground_temporal_match_distance",2.0)),
   float(fc.get("camera_ground_temporal_vru_extra_margin",1.0))))
+ camera_enforce=(fc.get("camera_ground_temporal_enforce_enabled",False) and
+                 fc.get("camera_ground_temporal_enforce_required_source","detector")=="detector")
+ print("Camera Tracker Initiation: %s | required source=detector classes=%s | one-cycle queue | CARLA truth blocked"%(
+  ("DETECTOR_ONLY_ENFORCE" if camera_enforce else "disabled"),
+  fc.get("camera_ground_temporal_enforce_allowed_classes",["person"])))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -672,8 +677,11 @@ def main():
      radar_camera_candidates,frame_id=radar[0])
    camera_ground_token=tuple((view["camera_id"],view["frame_id"])
                              for view in radar_camera_views)
+   camera_ground_existing=(list(fusion.last_roi_candidates)+[
+    item for item in fusion.last_tracked_candidates
+    if not item.get("camera_ground_initiated",False)])
    camera_ground_candidates=camera_ground_shadow.update(
-    radar_camera_views,list(fusion.last_roi_candidates)+list(fusion.last_tracked_candidates),
+    radar_camera_views,camera_ground_existing,
     station.junction_center.z if station.junction_center is not None else 0.0,
     validator=lambda item:station.validate_driving_roi(
      item["x"],item["y"],item["z"],item.get("extent"),item),
@@ -690,6 +698,8 @@ def main():
     evaluator.observe_camera_ground_counterfactual(
      fusion.last_tracked_candidates,camera_ground_shadow.last_temporal_candidates,
      frame_id=camera_ground_token)
+   fusion.queue_camera_ground_initiations(
+    camera_ground_shadow.last_temporal_candidates,camera_source)
    selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
    selected_held=fusion.last_selected_track_admission_rejections
    if eval_cfg.get("selected_track_admission_camera_profiling",False):
@@ -771,7 +781,7 @@ def main():
     print("    [RADAR CAMERA SUPPORT SHADOW] Raw:%d DedupeReject:%d ROIReject:%d Eligible:%d | Visible:%d Supported:%d Rate:%s SupportedTruth:%d FP:%d Precision:%s Source:%s | TrackerInput:UNCHANGED"%(
      radar_camera.get("raw",0),radar_camera.get("dedupe_rejected",0),radar_camera.get("roi_rejected",0),radar_camera.get("eligible",0),radar_camera_eval.get("visible",0),radar_camera_eval.get("supported",0),_pct(radar_camera_eval.get("support_rate")),radar_camera_eval.get("supported_truth",0),radar_camera_eval.get("supported_fp",0),_pct(radar_camera_eval.get("supported_precision")),radar_camera_eval.get("sources",{})))
     camera_ground=camera_ground_shadow.report();camera_ground_eval=evaluator.report_camera_ground_initiation() if evaluator is not None else {}
-    print("    [CAMERA GROUND INIT SHADOW] Frames:%d Det:%d ClassReject:%d ConfReject:%d ProjectionReject:%d RangeReject:%d CrossCamDedupe:%d LiDARDedupe:%d ROIReject:%d ValidatorError:%d WouldEmit:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s | TrackerInput:UNCHANGED"%(
+    print("    [CAMERA GROUND INIT SHADOW] Frames:%d Det:%d ClassReject:%d ConfReject:%d ProjectionReject:%d RangeReject:%d CrossCamDedupe:%d LiDARDedupe:%d ROIReject:%d ValidatorError:%d WouldEmit:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s"%(
      camera_ground.get("frames",0),camera_ground.get("detections",0),camera_ground.get("class_rejected",0),camera_ground.get("confidence_rejected",0),camera_ground.get("projection_rejected",0),camera_ground.get("range_rejected",0),camera_ground.get("cross_camera_deduped",0),camera_ground.get("lidar_deduped",0),camera_ground.get("roi_rejected",0),camera_ground.get("validator_errors",0),camera_ground.get("would_emit",0),camera_ground_eval.get("matched",0),camera_ground_eval.get("fp",0),_pct(camera_ground_eval.get("precision")),camera_ground_eval.get("classes",{}),camera_ground_eval.get("sources",{})))
     print("      [CAMERA GROUND ROI] Groups:%s RejectReasons:%s | callback=x/y/z/extent/candidate"%(
      camera_ground.get("roi_groups",{}),camera_ground.get("roi_rejection_reasons",{})))
@@ -780,13 +790,18 @@ def main():
      print("      [CAMERA VRU ROI +%sm SHADOW] Candidates:%d Truth:%d FP:%d Precision:%s Classes:%s | TrackerInput:UNCHANGED"%(
       margin,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("classes",{})))
     camera_temporal=camera_ground.get("temporal",{});camera_temporal_eval=evaluator.report_camera_ground_temporal() if evaluator is not None else {}
-    print("      [CAMERA TEMPORAL ADMISSION SHADOW] Frames:%d Input:%d Seeded:%d Matched:%d Active:%d Expired:%d Confirmed:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s | required=%d match<=%.1fm VRUExtra=%.1fm TrackerInput:UNCHANGED"%(
+    print("      [CAMERA TEMPORAL ADMISSION SHADOW] Frames:%d Input:%d Seeded:%d Matched:%d Active:%d Expired:%d Confirmed:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s | required=%d match<=%.1fm VRUExtra=%.1fm TrackerInput:SOURCE_GATED"%(
      camera_temporal.get("frames",0),camera_temporal.get("input",0),camera_temporal.get("seeded",0),camera_temporal.get("matched",0),camera_temporal.get("active",0),camera_temporal.get("expired",0),camera_temporal.get("confirmed",0),camera_temporal_eval.get("matched",0),camera_temporal_eval.get("fp",0),_pct(camera_temporal_eval.get("precision")),camera_temporal_eval.get("classes",{}),camera_temporal_eval.get("sources",{}),int(fc.get("camera_ground_temporal_required_frames",2)),float(fc.get("camera_ground_temporal_match_distance",2.0)),float(fc.get("camera_ground_temporal_vru_extra_margin",1.0))))
     camera_cf=evaluator.report_camera_ground_counterfactual() if evaluator is not None else {};camera_verdict=evaluator.camera_ground_deployment_verdict() if evaluator is not None else {}
     print("      [CAMERA TRACKER COUNTERFACTUAL SHADOW] Frames:%d Truth:%d BaseMatch:%d CameraCand:%d CameraTruth:%d CameraFP:%d Incremental:%d CombinedMatch:%d | BaseRecall:%s CombinedRecall:%s Gain:%s CameraPrecision:%s Classes:%s | TrackerInput:UNCHANGED"%(
      camera_cf.get("frames",0),camera_cf.get("truth",0),camera_cf.get("base_matched",0),camera_cf.get("camera_candidates",0),camera_cf.get("camera_truth",0),camera_cf.get("camera_fp",0),camera_cf.get("incremental_matched",0),camera_cf.get("combined_matched",0),_pct(camera_cf.get("base_recall")),_pct(camera_cf.get("combined_recall")),_pct(camera_cf.get("recall_gain")),_pct(camera_cf.get("camera_precision")),camera_cf.get("classes",{})))
     print("      [CAMERA TEMPORAL DEPLOYMENT VERDICT] %s Source:%s Checks:%s | CARLA truth can never enable runtime"%(
      camera_verdict.get("status","NO_EVALUATOR"),camera_verdict.get("source","none"),camera_verdict.get("checks",{})))
+    camera_tracker=fusion.camera_ground_tracker_stats
+    camera_tracker_mode=("DETECTOR_ONLY_ENFORCE" if camera_enforce and camera_source=="detector"
+                         else ("BLOCKED_SOURCE:%s"%camera_source if camera_enforce else "DISABLED"))
+    print("      [CAMERA GROUND TRACKER INPUT] Mode:%s Queued:%d Consumed:%d SourceReject:%d ClassReject:%d DedupeReject:%d | Total Q/C/S/K/D:%d/%d/%d/%d/%d | one-cycle delay"%(
+     camera_tracker_mode,camera_tracker.get("last_queued",0),camera_tracker.get("last_consumed",0),camera_tracker.get("last_source_rejected",0),camera_tracker.get("last_class_rejected",0),camera_tracker.get("last_dedupe_rejected",0),camera_tracker.get("queued_total",0),camera_tracker.get("consumed_total",0),camera_tracker.get("source_rejected_total",0),camera_tracker.get("class_rejected_total",0),camera_tracker.get("dedupe_rejected_total",0)))
     if camera_detector is not None:
      detector_report=camera_detector.report()
      print("      [CAMERA DETECTOR RUNTIME] Name:%s Runtime:%s Frames:%d Detections:%d AvgLatency:%.1fms MaxLatency:%.1fms Classes:%s"%(
