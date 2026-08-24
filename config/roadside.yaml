@@ -357,6 +357,11 @@ fusion:
   radar_initiation_single_point_ttl: 1.0
   # V0.6.12.8.2.2.54: diagnostic-only thresholds for every raw singleton.
   radar_initiation_single_speed_shadow_thresholds: [0.05, 0.10, 0.20, 0.40, 0.60]
+  # V0.6.12.8.2.2.55: shadow-only comparison. A moving singleton seeds the
+  # path; nearby singleton returns may continue it even when radial speed
+  # becomes zero. Neither rule reaches Tracker or the public ObjectList.
+  radar_initiation_seed_bridge_shadow_enabled: true
+  radar_initiation_seed_bridge_required_frames: [2, 3]
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

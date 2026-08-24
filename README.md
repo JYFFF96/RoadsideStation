@@ -587,3 +587,15 @@ moving points buried inside multi-point components, where a static median
 could otherwise conceal the return. The profiling remains
 sensor-only and diagnostic-only; the enforced three-frame, 0.20m/s single-
 return policy and the public fused target list are unchanged.
+
+V0.6.12.8.2.2.55 adds a parallel motion-seed bridge in Shadow mode. The
+V0.6.12.8.2.2.54 run observed four moving singleton seeds; none had a second
+non-zero-speed match, but two were followed by a nearby below-threshold return.
+The new branch therefore requires the first singleton to meet the unchanged
+0.20m/s motion threshold, then permits nearby singletons to continue the
+candidate when radial velocity becomes zero. Two-frame and three-frame rules
+are compared independently and report confirmation, LiDAR deduplication, road
+ROI rejection and would-emit totals. CARLA Ground Truth separately attributes
+the would-emit events to matched targets or false positives; those labels never
+enter the sensor pipeline. Static returns cannot create a seed. The branch is
+diagnostic-only and never reaches Tracker or the public ObjectList.

@@ -29,6 +29,11 @@ class NearRadarTrackInitiator(object):
             "radar_initiation_single_point_required_frames", 3)))
         self.single_point_ttl = float(c.get(
             "radar_initiation_single_point_ttl", 1.0))
+        self.seed_bridge_shadow_enabled = bool(c.get(
+            "radar_initiation_seed_bridge_shadow_enabled", False))
+        self.seed_bridge_required_frames = sorted(set(
+            max(2, int(value)) for value in c.get(
+                "radar_initiation_seed_bridge_required_frames", [2, 3])))
         self.required_frames = max(1, int(c.get("radar_initiation_required_frames", 2)))
         self.match_gate = float(c.get("radar_initiation_match_gate", 2.5))
         self.ttl = float(c.get("radar_initiation_ttl", 0.6))
@@ -43,10 +48,22 @@ class NearRadarTrackInitiator(object):
         self.default_extent = list(c.get(
             "radar_initiation_default_extent", [4.5, 1.8, 1.6]))
         self._pending = []
+        self._seed_bridge_pending = []
         self._last_frame = None
         self.last_shadow_candidates = []
+        self.last_seed_bridge_shadow_candidates = {}
+        self.seed_bridge_stats = self._empty_seed_bridge_stats()
         self.cumulative_stats = self._empty_cumulative_stats()
         self.last_stats = self._empty_stats()
+
+    def _empty_seed_bridge_stats(self):
+        return {"frames": 0, "seeds": 0, "matches": 0,
+                "below_speed_matches": 0, "expired": 0,
+                "expired_hits": {"1": 0, "2": 0, "3+": 0},
+                "rules": dict(
+                    (str(frames), {"confirmed": 0, "dedupe_rejected": 0,
+                                   "roi_rejected": 0, "would_emit": 0})
+                    for frames in self.seed_bridge_required_frames)}
 
     def _empty_cumulative_stats(self):
         return {"frames": 0, "range_points": 0, "components": 0,
@@ -91,6 +108,12 @@ class NearRadarTrackInitiator(object):
             self.cumulative_stats["single_point_speed_counts"])
         stats["cumulative"]["single_point_expired_hits"] = dict(
             self.cumulative_stats["single_point_expired_hits"])
+        bridge = dict(self.seed_bridge_stats)
+        bridge["expired_hits"] = dict(self.seed_bridge_stats["expired_hits"])
+        bridge["rules"] = dict(
+            (key, dict(value))
+            for key, value in self.seed_bridge_stats["rules"].items())
+        stats["seed_bridge_shadow"] = bridge
 
     def _accumulate(self, stats):
         scalar_keys = ("range_points", "components", "single_point_components",
@@ -155,6 +178,87 @@ class NearRadarTrackInitiator(object):
                 "radar_initiation_mode": mode,
                 "sensor_range": float(use.get("sensor_range", math.hypot(x, y)))}
 
+    def _update_seed_bridge_shadow(self, singleton_groups, existing, now,
+                                   token, validator):
+        self.last_seed_bridge_shadow_candidates = dict(
+            (str(frames), []) for frames in self.seed_bridge_required_frames)
+        if not self.seed_bridge_shadow_enabled:
+            return
+        self.seed_bridge_stats["frames"] += 1
+        kept = []
+        for old in self._seed_bridge_pending:
+            if now - float(old.get("last_time", now)) <= self.single_point_ttl:
+                kept.append(old)
+                continue
+            self.seed_bridge_stats["expired"] += 1
+            hits = int(old.get("hits", 1))
+            self.seed_bridge_stats["expired_hits"][
+                "3+" if hits >= 3 else str(hits)] += 1
+        self._seed_bridge_pending = kept
+        existing_pending = len(self._seed_bridge_pending)
+        used_pending = set()
+        for group in singleton_groups:
+            candidate = self._candidate(group, mode="single_seed_bridge_shadow")
+            speed = abs(float(candidate.get("radar_radial_velocity", 0.0)))
+            best = None
+            for index, old in enumerate(
+                    self._seed_bridge_pending[:existing_pending]):
+                if index in used_pending:
+                    continue
+                distance = math.hypot(float(candidate["x"]) - float(old["x"]),
+                                      float(candidate["y"]) - float(old["y"]))
+                if distance <= self.match_gate and (best is None or
+                                                     distance < best[0]):
+                    best = (distance, index, old)
+            if best is None:
+                if speed < self.single_point_min_abs_speed:
+                    continue
+                entry = dict(candidate)
+                entry.update({"hits": 1, "last_time": now,
+                              "last_frame": token,
+                              "seed_speed": speed,
+                              "confirmed_rules": []})
+                self._seed_bridge_pending.append(entry)
+                self.seed_bridge_stats["seeds"] += 1
+                continue
+            unused_distance, index, old = best
+            used_pending.add(index)
+            self.seed_bridge_stats["matches"] += 1
+            if speed < self.single_point_min_abs_speed:
+                self.seed_bridge_stats["below_speed_matches"] += 1
+            seed_speed = float(old.get("seed_speed", speed))
+            confirmed_rules = list(old.get("confirmed_rules", []))
+            old.update(candidate)
+            old["hits"] = int(old.get("hits", 1)) + 1
+            old["last_time"] = now
+            old["last_frame"] = token
+            old["seed_speed"] = seed_speed
+            old["confirmed_rules"] = confirmed_rules
+            for required in self.seed_bridge_required_frames:
+                rule = str(required)
+                if int(old["hits"]) < required or rule in confirmed_rules:
+                    continue
+                confirmed_rules.append(rule)
+                item = dict(candidate)
+                item["radar_initiation_frames"] = int(old["hits"])
+                item["radar_seed_abs_speed"] = seed_speed
+                item["radar_radial_velocity"] = float(
+                    old.get("radar_radial_velocity", 0.0))
+                self.seed_bridge_stats["rules"][rule]["confirmed"] += 1
+                if self._near_existing(item, existing):
+                    self.seed_bridge_stats["rules"][rule]["dedupe_rejected"] += 1
+                    continue
+                if validator is not None:
+                    try:
+                        valid = bool(validator(item))
+                    except Exception:
+                        valid = False
+                    if not valid:
+                        self.seed_bridge_stats["rules"][rule]["roi_rejected"] += 1
+                        continue
+                self.seed_bridge_stats["rules"][rule]["would_emit"] += 1
+                self.last_seed_bridge_shadow_candidates[rule].append(item)
+
     def _near_existing(self, candidate, existing):
         return any(math.hypot(float(candidate["x"]) - float(item["x"]),
                               float(candidate["y"]) - float(item["y"])) <=
@@ -182,6 +286,9 @@ class NearRadarTrackInitiator(object):
             return []
         token = frame_id if frame_id is not None else now
         if token == self._last_frame:
+            self.last_seed_bridge_shadow_candidates = dict(
+                (str(frames), [])
+                for frames in self.seed_bridge_required_frames)
             stats["pending"] = len(self._pending)
             self._attach_cumulative(stats)
             self.last_stats = stats
@@ -203,6 +310,7 @@ class NearRadarTrackInitiator(object):
         stats["components"] = len(components)
         groups = []
         singleton_speeds = []
+        singleton_groups = []
         for group in components:
             if len(group) >= self.min_points:
                 moving_points = sum(
@@ -214,6 +322,7 @@ class NearRadarTrackInitiator(object):
                     stats["moving_points_in_multi_components"] += moving_points
                 groups.append((group, "cluster"))
             elif len(group) == 1:
+                singleton_groups.append(group)
                 stats["single_point_components"] += 1
                 speed = abs(float(group[0].get("velocity", 0.0)))
                 singleton_speeds.append(speed)
@@ -230,6 +339,8 @@ class NearRadarTrackInitiator(object):
             ("%.2f" % threshold,
              sum(1 for speed in singleton_speeds if speed >= threshold))
             for threshold in self.single_speed_shadow_thresholds)
+        self._update_seed_bridge_shadow(
+            singleton_groups, existing, now, token, validator)
         stats["clusters"] = len(groups)
         stats["point_rejected"] = max(
             0, len(ranged) - sum(len(group) for group, unused_mode in groups))

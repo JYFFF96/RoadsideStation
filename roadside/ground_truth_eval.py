@@ -44,6 +44,8 @@ class GroundTruthEvaluator(object):
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
+        self._radar_seed_bridge_last_frame = None
+        self._radar_seed_bridge_totals = {}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -101,6 +103,8 @@ class GroundTruthEvaluator(object):
         self._truth_lifecycle_prev = {}
         self._truth_lifecycle_totals = {"entered":0,"boundary_exit":0,
                                         "unexpected_exit":0,"teleport":0}
+        self._radar_seed_bridge_last_frame = None
+        self._radar_seed_bridge_totals = {}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -254,6 +258,33 @@ class GroundTruthEvaluator(object):
             bucket["recall"]=(float(bucket["matched"])/bucket["truth"] if bucket["truth"] else None)
         metrics.update({"truth_objects":truth,"pairs":pairs,"range_bins":self._range_metrics(truth,detected),"class_metrics":classes})
         return metrics
+
+    def observe_radar_seed_bridge(self, rule_candidates, frame_id=None):
+        """Attribute Shadow bridge output without feeding truth to fusion."""
+        if frame_id is not None and frame_id == self._radar_seed_bridge_last_frame:
+            return self.report_radar_seed_bridge()
+        self._radar_seed_bridge_last_frame = frame_id
+        if not rule_candidates or not any(rule_candidates.values()):
+            return self.report_radar_seed_bridge()
+        truth = self.truth_objects()
+        for rule, candidates in (rule_candidates or {}).items():
+            detected = self._detected_with_range(candidates)
+            pairs = self._match(truth, detected)
+            total = self._radar_seed_bridge_totals.setdefault(
+                str(rule), {"candidates": 0, "matched": 0, "fp": 0})
+            total["candidates"] += len(detected)
+            total["matched"] += len(pairs)
+            total["fp"] += max(0, len(detected) - len(pairs))
+        return self.report_radar_seed_bridge()
+
+    def report_radar_seed_bridge(self):
+        result = {}
+        for rule, total in self._radar_seed_bridge_totals.items():
+            item = dict(total)
+            item["precision"] = (float(item["matched"]) / item["candidates"]
+                                 if item["candidates"] else None)
+            result[rule] = item
+        return result
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
         """Measure selected-output contribution without feeding truth to runtime.

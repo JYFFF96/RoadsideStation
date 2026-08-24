@@ -4,7 +4,13 @@ import unittest
 
 from roadside.radar_initiation import NearRadarTrackInitiator
 from roadside.fusion import SimpleFusion
+from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.tracking import NearestTracker
+
+
+class _Center(object):
+    x = 0.0
+    y = 0.0
 
 
 class NearRadarTrackInitiatorTests(unittest.TestCase):
@@ -22,6 +28,8 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             "radar_initiation_single_point_min_abs_speed": .2,
             "radar_initiation_single_point_required_frames": 3,
             "radar_initiation_single_point_ttl": 1.0,
+            "radar_initiation_seed_bridge_shadow_enabled": True,
+            "radar_initiation_seed_bridge_required_frames": [2, 3],
             "radar_initiation_match_gate": 2.5,
             "radar_initiation_ttl": .6,
             "radar_initiation_min_abs_speed": .6,
@@ -128,6 +136,70 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         self.assertEqual(1, cumulative["mixed_moving_components"])
         self.assertEqual(1, cumulative["moving_points_in_multi_components"])
         self.assertEqual(0, cumulative["single_point_candidates"])
+
+    def test_motion_seed_bridge_profiles_two_and_three_frame_rules(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(velocity=.33), [], 1.0, frame_id=10,
+                         validator=lambda unused: True)
+        initiator.update(self._single(8.1, velocity=.0), [], 1.1, frame_id=11,
+                         validator=lambda unused: True)
+        stats = initiator.last_stats["seed_bridge_shadow"]
+        self.assertEqual(1, stats["seeds"])
+        self.assertEqual(1, stats["matches"])
+        self.assertEqual(1, stats["below_speed_matches"])
+        self.assertEqual(1, stats["rules"]["2"]["would_emit"])
+        self.assertEqual(0, stats["rules"]["3"]["would_emit"])
+        initiator.update(self._single(8.2, velocity=.0), [], 1.2, frame_id=12,
+                         validator=lambda unused: True)
+        stats = initiator.last_stats["seed_bridge_shadow"]
+        self.assertEqual(1, stats["rules"]["2"]["confirmed"])
+        self.assertEqual(1, stats["rules"]["3"]["confirmed"])
+        self.assertEqual(1, stats["rules"]["3"]["would_emit"])
+
+    def test_motion_seed_bridge_remains_shadow_and_profiles_gates(self):
+        duplicate = NearRadarTrackInitiator(self._config())
+        duplicate.update(self._single(), [], 1.0, frame_id=10)
+        emitted = duplicate.update(
+            self._single(8.1, velocity=.0), [{"x": 8.0, "y": 0.0}],
+            1.1, frame_id=11, validator=lambda unused: True)
+        self.assertEqual([], emitted)
+        stats = duplicate.last_stats["seed_bridge_shadow"]["rules"]["2"]
+        self.assertEqual(1, stats["dedupe_rejected"])
+        self.assertEqual(0, stats["would_emit"])
+
+        rejected = NearRadarTrackInitiator(self._config())
+        rejected.update(self._single(), [], 1.0, frame_id=10)
+        rejected.update(self._single(8.1, velocity=.0), [], 1.1, frame_id=11,
+                        validator=lambda unused: False)
+        stats = rejected.last_stats["seed_bridge_shadow"]["rules"]["2"]
+        self.assertEqual(1, stats["roi_rejected"])
+        self.assertEqual(0, stats["would_emit"])
+
+    def test_static_singletons_cannot_seed_motion_bridge(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        for frame in range(10, 14):
+            initiator.update(self._single(velocity=.0), [], frame / 10.0,
+                             frame_id=frame, validator=lambda unused: True)
+        stats = initiator.last_stats["seed_bridge_shadow"]
+        self.assertEqual(0, stats["seeds"])
+        self.assertEqual(0, stats["rules"]["2"]["confirmed"])
+        self.assertEqual(0, stats["rules"]["3"]["confirmed"])
+
+    def test_motion_seed_bridge_truth_attribution_is_evaluation_only(self):
+        evaluator = GroundTruthEvaluator(None, lambda: _Center(), {
+            "radius": 80.0, "match_distance": 2.0})
+        evaluator.truth_objects = lambda: [
+            {"x": 8.0, "y": 0.0, "object_type": "pedestrian"}]
+        report = evaluator.observe_radar_seed_bridge({
+            "2": [{"x": 8.2, "y": 0.0}],
+            "3": [{"x": 20.0, "y": 0.0}]}, frame_id=10)
+        self.assertEqual(1, report["2"]["matched"])
+        self.assertEqual(0, report["2"]["fp"])
+        self.assertEqual(0, report["3"]["matched"])
+        self.assertEqual(1, report["3"]["fp"])
+        repeated = evaluator.observe_radar_seed_bridge({
+            "2": [{"x": 8.1, "y": 0.0}]}, frame_id=10)
+        self.assertEqual(1, repeated["2"]["candidates"])
 
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())

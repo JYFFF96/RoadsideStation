@@ -514,7 +514,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.54 Sparse Radar Lifecycle Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.55 Motion-Seed Radar Bridge Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -536,7 +536,11 @@ def main():
   "enabled" if fc.get("radar_initiation_single_point_enabled",False) else "disabled",
   float(fc.get("radar_initiation_single_point_min_abs_speed",.2)),
   int(fc.get("radar_initiation_single_point_required_frames",3)),
-  float(fc.get("radar_initiation_single_point_ttl",1.0))))
+ float(fc.get("radar_initiation_single_point_ttl",1.0))))
+ print("Motion-Seed Radar Bridge: %s | seed speed>=%.2fm/s | compare frames=%s | Shadow only, Tracker/ObjectList unchanged"%(
+  "enabled" if fc.get("radar_initiation_seed_bridge_shadow_enabled",False) else "disabled",
+  float(fc.get("radar_initiation_single_point_min_abs_speed",.2)),
+  fc.get("radar_initiation_seed_bridge_required_frames",[2,3])))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -613,6 +617,9 @@ def main():
  try:
   while not _STOP_REQUESTED:
    cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None,radar_frame_id=radar[0] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
+   if evaluator is not None and radar is not None:
+    evaluator.observe_radar_seed_bridge(
+     fusion.last_radar_seed_bridge_shadow_candidates,frame_id=radar[0])
    if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
    for camera_id,runtime in camera_runtimes.items():
@@ -688,6 +695,13 @@ def main():
      radar_cumulative.get("single_point_matched",0),radar_cumulative.get("single_point_below_speed_near_pending",0),
      radar_cumulative.get("single_point_expired",0),expired_hits.get("1",0),expired_hits.get("2",0),expired_hits.get("3+",0),
      radar_cumulative.get("single_point_confirmed",0),radar_cumulative.get("single_point_emitted",0),single_speed_text))
+    bridge=s.get("radar_seed_bridge_shadow",{}) or {};bridge_expired=bridge.get("expired_hits",{}) or {};bridge_rules=bridge.get("rules",{}) or {}
+    print("  [RADAR MOTION-SEED BRIDGE SHADOW] Frames:%d Seeds:%d Matches:%d BelowSpeedMatches:%d Expired:%d Hits(1/2/3+):%d/%d/%d | TrackerInput:UNCHANGED"%(
+     bridge.get("frames",0),bridge.get("seeds",0),bridge.get("matches",0),bridge.get("below_speed_matches",0),bridge.get("expired",0),bridge_expired.get("1",0),bridge_expired.get("2",0),bridge_expired.get("3+",0)))
+    for rule in sorted(bridge_rules,key=int):
+     value=bridge_rules[rule]
+     print("    [BRIDGE %s-FRAME] Confirmed:%d DedupeReject:%d ROIReject:%d WouldEmit:%d | OutputPolicy:UNCHANGED"%(
+      rule,value.get("confirmed",0),value.get("dedupe_rejected",0),value.get("roi_rejected",0),value.get("would_emit",0)))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
@@ -712,6 +726,9 @@ def main():
     _print_stage("GEOMETRY",geo);_print_stage("ROI",roi);_print_stage("SCORE",scored);_print_stage("DYNAMIC",dyn);_print_stage("TRACK",ev)
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_road_object_profile(road_ga);_print_road_object_stage_attribution(road_stage);_print_road_object_cap_comparison(road_cap);_print_selected_enforcement_attribution(selected_attr);_print_selected_admission_score_profile(selected_score);_print_adaptive_temporal_profile(road_adaptive);_print_hybrid_selection_profile(road_hybrid);_print_hybrid_rescue_profile(road_rescue);_print_truth_lifecycle(truth_lifecycle);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds);_print_geometry_attribution(ga);_print_detection_drop(dd)
     _print_selected_track_admission_profile(evaluator.report_selected_track_admission())
+    for rule,value in sorted(evaluator.report_radar_seed_bridge().items(),key=lambda item:int(item[0])):
+     print("  [RADAR BRIDGE TRUTH %s-FRAME] Candidates:%d Matched:%d FP:%d Precision:%s | EvaluationOnly"%(
+      rule,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision"))))
     if eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False):
      admission_report=evaluator.report_far_admission_decisions(reset=True)
      if eval_cfg.get("far_admission_decision_diagnostics",False):_print_far_admission_eval(admission_report)
