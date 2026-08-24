@@ -322,5 +322,46 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,report["matched"])
         self.assertEqual(1.0,report["precision"])
 
+    def test_tracker_exposes_camera_birth_conflict_without_changing_assignment(self):
+        tracker=NearestTracker(max_distance=2.0)
+        first=tracker.update([{
+            "x":16.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_ground_tracker_enforced":True}],timestamp=1.0)[0]
+        self.assertEqual("no_active_tracks",first[
+            "track_association_birth_reason"])
+        result=tracker.update([
+            {"x":16.1,"y":0.0,"z":.85,"sources":["camera"],
+             "camera_ground_tracker_enforced":True},
+            {"x":16.2,"y":0.0,"z":.85,"sources":["camera"],
+             "camera_ground_tracker_enforced":True}],timestamp=1.1)
+        confirmed=[x for x in result if x["track_state"]=="confirmed"]
+        born=[x for x in result if x["track_state"]=="new"]
+        self.assertEqual(1,len(confirmed));self.assertEqual(1,len(born))
+        self.assertAlmostEqual(.1,confirmed[0]["track_association_distance"])
+        self.assertEqual("assignment_conflict",born[0][
+            "track_association_birth_reason"])
+        self.assertEqual(1,born[0]["track_association_candidate_count"])
+        self.assertEqual(1,born[0][
+            "track_association_camera_origin_candidate_count"])
+
+    def test_camera_enforcement_reports_track_birth_causes(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":4.0})
+        evaluator.truth_objects=lambda:[
+            {"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_1","x":16.1,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_association_birth_reason":"outside_gate",
+            "track_association_nearest_distance":4.2,
+            "track_association_nearest_camera_origin_distance":4.4,
+            "track_association_candidate_count":0,
+            "track_association_camera_origin_candidate_count":0}],frame_id=10)
+        association=report["association"]
+        self.assertEqual(1,association["births"])
+        self.assertEqual({"outside_gate":1},association["birth_reasons"])
+        self.assertAlmostEqual(4.2,association["birth_nearest"]["mean"])
+        self.assertAlmostEqual(4.4,association["birth_nearest_camera"]["mean"])
+
 
 if __name__ == "__main__":unittest.main()

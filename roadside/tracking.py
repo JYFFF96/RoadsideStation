@@ -298,24 +298,41 @@ class NearestTracker(object):
         unmatched = set(self._tracks)
         results = []
         pending = []
+        association_meta = {}
         stats = {"new": 0, "update": 0, "coast": 0, "drop": 0, "suppress": 0,
                  "low_hit_keep": 0, "low_new_drop": 0}
 
         for di, det in enumerate(detections):
+            nearest = None
+            nearest_camera = None
+            candidate_count = 0
+            camera_candidate_count = 0
             for tid in unmatched:
                 t = self._tracks[tid]
                 dt = max(1e-3, now - t["timestamp"])
                 px = t["x"] + t["vx"] * dt
                 py = t["y"] + t["vy"] * dt
                 d = math.hypot(det["x"] - px, det["y"] - py)
+                if nearest is None or d < nearest:nearest = d
+                camera_origin = bool(t.get("camera_ground_origin", False))
+                if camera_origin and (nearest_camera is None or d < nearest_camera):
+                    nearest_camera = d
                 if d < self.max_distance:
                     pending.append((d, di, tid))
+                    candidate_count += 1
+                    if camera_origin:camera_candidate_count += 1
+            association_meta[di] = {
+                "nearest": nearest,"nearest_camera": nearest_camera,
+                "candidates": candidate_count,
+                "camera_candidates": camera_candidate_count}
         pending.sort()
         assigned_det = {}
+        assigned_distance = {}
         assigned_track = set()
         for d, di, tid in pending:
             if di not in assigned_det and tid not in assigned_track:
                 assigned_det[di] = tid
+                assigned_distance[di] = d
                 assigned_track.add(tid)
 
         for di, det in enumerate(detections):
@@ -419,6 +436,23 @@ class NearestTracker(object):
                 "track_selected_enforced_origin": track["selected_enforced_origin"],
                 "track_non_selected_hits": non_selected_hits
             })
+            meta = association_meta.get(di, {})
+            item["track_association_distance"] = assigned_distance.get(di)
+            item["track_association_candidate_count"] = int(
+                meta.get("candidates", 0))
+            item["track_association_camera_origin_candidate_count"] = int(
+                meta.get("camera_candidates", 0))
+            item["track_association_nearest_distance"] = meta.get("nearest")
+            item["track_association_nearest_camera_origin_distance"] = \
+                meta.get("nearest_camera")
+            if old is None:
+                if meta.get("nearest") is None:
+                    reason = "no_active_tracks"
+                elif int(meta.get("candidates", 0)) == 0:
+                    reason = "outside_gate"
+                else:
+                    reason = "assignment_conflict"
+                item["track_association_birth_reason"] = reason
             self._decorate_quality(item, track, now)
             results.append(item)
 

@@ -118,7 +118,10 @@ class GroundTruthEvaluator(object):
                 "camera_only":0,"lidar_takeover":0,"duplicate_like_fp":0,
                 "spatial_fp":0,"states":{},"track_ids":{},"actor_ids":{},
                 "actor_tracks":{},"track_actors":{},"per_track_samples":{},
-                "classes":{}}
+                "classes":{},"association_distances":[],"births":0,
+                "birth_reasons":{},"birth_nearest_distances":[],
+                "birth_nearest_camera_distances":[],"birth_candidate_counts":[],
+                "birth_camera_candidate_counts":[]}
 
     @staticmethod
     def _empty_camera_enforcement_current():
@@ -559,6 +562,25 @@ class GroundTruthEvaluator(object):
             totals["per_track_samples"][track_id]=totals["per_track_samples"].get(track_id,0)+1
             if int(item.get("track_lidar_hits",0))>0:totals["lidar_takeover"]+=1
             else:totals["camera_only"]+=1
+            association_distance=item.get("track_association_distance")
+            if association_distance is not None:
+                totals["association_distances"].append(float(association_distance))
+            if state=="new":
+                totals["births"]+=1
+                reason=str(item.get("track_association_birth_reason","unknown"))
+                totals["birth_reasons"][reason]=totals["birth_reasons"].get(reason,0)+1
+                nearest=item.get("track_association_nearest_distance")
+                if nearest is not None:
+                    totals["birth_nearest_distances"].append(float(nearest))
+                nearest_camera=item.get(
+                    "track_association_nearest_camera_origin_distance")
+                if nearest_camera is not None:
+                    totals["birth_nearest_camera_distances"].append(
+                        float(nearest_camera))
+                totals["birth_candidate_counts"].append(int(
+                    item.get("track_association_candidate_count",0)))
+                totals["birth_camera_candidate_counts"].append(int(item.get(
+                    "track_association_camera_origin_candidate_count",0)))
         matched_detected=set()
         for truth_index,detected_index,unused_distance in pairs:
             gt=truth[truth_index];name=str(gt.get("object_type","unknown_obstacle"))
@@ -649,8 +671,23 @@ class GroundTruthEvaluator(object):
                 "error_avg":(sum(errors)/len(errors) if errors else None),
                 "error_max":(max(errors) if errors else None)}
         item["identity_gates"]=identity_gates
+        item["association"]={
+            "updates":len(totals["association_distances"]),
+            "match_distance":self._distribution(totals["association_distances"]),
+            "births":totals["births"],
+            "birth_reasons":dict(totals["birth_reasons"]),
+            "birth_nearest":self._distribution(totals["birth_nearest_distances"]),
+            "birth_nearest_camera":self._distribution(
+                totals["birth_nearest_camera_distances"]),
+            "birth_candidate_count":self._distribution(
+                totals["birth_candidate_counts"]),
+            "birth_camera_candidate_count":self._distribution(
+                totals["birth_camera_candidate_counts"])}
         item["current"]=dict(self._camera_ground_enforcement_current)
-        for key in ("track_ids","actor_ids","actor_tracks","track_actors","per_track_samples"):
+        for key in ("track_ids","actor_ids","actor_tracks","track_actors",
+                    "per_track_samples","association_distances","birth_reasons",
+                    "birth_nearest_distances","birth_nearest_camera_distances",
+                    "birth_candidate_counts","birth_camera_candidate_counts"):
             item.pop(key,None)
         return item
 

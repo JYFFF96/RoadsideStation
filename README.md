@@ -735,3 +735,17 @@ actors, extra ID fragments, switching tracks, and position error for each
 gate. The experiment is confined to GroundTruthEvaluator: Tracker matching,
 camera admission, detector-only person enforcement, and ObjectList output are
 unchanged.
+
+V0.6.12.8.2.2.69 attributes every actual camera-origin track birth to the
+production association state. The V0.6.12.8.2.2.68 gate comparison showed
+that reducing the truth gate is not a usable fix: 1 m matched only 40.6 percent
+of camera-origin samples, 2 m matched 74.3 percent, 3 m matched 95.0 percent,
+and 4 m matched 98.5 percent, while identity switches remained at seven or
+eight for the 2--4 m variants. The Tracker already predicts position from its
+velocity estimate, so this version does not duplicate that experiment.
+Instead, it records the actual prediction-to-detection match distance and
+classifies a new camera track as no active tracks, outside the 3.5 m production
+gate, or assignment conflict when an eligible track was claimed by another
+detection. It also reports the nearest active and nearest camera-origin track
+distances plus candidate multiplicity. All fields are diagnostic-only; greedy
+assignment, gates, track IDs, admission, and ObjectList output are unchanged.
