@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 20748)
-Total output lines: 716
-
 from __future__ import print_function
 import argparse,json,signal,sys,time,yaml,math
 import carla
@@ -426,7 +423,32 @@ def _print_adaptive_temporal_profile(report):
  if not report.get("enabled",False):return
  for key,label in (("frame","FRAME"),("run","RUN")):
   value=report.get(key,{}) or {}
-  print("    [ROAD-OB…748 tokens truncated…file",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
+  print("    [ROAD-OBJECT ADAPTIVE PROFILE %s] PreCap:%d Truth:%d FP:%d Precision:%s Bands:%s"%(label,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("bands",{})))
+  profiles=[]
+  for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
+  fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
+  for name,count,profile in profiles:
+   print("      [ADAPTIVE FEATURE %s %s] N:%d Score(avg/p10/p50/p90):%s TotalPts:%s Current:%s History:%s Frames:%s Height:%s Range:%s SensorBands:%s"%(label,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"range"),profile.get("bands",{})))
+
+def _print_hybrid_selection_profile(report):
+ if not report.get("enabled",False):return
+ for key,label in (("frame","FRAME"),("run","RUN")):
+  for source,value in sorted((report.get(key,{}) or {}).items()):
+   print("    [ROAD-OBJECT HYBRID PROFILE %s %s] C:%d Truth:%d FP:%d Precision:%s Classes:%s"%(label,source,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),dict((name,b.get("samples",0)) for name,b in (value.get("classes",{}) or {}).items())))
+   profiles=[]
+   for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
+   fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
+   for name,count,profile in profiles:
+    print("      [HYBRID FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Range:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"range")))
+
+def _print_hybrid_rescue_profile(report):
+ if not report.get("enabled",False):return
+ for key,label in (("frame","FRAME"),("run","RUN")):
+  for source,value in sorted((report.get(key,{}) or {}).items()):
+   print("    [ROAD-OBJECT RESCUE PROFILE %s %s] C:%d Truth:%d FP:%d Precision:%s Classes:%s"%(label,source,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),dict((name,b.get("samples",0)) for name,b in (value.get("classes",{}) or {}).items())))
+   profiles=[]
+   for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
+   fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
    for name,count,profile in profiles:
     print("      [RESCUE FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Area:%s Range:%s SensorRange:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"footprint_area"),_adaptive_feature(profile,"range"),_adaptive_feature(profile,"sensor_range")))
   for source,tests in sorted((report.get("ablations_"+key,{}) or {}).items()):
