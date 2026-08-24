@@ -513,7 +513,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.48 V2X Event Foundation starting...")
+ print("RoadsideStation V0.6.12.8.2.2.49 Fused Output Boundary starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -589,7 +589,7 @@ def main():
  print("ARCH: Camera association writes generic confirmation evidence back to track state for the next cycle.")
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
- print("V2X Event Engine: %s | AVW + SLW | Dachuan-compatible JSON, vendor MQTT direction pending"%("enabled" if event_engine.enabled else "disabled"))
+ print("V2X Event Engine: %s | AVW + SLW | canonical FusedObjectList input"%("enabled" if event_engine.enabled else "disabled"))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (opt-in benchmark)" if args.sensor_sync=="aligned" else " (legacy default)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
  last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
@@ -621,7 +621,12 @@ def main():
      fusion.last_selected_delayed_reappearance_candidates,
      fusion.last_selected_track_admission_candidates,frame_id=lidar[0])
    fusion.apply_camera_confirmations(pairs,timestamp=ol.timestamp)
-   fol=build_fused_object_list(sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs);oj=encode_object_list(ol);rj=encode_rsm(ol);now=time.time()
+   fol=build_fused_object_list(
+    sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs,
+    frame_id=(lidar[0] if lidar else None),coordinate_frame="carla_world")
+   # V0.6.12.8.2.2.49: every downstream consumer uses the same post-association
+   # object list. Camera class/size/source evidence must not disappear at MQTT.
+   oj=encode_object_list(fol);rj=encode_rsm(fol);now=time.time()
    if now-last>=1.0:
     s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     sync_frames=(int(camera[0])-int(lidar[0])) if camera is not None and lidar is not None else None
@@ -679,7 +684,7 @@ def main():
     last_eval=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj)
    ego_speed=(config.get("v2x_events",{}) or {}).get("test_ego_speed_kmh")
-   for event in event_engine.update(ol,{"speed_kmh":ego_speed} if ego_speed is not None else {}):
+   for event in event_engine.update(fol,{"speed_kmh":ego_speed} if ego_speed is not None else {}):
     payload=encode_v2x_event(event);pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload);print("[V2X EVENT] %s"%payload)
    time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True

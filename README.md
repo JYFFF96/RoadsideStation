@@ -495,7 +495,7 @@ configurable and must be confirmed with Dachuan before device-side deployment.
 - Radar association
 - Tracking
 - Camera/LiDAR association scaffold
-- Unified ObjectList output
+- Canonical FusedObjectList V1.0 output
 - CARLA ground-truth evaluation
 - RSM-like JSON encoder
 - MQTT publisher
@@ -522,3 +522,12 @@ perception -> fusion -> tracking -> ObjectList / RSM
 ```
 
 Scenario vehicles used later for abnormal-stop, wrong-way, FCW, BSD, VRU or intersection-conflict tests should be managed separately from normal background traffic.
+
+V0.6.12.8.2.2.49 closes the public fused-output boundary. Camera-associated
+class labels, normalized object size, radar evidence, track age/state and source
+provenance now remain present in the single `FusedObjectList V1.0` consumed by
+MQTT, the local-coordinate RSM-like adapter and the V2X event engine. The
+previous pre-camera `ObjectList` is retained only as an internal LiDAR/tracker
+result. CARLA LiDAR defaults now model the RoboSense Fairy 48TX: 48 channels,
+690,000 points/s, 10Hz and -15.84 to +15.84 degree vertical FOV, with an 80m
+first-stage acceptance range. Ground Truth remains evaluation-only.

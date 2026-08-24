@@ -1,12 +1,13 @@
 from __future__ import print_function
 
+import math
 import time
 
 
 class FusedObject(object):
     def __init__(self, object_id, object_type="unknown_obstacle", x=0.0, y=0.0, z=0.0,
                  vx=0.0, vy=0.0, size=None, confidence=0.0, sources=None,
-                 camera=None, radar_speed=None):
+                 camera=None, radar_speed=None, age=1, track_state="confirmed"):
         self.object_id = str(object_id)
         self.object_type = str(object_type)
         self.x = float(x); self.y = float(y); self.z = float(z)
@@ -16,6 +17,8 @@ class FusedObject(object):
         self.sources = list(sources or [])
         self.camera = camera
         self.radar_speed = None if radar_speed is None else float(radar_speed)
+        self.age = max(1, int(age))
+        self.track_state = str(track_state)
 
     def to_dict(self):
         out = {
@@ -23,9 +26,14 @@ class FusedObject(object):
             "type": self.object_type,
             "position": {"x": self.x, "y": self.y, "z": self.z},
             "velocity": {"x": self.vx, "y": self.vy},
+            "speedMps": math.hypot(self.vx, self.vy),
+            "headingDeg": (math.degrees(math.atan2(self.vy, self.vx)) % 360.0
+                           if math.hypot(self.vx, self.vy) > 1e-3 else 0.0),
             "size": {"length": self.size[0], "width": self.size[1], "height": self.size[2]},
             "confidence": self.confidence,
             "sources": list(self.sources),
+            "age": self.age,
+            "trackState": self.track_state,
         }
         if self.radar_speed is not None:
             out["radarRadialVelocity"] = self.radar_speed
@@ -35,24 +43,31 @@ class FusedObject(object):
 
 
 class FusedObjectList(object):
-    def __init__(self, station_id, objects=None, timestamp=None):
+    def __init__(self, station_id, objects=None, timestamp=None, frame_id=None,
+                 coordinate_frame="carla_world"):
         self.station_id = str(station_id)
         self.objects = objects or []
         self.timestamp = time.time() if timestamp is None else float(timestamp)
+        self.frame_id = frame_id
+        self.coordinate_frame = str(coordinate_frame)
 
     def to_dict(self):
         return {
             "msgType": "FusedObjectList",
-            "version": "V0.4.5",
+            "version": "V1.0",
             "stationId": self.station_id,
             "timestamp": self.timestamp,
+            "timestampMs": int(round(self.timestamp * 1000.0)),
+            "frameId": self.frame_id,
+            "coordinateFrame": self.coordinate_frame,
             "objectCount": len(self.objects),
             "objects": [o.to_dict() for o in self.objects],
         }
 
 
 def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
-                            camera_objects=None, associations=None):
+                            camera_objects=None, associations=None, frame_id=None,
+                            coordinate_frame="carla_world"):
     """Build FusedObjectList and optionally attach CameraObject associations."""
     camera_objects = camera_objects or []
     associations = associations or []
@@ -98,5 +113,8 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
             x=item.get("x", 0.0), y=item.get("y", 0.0), z=item.get("z", 0.0),
             vx=item.get("vx", 0.0), vy=item.get("vy", 0.0), size=size,
             confidence=confidence, sources=sources, camera=camera_meta,
-            radar_speed=radar_velocity))
-    return FusedObjectList(station_id, objects, timestamp)
+            radar_speed=radar_velocity,
+            age=item.get("track_hits", item.get("hits", 1)),
+            track_state=item.get("track_state", "confirmed")))
+    return FusedObjectList(station_id, objects, timestamp, frame_id,
+                           coordinate_frame)

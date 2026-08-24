@@ -50,12 +50,14 @@ camera_lidar_association:
 
 lidar:
   enabled: true
-  channels: 64
+  # V0.6.12.8.2.2.49: CARLA profile matched to RoboSense Fairy 48TX.
+  # The first acceptance range remains 80m (10% reflectivity specification).
+  channels: 48
   range: 80.0
-  points_per_second: 400000
+  points_per_second: 690000
   rotation_frequency: 10.0
-  upper_fov: 5.0
-  lower_fov: -35.0
+  upper_fov: 15.84
+  lower_fov: -15.84
   transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 radar:
