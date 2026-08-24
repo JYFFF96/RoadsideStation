@@ -556,3 +556,12 @@ receive camera class evidence through the existing dual-camera association.
 The implementation uses only scalar radar data and is independent of CARLA
 actors so an MR76 adapter can reuse the same fusion boundary. Runtime logs
 report the complete decision funnel in `[RADAR INIT]`.
+
+V0.6.12.8.2.2.52 makes the background-calibration transition unmistakable:
+the first READY report is wrapped in 72-character separator lines and prints
+an explicit instruction to start the benchmark targets. The ordinary compact
+background status remains available afterwards. The radar initiator now also
+profiles the absolute radial speed of every temporally confirmed cluster and
+reports p50, maximum and shadow counts at 0.10/0.20/0.40/0.60m/s. These
+threshold comparisons are diagnostic-only; the enforced 0.60m/s gate remains
+unchanged until a log demonstrates a safe lower boundary.

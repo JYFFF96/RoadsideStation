@@ -351,6 +351,7 @@ fusion:
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6
+  radar_initiation_speed_shadow_thresholds: [0.10, 0.20, 0.40, 0.60]
   radar_initiation_dedupe_distance: 3.0
   radar_initiation_max_candidates: 24
   radar_initiation_default_extent: [4.5, 1.8, 1.6]

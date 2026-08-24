@@ -15,6 +15,7 @@ from roadside.camera_objects import CameraObjectList
 from roadside.fused_objects import build_fused_object_list
 from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.lidar_projection import project_lidar_tracks
+from roadside.runtime_status import background_ready_banner
 from roadside.selected_camera_support import annotate_selected_camera_support
 from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
@@ -513,7 +514,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.51 Near-Radar Track Initiation starting...")
+ print("RoadsideStation V0.6.12.8.2.2.52 Radar-Speed Profiling starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -603,7 +604,7 @@ def main():
  print("V2X Event Engine: %s | AVW + SLW | canonical FusedObjectList input"%("enabled" if event_engine.enabled else "disabled"))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
- last=0.0;last_eval=0.0;last_json_sample=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
+ last=0.0;last_eval=0.0;last_json_sample=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
  try:
   while not _STOP_REQUESTED:
    cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None,radar_frame_id=radar[0] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
@@ -654,6 +655,9 @@ def main():
     sync_seconds=(float(primary_camera[2])-float(lidar[2])) if primary_camera is not None and lidar is not None and primary_camera[2] is not None and lidar[2] is not None else None
     print("  [SENSOR SYNC] Mode:%s Camera-LiDAR FrameDelta:%s TimeDelta:%s"%(args.sensor_sync,("-" if sync_frames is None else "%+d"%sync_frames),("-" if sync_seconds is None else "%+.3fs"%sync_seconds)))
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
+    if s.get("background_ready",False) and not background_ready_announced:
+     for banner_line in background_ready_banner():print(banner_line)
+     background_ready_announced=True
     print("  [BACKGROUND] Status:%s Remaining:%.1fs Cells:%d Rejected:%d"%(
      "READY" if s.get("background_ready",False) else "LEARNING",float(s.get("background_remaining",0.0)),int(s.get("background_cells",0)),int(s.get("background_rejected",0))))
     print("  [RADAR INIT] Mode:%s RangePts:%d Clusters:%d Pending:%d Confirmed:%d Moving:%d StaticReject:%d DedupeReject:%d ROIReject:%d Emitted:%d"%(
@@ -663,6 +667,11 @@ def main():
      s.get("radar_initiation_moving",0),s.get("radar_initiation_static_rejected",0),
      s.get("radar_initiation_dedupe_rejected",0),s.get("radar_initiation_roi_rejected",0),
      s.get("radar_initiation_emitted",0)))
+    radar_speed_p50=s.get("radar_initiation_speed_p50");radar_speed_max=s.get("radar_initiation_speed_max");radar_speed_counts=s.get("radar_initiation_speed_shadow_counts",{}) or {}
+    radar_speed_shadow=" ".join(">=%sm/s:%d"%(key,radar_speed_counts[key]) for key in sorted(radar_speed_counts,key=float)) or "-"
+    print("  [RADAR SPEED SHADOW] ConfirmedAbsSpeed P50:%s Max:%s | WouldMove %s | TrackerInput:UNCHANGED"%(
+     "-" if radar_speed_p50 is None else "%.2fm/s"%float(radar_speed_p50),
+     "-" if radar_speed_max is None else "%.2fm/s"%float(radar_speed_max),radar_speed_shadow))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))

@@ -51,6 +51,18 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         self.assertEqual([], initiator.update(self._points(), [], 1.1, frame_id=10))
         self.assertEqual(1, initiator.last_stats["pending"])
 
+    def test_confirmed_speed_shadow_profiles_lower_thresholds(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._points(velocity=.25), [], 1.0, frame_id=10)
+        self.assertEqual([], initiator.update(
+            self._points(8.1, velocity=.25), [], 1.1, frame_id=11))
+        stats = initiator.last_stats
+        self.assertAlmostEqual(.35, stats["confirmed_abs_speed_p50"])
+        self.assertAlmostEqual(.35, stats["confirmed_abs_speed_max"])
+        self.assertEqual({"0.10": 1, "0.20": 1, "0.40": 0, "0.60": 0},
+                         stats["speed_shadow_counts"])
+        self.assertEqual(1, stats["static_rejected"])
+
     def test_static_and_existing_lidar_targets_are_not_emitted(self):
         static = NearRadarTrackInitiator(self._config())
         static.update(self._points(velocity=.1), [], 1.0, frame_id=1)

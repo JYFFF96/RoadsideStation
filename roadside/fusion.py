@@ -1115,6 +1115,10 @@ class SimpleFusion(object):
             "radar_initiation_dedupe_rejected": int(radar_init_stats.get("dedupe_rejected",0)),
             "radar_initiation_roi_rejected": int(radar_init_stats.get("roi_rejected",0)),
             "radar_initiation_emitted": int(radar_init_stats.get("emitted",0)),
+            "radar_initiation_speed_p50": radar_init_stats.get("confirmed_abs_speed_p50"),
+            "radar_initiation_speed_max": radar_init_stats.get("confirmed_abs_speed_max"),
+            "radar_initiation_speed_shadow_counts": dict(
+                radar_init_stats.get("speed_shadow_counts",{}) or {}),
             "radar_nearest_min": min(nearest) if nearest else None,
             "tracked_objects": len(objs), "track_new": int(ts.get("new", 0)),
             "track_update": int(ts.get("update", 0)), "track_coast": int(ts.get("coast", 0)),

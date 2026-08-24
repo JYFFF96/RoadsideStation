@@ -27,6 +27,8 @@ class NearRadarTrackInitiator(object):
         self.min_abs_speed = float(c.get("radar_initiation_min_abs_speed", 0.6))
         self.dedupe_distance = float(c.get("radar_initiation_dedupe_distance", 3.0))
         self.max_candidates = max(1, int(c.get("radar_initiation_max_candidates", 24)))
+        self.speed_shadow_thresholds = [float(value) for value in c.get(
+            "radar_initiation_speed_shadow_thresholds", [.10, .20, .40, .60])]
         self.default_extent = list(c.get(
             "radar_initiation_default_extent", [4.5, 1.8, 1.6]))
         self._pending = []
@@ -39,6 +41,9 @@ class NearRadarTrackInitiator(object):
                 "point_rejected": 0, "pending": 0, "confirmed": 0,
                 "moving_confirmed": 0, "static_rejected": 0,
                 "dedupe_rejected": 0, "roi_rejected": 0, "emitted": 0,
+                "confirmed_abs_speed_p50": None,
+                "confirmed_abs_speed_max": None,
+                "speed_shadow_counts": {},
                 "shadow_mode": self.shadow_mode, "new_frame": False}
 
     def _clusters(self, points):
@@ -145,6 +150,16 @@ class NearRadarTrackInitiator(object):
             confirmed.append(item)
         stats["pending"] = len(self._pending)
         stats["confirmed"] = len(confirmed)
+        confirmed_speeds = [abs(float(item.get("radar_radial_velocity", 0.0)))
+                            for item in confirmed]
+        if confirmed_speeds:
+            stats["confirmed_abs_speed_p50"] = float(
+                statistics.median(confirmed_speeds))
+            stats["confirmed_abs_speed_max"] = max(confirmed_speeds)
+        stats["speed_shadow_counts"] = dict(
+            ("%.2f" % threshold,
+             sum(1 for speed in confirmed_speeds if speed >= threshold))
+            for threshold in self.speed_shadow_thresholds)
         self.last_shadow_candidates = [dict(item) for item in confirmed]
         emitted = []
         for item in confirmed:
