@@ -2,7 +2,8 @@ from __future__ import print_function
 
 import math
 import carla
-from .sensors import SensorCache, image_to_bgra, lidar_to_xyz, radar_to_cartesian
+from .sensors import (SensorCache, image_to_bgra, level_mount_blind_ranges,
+                      lidar_to_xyz, radar_to_cartesian)
 
 
 def _combine_transform(base, offset):
@@ -19,7 +20,14 @@ def _angle_diff(a,b):
 class CarlaRoadsideStation(object):
     def __init__(self, config):
         self.config=config; self.cache=SensorCache(); self.client=None; self.world=None; self.sensors=[]
-        self.base_transform=None; self.map_name=None; self.camera_transform=None; self.lidar_transform=None; self.radar_transform=None; self.world_map=None; self.junction_center=None
+        self.base_transform=None; self.map_name=None; self.camera_transform=None; self.camera_transforms={}; self.lidar_transform=None; self.radar_transform=None; self.world_map=None; self.junction_center=None
+
+    def camera_configs(self):
+        configured=self.config.get("cameras")
+        if configured:
+            return [dict(x) for x in configured if x.get("enabled",True)]
+        legacy=self.config.get("camera",{})
+        return [dict(legacy)] if legacy.get("enabled",True) else []
 
     def _attach_current_world(self):
         self.world=self.client.get_world(); self.world_map=self.world.get_map(); self.map_name=self.world_map.name.split("/")[-1]
@@ -159,14 +167,33 @@ class CarlaRoadsideStation(object):
         cc=self.config["carla"];self.client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));self.client.set_timeout(float(cc.get("timeout",60.0)))
         self._attach_current_world();self._configure_map_layers();blueprints=self.world.get_blueprint_library();self.base_transform=self._resolve_base_transform()
         print("RSU deployment: map=%s x=%.2f y=%.2f z=%.2f yaw=%.1f"%(self.map_name,self.base_transform.location.x,self.base_transform.location.y,self.base_transform.location.z,self.base_transform.rotation.yaw))
-        if self.config["camera"].get("enabled",True):
-            cfg=self.config["camera"];bp=blueprints.find("sensor.camera.rgb");bp.set_attribute("image_size_x",str(cfg.get("width",1280)));bp.set_attribute("image_size_y",str(cfg.get("height",720)));bp.set_attribute("fov",str(cfg.get("fov",90)));self.camera_transform=_combine_transform(self.base_transform,cfg["transform"]);a=self.world.spawn_actor(bp,self.camera_transform);a.listen(lambda d:self.cache.set_camera(d.frame,image_to_bgra(d),d.timestamp));self.sensors.append(a)
+        for cfg in self.camera_configs():
+            camera_id=str(cfg.get("id","CAM_%02d"%(len(self.camera_transforms)+1)))
+            bp=blueprints.find("sensor.camera.rgb");bp.set_attribute("image_size_x",str(cfg.get("width",1280)));bp.set_attribute("image_size_y",str(cfg.get("height",720)));bp.set_attribute("fov",str(cfg.get("fov",90)))
+            transform=_combine_transform(self.base_transform,cfg["transform"]);self.camera_transforms[camera_id]=transform
+            if self.camera_transform is None:self.camera_transform=transform
+            a=self.world.spawn_actor(bp,transform)
+            a.listen(lambda d,camera_id=camera_id:self.cache.set_camera(
+                d.frame,image_to_bgra(d),d.timestamp,camera_id))
+            self.sensors.append(a)
+            print("Camera config: id=%s size=%sx%s fov=%s yaw=%.1f pitch=%.1f"%(
+                camera_id,cfg.get("width",1280),cfg.get("height",720),cfg.get("fov",90),
+                transform.rotation.yaw,transform.rotation.pitch))
         if self.config["lidar"].get("enabled",True):
             cfg=self.config["lidar"];bp=blueprints.find("sensor.lidar.ray_cast")
             for key,attr in [("channels","channels"),("range","range"),("points_per_second","points_per_second"),("rotation_frequency","rotation_frequency"),("upper_fov","upper_fov"),("lower_fov","lower_fov")]:
                 if key in cfg: bp.set_attribute(attr,str(cfg[key]))
             self.lidar_transform=_combine_transform(self.base_transform,cfg["transform"])
             print("LiDAR config: channels=%s pps=%s range=%sm vertical_fov=[%s,%s] height=%.2fm"%(cfg.get("channels"),cfg.get("points_per_second"),cfg.get("range"),cfg.get("lower_fov","default"),cfg.get("upper_fov","default"),self.lidar_transform.location.z))
+            ground_z=float(self.junction_center.z) if self.junction_center is not None else 0.0
+            height=max(0.0,float(self.lidar_transform.location.z)-ground_z)
+            down_angle=abs(float(cfg.get("lower_fov",-15.0)))
+            if height>0.0 and down_angle>0.1:
+                target_height=float(cfg.get("near_coverage_reference_height",1.70))
+                ground_blind,target_blind=level_mount_blind_ranges(
+                    height,down_angle,target_height)
+                print("[LIDAR COVERAGE] Level-mount geometric blind range: ground=%.1fm target(%.1fm)=%.1fm | Camera/Radar must initiate near tracks"%(
+                    ground_blind,target_height,target_blind))
             a=self.world.spawn_actor(bp,self.lidar_transform);a.listen(lambda d:self.cache.set_lidar(d.frame,lidar_to_xyz(d),d.timestamp));self.sensors.append(a)
         if self.config["radar"].get("enabled",True):
             cfg=self.config["radar"];bp=blueprints.find("sensor.other.radar");bp.set_attribute("horizontal_fov",str(cfg["horizontal_fov"]));bp.set_attribute("vertical_fov",str(cfg["vertical_fov"]));bp.set_attribute("range",str(cfg["range"]));self.radar_transform=_combine_transform(self.base_transform,cfg["transform"]);a=self.world.spawn_actor(bp,self.radar_transform);a.listen(lambda d:self.cache.set_radar(d.frame,radar_to_cartesian(d),d.timestamp));self.sensors.append(a)

@@ -78,7 +78,20 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
             continue
         track_id = (tracked_candidates or [])[li].get("id")
         if track_id is not None:
-            camera_by_track[str(track_id)] = (camera_objects[ci], pair)
+            key=str(track_id);candidate=(camera_objects[ci],pair)
+            previous=camera_by_track.get(key)
+            # A track can be visible in both opposite-facing cameras near the
+            # overlap boundary. Keep the strongest association deterministically.
+            candidate_rank=(float(pair.get("iou",0.0)),
+                            -float(pair.get("center_distance",float("inf"))),
+                            float(getattr(camera_objects[ci],"confidence",0.0)))
+            previous_rank=None
+            if previous is not None:
+                previous_rank=(float(previous[1].get("iou",0.0)),
+                               -float(previous[1].get("center_distance",float("inf"))),
+                               float(getattr(previous[0],"confidence",0.0)))
+            if previous_rank is None or candidate_rank>previous_rank:
+                camera_by_track[key]=candidate
 
     objects = []
     for item in tracked_candidates or []:

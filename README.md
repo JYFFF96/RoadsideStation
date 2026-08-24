@@ -61,8 +61,10 @@ cd ~/RoadsideStation
 python3.7 main.py
 ```
 
-For the V0.6.12.8.1 multi-class geometry benchmark, also start deterministic
-crosswalk walkers and lane obstacles in another terminal before main.py:
+For the multi-class geometry benchmark, wait until main.py prints
+`[BACKGROUND] Status:READY`, then start deterministic crosswalk walkers and
+lane obstacles in another terminal. Starting them after background calibration
+prevents the intentional static hazards from being learned as fixed map:
 
 ```bash
 cd ~/RoadsideStation
@@ -487,7 +489,7 @@ configurable and must be confirmed with Dachuan before device-side deployment.
 
 ## Current scope
 
-- Fixed roadside RGB camera
+- Two opposite-facing roadside RGB cameras
 - Fixed roadside LiDAR
 - Fixed roadside radar
 - Sensor frame cache
@@ -531,3 +533,15 @@ previous pre-camera `ObjectList` is retained only as an internal LiDAR/tracker
 result. CARLA LiDAR defaults now model the RoboSense Fairy 48TX: 48 channels,
 690,000 points/s, 10Hz and -15.84 to +15.84 degree vertical FOV, with an 80m
 first-stage acceptance range. Ground Truth remains evaluation-only.
+
+V0.6.12.8.2.2.50 adds the dual-camera coverage baseline required by the Fairy
+48TX installation geometry. `CAM_NORTH` and `CAM_SOUTH` have independent
+caches, transforms, projection, detector/truth objects and Camera-LiDAR
+association before their results enter one canonical `FusedObjectList`.
+Multi-camera snapshots align to the LiDAR frame by default. Startup now reports
+the level-mount LiDAR blind ranges; at the configured 8.5m sensor height and
+-15.84 degree lower FOV these are approximately 30.0m at ground level and
+24.0m for a 1.7m target. Fixed-map background learning is enabled for six
+seconds, after which newly spawned stationary hazards remain eligible. A
+periodic `[FUSED OUTPUT SAMPLE]` exposes the real public JSON fields in logs.
+Ground Truth remains evaluation-only and cannot initiate or modify tracks.

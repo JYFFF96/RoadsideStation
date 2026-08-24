@@ -1,6 +1,6 @@
 from __future__ import print_function
 import unittest
-from roadside.sensors import SensorCache
+from roadside.sensors import SensorCache,level_mount_blind_ranges
 
 
 class SensorTimestampTest(unittest.TestCase):
@@ -34,6 +34,24 @@ class SensorTimestampTest(unittest.TestCase):
     def test_aligned_snapshot_falls_back_until_common_frame_arrives(self):
         cache=SensorCache();cache.set_camera(4,"camera-4",.4);cache.set_lidar(5,"lidar-5",.5)
         self.assertEqual(cache.snapshot(),cache.snapshot_aligned())
+
+    def test_multi_camera_alignment_uses_lidar_frame_per_camera(self):
+        cache=SensorCache()
+        cache.set_camera(10,"north-10",1.0,"CAM_NORTH")
+        cache.set_camera(11,"north-11",1.1,"CAM_NORTH")
+        cache.set_camera(10,"south-10",1.0,"CAM_SOUTH")
+        cache.set_camera(12,"south-12",1.2,"CAM_SOUTH")
+        cache.set_lidar(10,"lidar-10",1.0)
+        cameras,lidar,radar=cache.snapshot_all_aligned()
+        self.assertEqual("north-10",cameras["CAM_NORTH"][1])
+        self.assertEqual("south-10",cameras["CAM_SOUTH"][1])
+        self.assertEqual(10,lidar[0]);self.assertIsNone(radar)
+        self.assertEqual("north-11",cache.snapshot()[0][1])
+
+    def test_fairy_height_explains_near_blind_zone(self):
+        ground,target=level_mount_blind_ranges(8.5,-15.84,1.7)
+        self.assertAlmostEqual(30.0,ground,places=1)
+        self.assertAlmostEqual(24.0,target,places=1)
 
 
 if __name__=="__main__":unittest.main()

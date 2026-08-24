@@ -32,6 +32,22 @@ camera:
   fov: 90
   transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
 
+# V0.6.12.8.2.2.50: two cameras cover the selected road axis in opposite
+# directions. The legacy camera block remains as a tool-compatible fallback.
+cameras:
+  - id: CAM_NORTH
+    enabled: true
+    width: 1280
+    height: 720
+    fov: 90
+    transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 0.0, roll: 0.0}
+  - id: CAM_SOUTH
+    enabled: true
+    width: 1280
+    height: 720
+    fov: 90
+    transform: {x: 0.0, y: 0.0, z: 0.0, pitch: -20.0, yaw: 180.0, roll: 0.0}
+
 camera_detection:
   enabled: true
   backend: yolov5_onnx_auto
@@ -58,6 +74,7 @@ lidar:
   rotation_frequency: 10.0
   upper_fov: 15.84
   lower_fov: -15.84
+  near_coverage_reference_height: 1.70
   transform: {x: 0.0, y: 0.0, z: 0.5, pitch: 0.0, yaw: 0.0, roll: 0.0}
 
 radar:
@@ -391,7 +408,9 @@ fusion:
   geometry_aware_roi_mid_max_center_excess: 2.6
   geometry_aware_roi_mid_max_half_width: 2.0
 
-  background_filter_enabled: false
+  # Learn fixed map returns before benchmark targets are spawned. New static
+  # hazards created after READY remain eligible for ObjectList.
+  background_filter_enabled: true
   background_calibration_seconds: 6.0
   background_cell_size: 1.0
   background_occupancy_ratio: 0.45
@@ -513,6 +532,10 @@ mqtt:
   topic_rsm: roadside/RSU_001/rsm
   # Confirm the writable device-side topic with Dachuan before production use.
   topic_event: roadside/RSU_001/event2hmi
+
+output_diagnostics:
+  fused_json_sample_enabled: true
+  fused_json_sample_interval: 5.0
 
 v2x_events:
   enabled: true

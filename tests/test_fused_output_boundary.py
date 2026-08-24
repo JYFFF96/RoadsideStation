@@ -8,6 +8,7 @@ import yaml
 
 from roadside.camera_objects import CameraObject
 from roadside.fused_objects import build_fused_object_list
+from roadside.fusion import SimpleFusion
 from roadside.messages import encode_object_list, encode_rsm
 from roadside.v2x_events import V2XEventEngine
 
@@ -75,6 +76,39 @@ class FusedOutputBoundaryTest(unittest.TestCase):
         self.assertEqual(10.0, lidar["rotation_frequency"])
         self.assertEqual((-15.84, 15.84),
                          (lidar["lower_fov"], lidar["upper_fov"]))
+
+    def test_default_profile_has_opposite_cameras_and_background_learning(self):
+        root = os.path.dirname(os.path.dirname(__file__))
+        with open(os.path.join(root, "config", "roadside.yaml"), "r") as stream:
+            config = yaml.safe_load(stream)
+        cameras=config["cameras"]
+        self.assertEqual(["CAM_NORTH","CAM_SOUTH"],[x["id"] for x in cameras])
+        self.assertEqual([0.0,180.0],[x["transform"]["yaw"] for x in cameras])
+        self.assertTrue(config["fusion"]["background_filter_enabled"])
+
+    def test_strongest_of_two_camera_associations_is_published(self):
+        tracks=[{"id":1,"x":0,"y":0,"z":1,"extent":[4,2,1.5],
+                 "sources":["lidar"],"confidence":.7}]
+        cameras=[CameraObject("CAM_NORTH","car",.8,[0,0,20,20]),
+                 CameraObject("CAM_SOUTH","truck",.9,[0,0,30,30])]
+        pairs=[{"lidar_index":0,"camera_index":0,"iou":.1,"center_distance":5},
+               {"lidar_index":0,"camera_index":1,"iou":.4,"center_distance":10}]
+        fused=build_fused_object_list("R",tracks,1.0,cameras,pairs)
+        self.assertEqual("truck",fused.objects[0].object_type)
+        self.assertEqual("CAM_SOUTH",fused.objects[0].camera["cameraId"])
+
+    def test_background_filter_uses_prefixed_runtime_config(self):
+        fusion=SimpleFusion("R",{
+            "background_calibration_seconds":2.5,
+            "background_cell_size":.7,
+            "background_occupancy_ratio":.6,
+            "background_moving_radar_speed":1.8,
+            "background_neighbor_radius_cells":1})
+        self.assertEqual(2.5,fusion.background.calibration_seconds)
+        self.assertEqual(.7,fusion.background.cell_size)
+        self.assertEqual(.6,fusion.background.occupancy_ratio)
+        self.assertEqual(1.8,fusion.background.moving_radar_speed)
+        self.assertEqual(1,fusion.background.neighbor_radius_cells)
 
 
 if __name__ == "__main__":

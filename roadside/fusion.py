@@ -81,7 +81,12 @@ class SimpleFusion(object):
             config.get("track_coast_low_score", 0.55),
             config.get("track_coast_edge_ratio", 0.90))
         self.tracker.configure_quality(config)
-        self.background = PersistentStaticFilter(**config)
+        self.background = PersistentStaticFilter(
+            calibration_seconds=config.get("background_calibration_seconds",6.0),
+            cell_size=config.get("background_cell_size",1.0),
+            occupancy_ratio=config.get("background_occupancy_ratio",.45),
+            moving_radar_speed=config.get("background_moving_radar_speed",1.2),
+            neighbor_radius_cells=config.get("background_neighbor_radius_cells",2))
         self.road_object_recovery = RoadObjectGeometryRecovery()
         self.world_transform = None
         self.radar_matrix = None

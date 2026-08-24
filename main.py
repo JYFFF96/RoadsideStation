@@ -1,5 +1,8 @@
+Warning: truncated output (original token count: 20748)
+Total output lines: 716
+
 from __future__ import print_function
-import argparse,signal,sys,time,yaml,math
+import argparse,json,signal,sys,time,yaml,math
 import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
@@ -423,32 +426,7 @@ def _print_adaptive_temporal_profile(report):
  if not report.get("enabled",False):return
  for key,label in (("frame","FRAME"),("run","RUN")):
   value=report.get(key,{}) or {}
-  print("    [ROAD-OBJECT ADAPTIVE PROFILE %s] PreCap:%d Truth:%d FP:%d Precision:%s Bands:%s"%(label,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("bands",{})))
-  profiles=[]
-  for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
-  fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
-  for name,count,profile in profiles:
-   print("      [ADAPTIVE FEATURE %s %s] N:%d Score(avg/p10/p50/p90):%s TotalPts:%s Current:%s History:%s Frames:%s Height:%s Range:%s SensorBands:%s"%(label,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"range"),profile.get("bands",{})))
-
-def _print_hybrid_selection_profile(report):
- if not report.get("enabled",False):return
- for key,label in (("frame","FRAME"),("run","RUN")):
-  for source,value in sorted((report.get(key,{}) or {}).items()):
-   print("    [ROAD-OBJECT HYBRID PROFILE %s %s] C:%d Truth:%d FP:%d Precision:%s Classes:%s"%(label,source,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),dict((name,b.get("samples",0)) for name,b in (value.get("classes",{}) or {}).items())))
-   profiles=[]
-   for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
-   fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
-   for name,count,profile in profiles:
-    print("      [HYBRID FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Range:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"range")))
-
-def _print_hybrid_rescue_profile(report):
- if not report.get("enabled",False):return
- for key,label in (("frame","FRAME"),("run","RUN")):
-  for source,value in sorted((report.get(key,{}) or {}).items()):
-   print("    [ROAD-OBJECT RESCUE PROFILE %s %s] C:%d Truth:%d FP:%d Precision:%s Classes:%s"%(label,source,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),dict((name,b.get("samples",0)) for name,b in (value.get("classes",{}) or {}).items())))
-   profiles=[]
-   for name,bucket in sorted((value.get("classes",{}) or {}).items()):profiles.append((name,bucket.get("samples",0),bucket.get("profile",{})))
-   fp=value.get("false_profile",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
+  print("    [ROAD-OB…748 tokens truncated…file",{}) or {};profiles.append(("FP",(fp.get("points",{}) or {}).get("samples",0),fp))
    for name,count,profile in profiles:
     print("      [RESCUE FEATURE %s %s %s] N:%d Score:%s Pts:%s Current:%s History:%s Frames:%s Height:%s Long:%s Short:%s Area:%s Range:%s SensorRange:%s"%(label,source,name,count,_adaptive_feature(profile,"rank_score"),_adaptive_feature(profile,"points"),_adaptive_feature(profile,"current_points"),_adaptive_feature(profile,"history_points"),_adaptive_feature(profile,"support_frames"),_adaptive_feature(profile,"height"),_adaptive_feature(profile,"long_side"),_adaptive_feature(profile,"short_side"),_adaptive_feature(profile,"footprint_area"),_adaptive_feature(profile,"range"),_adaptive_feature(profile,"sensor_range")))
   for source,tests in sorted((report.get("ablations_"+key,{}) or {}).items()):
@@ -507,13 +485,13 @@ def main():
  parser.add_argument("--config",default="config/roadside.yaml")
  parser.add_argument("--camera-source",choices=["none","carla_truth","detector"],default=None)
  parser.add_argument("--camera-model",default=None)
- parser.add_argument("--sensor-sync",choices=["latest","aligned"],default="latest",
-                     help="latest preserves legacy behavior; aligned selects the newest common Camera/LiDAR frame")
+ parser.add_argument("--sensor-sync",choices=["latest","aligned"],default="aligned",
+                     help="aligned selects each camera at the LiDAR frame; latest is a legacy diagnostic mode")
  args=parser.parse_args()
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.49 Fused Output Boundary starting...")
+ print("RoadsideStation V0.6.12.8.2.2.50 Dual-Camera Coverage Baseline starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -524,7 +502,7 @@ def main():
  print("LiDAR clustering: %s"%("hybrid range-adaptive (near geometry filtered, mid 3D, far multi-scale BEV)" if fc.get("range_adaptive_clustering",False) else "fixed"))
  if fc.get("range_adaptive_clustering",False):print("LiDAR range bands: %s"%fc.get("range_bands",[]))
  near_band=(fc.get("range_bands") or [{}])[0]
- print("Teaching acceptance focus: 0-30m UNCHANGED | near geometry L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | merge gap=%.2fm"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6)),float(fc.get("near_merge_gap",0.65))))
+ print("LiDAR near-band geometry: 0-30m L=%.2f..%.1f W=%.2f..%.1f H=%.2f..%.1fm | physical blind zone is reported separately; cameras/radar cover it"%(float(near_band.get("min_length",0.75)),float(near_band.get("max_length",6.5)),float(near_band.get("min_width",0.55)),float(near_band.get("max_width",3.4)),float(near_band.get("min_height",0.45)),float(near_band.get("max_height",2.6))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -560,11 +538,16 @@ def main():
  print("Multi-Class Safety Baseline: vehicle + VRU + configured road obstacles | LiDAR unknowns remain unknown_obstacle")
  print("Qt/C++ portability: rescue/discovery/far-builder/quality/diagnostic logic uses scalar point/track evidence only; no CARLA actor data.")
  print("Background filter: %s"%("enabled" if fc.get("background_filter_enabled",False) else "disabled"))
- projector=None;width=0;height=0
- if station.camera_transform is not None:
-  cc=config["camera"];width=int(cc.get("width",1280));height=int(cc.get("height",720));projector=CameraProjector(width,height,cc.get("fov",90),station.camera_transform)
- camera_id=config.get("camera",{}).get("id","CAM_01");camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
- camera_detector=None;camera_detection_frame=None;camera_detection_objects=[]
+ camera_runtimes={}
+ for cc in station.camera_configs():
+  camera_id=str(cc.get("id","CAM_01"));transform=station.camera_transforms.get(camera_id)
+  if transform is None:continue
+  width=int(cc.get("width",1280));height=int(cc.get("height",720))
+  camera_runtimes[camera_id]={"config":cc,"width":width,"height":height,
+   "projector":CameraProjector(width,height,cc.get("fov",90),transform)}
+ primary_camera_id=next(iter(camera_runtimes),None)
+ camera_source=config.get("camera_fusion",{}).get("source","none");assoc_cfg=config.get("camera_lidar_association",{})
+ camera_detector=None;camera_detection_frames={};camera_detection_objects={}
  if camera_source=="detector" and config.get("camera_detection",{}).get("enabled",True):
   try:
    camera_detector=create_camera_detector(config.get("camera_detection",{}));print("Camera detector active in fusion loop: %s model=%s"%(camera_detector.name,config.get("camera_detection",{}).get("model","-")))
@@ -578,7 +561,7 @@ def main():
    return None
   evaluator=GroundTruthEvaluator(station.world,eval_center,eval_cfg)
   _print_test_targets(evaluator)
- print("CARLA roadside sensors started: %d"%len(station.sensors));print("V0.6.11.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
+ print("CARLA roadside sensors started: %d | cameras=%s"%(len(station.sensors),sorted(camera_runtimes)));print("V0.6.11.2 CARLA evaluator: %s"%("enabled" if evaluator else "disabled"))
  if evaluator:print("Evaluation radius: %.1fm, bins=%s, truth-track gate: %.1fm"%(evaluator.radius,evaluator.range_bins,evaluator.match_distance))
  print("ARCH: traffic -> ground removal -> clustering -> V0.6.11.1 range-aware rescue + V0.6.11.2 far geometry builder + V0.6.10 current-frame discovery -> road ROI -> far score -> tracker -> fusion")
  print("ARCH: Discovery Diagnostics observes source stages and discovery-born track lifecycle only.")
@@ -590,29 +573,37 @@ def main():
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  print("V2X Event Engine: %s | AVW + SLW | canonical FusedObjectList input"%("enabled" if event_engine.enabled else "disabled"))
- print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (opt-in benchmark)" if args.sensor_sync=="aligned" else " (legacy default)"))
+ print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
- last=0.0;last_eval=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0))
+ last=0.0;last_eval=0.0;last_json_sample=0.0;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
  try:
   while not _STOP_REQUESTED:
-   camera,lidar,radar=(station.cache.snapshot_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];pairs=[]
+   cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
    if evaluator is not None and lidar is not None and (eval_cfg.get("far_admission_decision_diagnostics",False) or eval_cfg.get("far_admission_feature_profiling",False) or eval_cfg.get("far_admission_edge_risk_shadow",False)):
     evaluator.observe_far_admission_decisions(fusion.last_far_admission_rejections,fusion.last_far_admission_candidates,fusion.last_far_admission_expired_candidates,frame_id=lidar[0])
-   if projector is not None and camera is not None:
+   for camera_id,runtime in camera_runtimes.items():
+    camera=cameras.get(camera_id)
+    if camera is None:continue
+    projector=runtime["projector"];width=runtime["width"];height=runtime["height"]
     projected=project_lidar_tracks(projector,fusion.last_tracked_candidates,width,height)
+    local_objects=[]
     if camera_source=="carla_truth":
-     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp,obstacle_patterns=eval_cfg.get("obstacle_actor_patterns",[]));camera_objects=cam_list.objects
+     cam_list=make_truth_camera_objects(station.world,projector,camera_id,width,height,frame_id=camera[0],timestamp=ol.timestamp,obstacle_patterns=eval_cfg.get("obstacle_actor_patterns",[]));local_objects=cam_list.objects
     elif camera_source=="detector" and camera_detector is not None:
-     if camera_detection_frame!=camera[0]:
-      detections=camera_detector.detect(camera[1][:,:,:3].copy());cam_list=CameraObjectList.from_detections(camera_id,detections,timestamp=ol.timestamp,frame_id=camera[0]);camera_detection_objects=cam_list.objects;camera_detection_frame=camera[0]
-     camera_objects=list(camera_detection_objects)
-    for pair in associate_camera_to_lidar(camera_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
-     p=dict(pair);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];pairs.append(p)
+     if camera_detection_frames.get(camera_id)!=camera[0]:
+      detections=camera_detector.detect(camera[1][:,:,:3].copy());cam_list=CameraObjectList.from_detections(camera_id,detections,timestamp=ol.timestamp,frame_id=camera[0]);camera_detection_objects[camera_id]=cam_list.objects;camera_detection_frames[camera_id]=camera[0]
+     local_objects=list(camera_detection_objects.get(camera_id,[]))
+    camera_objects_by_id[camera_id]=list(local_objects);camera_offset=len(camera_objects);camera_objects.extend(local_objects)
+    for pair in associate_camera_to_lidar(local_objects,projected,min_iou=assoc_cfg.get("min_iou",.05),max_center_distance=assoc_cfg.get("max_center_distance",120.0)):
+     p=dict(pair);p["camera_index"]=camera_offset+int(pair["camera_index"]);p["lidar_index"]=projected[pair["lidar_index"]]["source_index"];p["camera_id"]=camera_id;pairs.append(p)
    selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
    selected_held=fusion.last_selected_track_admission_rejections
    if eval_cfg.get("selected_track_admission_camera_profiling",False):
+    primary_runtime=camera_runtimes.get(primary_camera_id);primary_camera=cameras.get(primary_camera_id) if primary_camera_id else None
     selected_held,selected_camera_stats=annotate_selected_camera_support(
-     selected_held,projector if camera is not None else None,camera_objects,width,height,
+     selected_held,(primary_runtime or {}).get("projector") if primary_camera is not None else None,
+     camera_objects_by_id.get(primary_camera_id,[]),
+     (primary_runtime or {}).get("width",0),(primary_runtime or {}).get("height",0),
      camera_source=camera_source,min_iou=assoc_cfg.get("min_iou",.05),
      max_center_distance=assoc_cfg.get("max_center_distance",120.0))
    if evaluator is not None and lidar is not None and eval_cfg.get("selected_track_admission_profiling",False):
@@ -624,15 +615,19 @@ def main():
    fol=build_fused_object_list(
     sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs,
     frame_id=(lidar[0] if lidar else None),coordinate_frame="carla_world")
-   # V0.6.12.8.2.2.49: every downstream consumer uses the same post-association
+   # Every downstream consumer uses the same post-association
    # object list. Camera class/size/source evidence must not disappear at MQTT.
    oj=encode_object_list(fol);rj=encode_rsm(fol);now=time.time()
+   if output_diag.get("fused_json_sample_enabled",True) and fol.objects and now-last_json_sample>=float(output_diag.get("fused_json_sample_interval",5.0)):
+    print("[FUSED OUTPUT SAMPLE] %s"%json.dumps(fol.objects[0].to_dict(),ensure_ascii=False,separators=(",",":")));last_json_sample=now
    if now-last>=1.0:
-    s=fusion.last_stats;cf=camera[0] if camera else "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
-    sync_frames=(int(camera[0])-int(lidar[0])) if camera is not None and lidar is not None else None
-    sync_seconds=(float(camera[2])-float(lidar[2])) if camera is not None and lidar is not None and camera[2] is not None and lidar[2] is not None else None
+    s=fusion.last_stats;camera_frames=",".join("%s:%s"%(cid,(cameras.get(cid) or ("-",))[0]) for cid in sorted(camera_runtimes));primary_camera=cameras.get(primary_camera_id) if primary_camera_id else None;cf=camera_frames or "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
+    sync_frames=(int(primary_camera[0])-int(lidar[0])) if primary_camera is not None and lidar is not None else None
+    sync_seconds=(float(primary_camera[2])-float(lidar[2])) if primary_camera is not None and lidar is not None and primary_camera[2] is not None and lidar[2] is not None else None
     print("  [SENSOR SYNC] Mode:%s Camera-LiDAR FrameDelta:%s TimeDelta:%s"%(args.sensor_sync,("-" if sync_frames is None else "%+d"%sync_frames),("-" if sync_seconds is None else "%+.3fs"%sync_seconds)))
     print("[RSU %s | %s] Camera:%s LiDAR:%d -> Ground:-%d => %d pts | Clusters:%d Geo:%d ROI:%d(+%d rescued) Reject:%d Score:%d(-%d avg=%s) Dyn:%d Tracks:%d | TrackLife N:%d U:%d C:%d S:%d D:%d | Radar:%d/%d Matched:%d Nearest:%s | Fused:%d Cam:%d/%d"%(sid,station.map_name,cf,s["lidar_points"],s.get("ground_removed_points",0),s.get("lidar_points_after_ground",s["lidar_points"]),s["lidar_clusters"],s.get("world_geometry_candidates",0),s["roi_candidates"],s.get("roi_rescued",0),s.get("roi_rejected",0),s.get("scored_candidates",s["roi_candidates"]),s.get("score_rejected",0),score_txt,s["background_candidates"],s["tracked_objects"],s.get("track_new",0),s.get("track_update",0),s.get("track_coast",0),s.get("track_suppress",0),s.get("track_drop",0),s["radar_detections"],s.get("radar_world_points",0),s.get("radar_matched_objects",0),rmin_txt,len(fol.objects),len(camera_objects),len(pairs)))
+    print("  [BACKGROUND] Status:%s Remaining:%.1fs Cells:%d Rejected:%d"%(
+     "READY" if s.get("background_ready",False) else "LEARNING",float(s.get("background_remaining",0.0)),int(s.get("background_cells",0)),int(s.get("background_rejected",0))))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))
