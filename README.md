@@ -673,3 +673,11 @@ Tracker-plus-camera result, reporting incremental matches, combined recall,
 recall gain, camera precision and class attribution. A deployment verdict is
 also explicit: `carla_truth` is always blocked, while a real detector must
 provide at least 100 samples, 95 percent precision and 5 percent recall gain.
+
+V0.6.12.8.2.2.64 is the real-detector evidence run. V0.6.12.8.2.2.63 showed
+that the confirmed camera path would raise cumulative Tracker recall from about
+35.9 percent to 50.5 percent, a 14.6-point gain, with 517/517 CARLA-truth
+camera matches. The ONNX preflight now performs an actual blank-frame inference,
+and runtime reporting includes processed frames, detections, average/maximum
+latency and class counts. No detector evidence reports
+`BLOCKED_NO_DETECTOR_EVIDENCE`; CARLA truth remains explicitly blocked.

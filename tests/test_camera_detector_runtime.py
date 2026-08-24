@@ -41,6 +41,8 @@ class CameraDetectorRuntimeTest(unittest.TestCase):
         detector = YoloV5OnnxDetector(self.model)
         self.assertEqual("opencv", detector.runtime)
         self.assertEqual("yolov5_onnx_opencv", detector.name)
+        report=detector.report()
+        self.assertEqual(0,report["frames"]);self.assertEqual({},report["classes"])
 
     @mock.patch("roadside.camera_detector.cv2.dnn.readNetFromONNX")
     def test_falls_back_to_onnxruntime(self, load):

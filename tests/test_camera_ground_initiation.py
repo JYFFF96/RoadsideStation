@@ -179,5 +179,13 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual("BLOCKED_CARLA_TRUTH",verdict["status"])
         self.assertFalse(verdict["checks"]["detector_source"])
 
+    def test_deployment_verdict_distinguishes_missing_detector_evidence(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[]
+        evaluator.observe_camera_ground_counterfactual([],[],frame_id=11)
+        self.assertEqual("BLOCKED_NO_DETECTOR_EVIDENCE",
+                         evaluator.camera_ground_deployment_verdict()["status"])
+
 
 if __name__ == "__main__":unittest.main()

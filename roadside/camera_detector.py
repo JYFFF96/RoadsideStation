@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import os
+import time
 import cv2
 import numpy as np
 
@@ -18,6 +19,10 @@ class CameraDetector(object):
 
     def detect(self, bgr):
         raise NotImplementedError
+
+    def report(self):
+        return {"name":self.name,"runtime":"none","frames":0,"detections":0,
+                "latency_ms_avg":0.0,"latency_ms_max":0.0,"classes":{}}
 
 
 class NullCameraDetector(CameraDetector):
@@ -41,6 +46,8 @@ class YoloV5OnnxDetector(CameraDetector):
         self.session = None
         self.input_name = None
         self.runtime = None
+        self.stats={"frames":0,"detections":0,"latency_ms_total":0.0,
+                    "latency_ms_max":0.0,"classes":{}}
         opencv_error = None
         try:
             self.net = cv2.dnn.readNetFromONNX(model_path)
@@ -61,7 +68,25 @@ class YoloV5OnnxDetector(CameraDetector):
                 )
         self.name = "yolov5_onnx_%s" % self.runtime
 
+    def _record(self, result, started):
+        elapsed=max(0.0,(time.time()-started)*1000.0);self.stats["frames"]+=1
+        self.stats["detections"]+=len(result or [])
+        self.stats["latency_ms_total"]+=elapsed
+        self.stats["latency_ms_max"]=max(self.stats["latency_ms_max"],elapsed)
+        for item in result or []:
+            name=str(item.get("class_name","unknown"));classes=self.stats["classes"]
+            classes[name]=classes.get(name,0)+1
+        return result
+
+    def report(self):
+        item=dict(self.stats);item["classes"]=dict(self.stats["classes"])
+        item["latency_ms_avg"]=(self.stats["latency_ms_total"]/
+                                self.stats["frames"] if self.stats["frames"] else 0.0)
+        item["runtime"]=self.runtime;item["name"]=self.name
+        return item
+
     def detect(self, bgr):
+        started=time.time()
         h, w = bgr.shape[:2]
         blob = cv2.dnn.blobFromImage(bgr, 1.0 / 255.0, (self.input_size, self.input_size), swapRB=True, crop=False)
         if self.runtime == "opencv":
@@ -72,7 +97,7 @@ class YoloV5OnnxDetector(CameraDetector):
         if isinstance(out, (list, tuple)): out = out[0]
         pred = np.asarray(out)
         if pred.ndim == 3: pred = pred[0]
-        if pred.ndim != 2 or pred.shape[1] < 6: return []
+        if pred.ndim != 2 or pred.shape[1] < 6:return self._record([],started)
         sx = float(w) / self.input_size; sy = float(h) / self.input_size
         boxes=[]; scores=[]; class_ids=[]
         for row in pred:
@@ -85,14 +110,14 @@ class YoloV5OnnxDetector(CameraDetector):
             cx,cy,bw,bh=[float(v) for v in row[:4]]
             boxes.append([int((cx-bw*.5)*sx),int((cy-bh*.5)*sy),int(bw*sx),int(bh*sy)])
             scores.append(score); class_ids.append(cid)
-        if not boxes: return []
+        if not boxes:return self._record([],started)
         keep=cv2.dnn.NMSBoxes(boxes,scores,self.confidence,self.nms)
-        if len(keep)==0:return []
+        if len(keep)==0:return self._record([],started)
         result=[]
         for idx in np.asarray(keep).reshape(-1):
             i=int(idx);x,y,ww,hh=boxes[i];x1=max(0,x);y1=max(0,y);x2=min(w-1,x+ww);y2=min(h-1,y+hh)
             result.append({"class_id":class_ids[i],"class_name":ROAD_CLASSES[class_ids[i]],"confidence":float(scores[i]),"bbox":[x1,y1,x2,y2],"center":[(x1+x2)*.5,(y1+y2)*.5]})
-        return result
+        return self._record(result,started)
 
 
 def create_camera_detector(config):

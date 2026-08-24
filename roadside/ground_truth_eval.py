@@ -497,7 +497,8 @@ class GroundTruthEvaluator(object):
             "recall_gain":(item["recall_gain"] is not None and
                            item["recall_gain"]>=float(cfg.get(
                                "camera_ground_deployment_min_recall_gain",.05)))}
-        if not checks["detector_source"]:status="BLOCKED_CARLA_TRUTH"
+        if source=="carla_truth":status="BLOCKED_CARLA_TRUTH"
+        elif not checks["detector_source"]:status="BLOCKED_NO_DETECTOR_EVIDENCE"
         elif all(checks.values()):status="READY"
         else:status="MORE_EVIDENCE"
         return {"status":status,"source":source,"checks":checks}
