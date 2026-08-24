@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.65 Detector Camera Track Initiation starting...")
+ print("RoadsideStation V0.6.12.8.2.2.66 Camera Enforcement Attribution starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -716,6 +716,10 @@ def main():
      fusion.last_selected_delayed_reappearance_candidates,
      fusion.last_selected_track_admission_candidates,frame_id=lidar[0])
    fusion.apply_camera_confirmations(pairs,timestamp=ol.timestamp)
+   if evaluator is not None:
+    evaluator.observe_camera_ground_enforcement(
+     fusion.last_tracked_candidates,
+     frame_id=(lidar[0] if lidar is not None else camera_ground_token))
    fol=build_fused_object_list(
     sid,fusion.last_tracked_candidates,ol.timestamp,camera_objects,pairs,
     frame_id=(lidar[0] if lidar else None),coordinate_frame="carla_world")
@@ -795,13 +799,17 @@ def main():
     camera_cf=evaluator.report_camera_ground_counterfactual() if evaluator is not None else {};camera_verdict=evaluator.camera_ground_deployment_verdict() if evaluator is not None else {}
     print("      [CAMERA TRACKER COUNTERFACTUAL SHADOW] Frames:%d Truth:%d BaseMatch:%d CameraCand:%d CameraTruth:%d CameraFP:%d Incremental:%d CombinedMatch:%d | BaseRecall:%s CombinedRecall:%s Gain:%s CameraPrecision:%s Classes:%s | TrackerInput:UNCHANGED"%(
      camera_cf.get("frames",0),camera_cf.get("truth",0),camera_cf.get("base_matched",0),camera_cf.get("camera_candidates",0),camera_cf.get("camera_truth",0),camera_cf.get("camera_fp",0),camera_cf.get("incremental_matched",0),camera_cf.get("combined_matched",0),_pct(camera_cf.get("base_recall")),_pct(camera_cf.get("combined_recall")),_pct(camera_cf.get("recall_gain")),_pct(camera_cf.get("camera_precision")),camera_cf.get("classes",{})))
-    print("      [CAMERA TEMPORAL DEPLOYMENT VERDICT] %s Source:%s Checks:%s | CARLA truth can never enable runtime"%(
+    print("      [CAMERA PRE-ENFORCEMENT VERDICT] RETIRED_AFTER_ENFORCEMENT Legacy:%s Source:%s Checks:%s | not a runtime gate"%(
      camera_verdict.get("status","NO_EVALUATOR"),camera_verdict.get("source","none"),camera_verdict.get("checks",{})))
     camera_tracker=fusion.camera_ground_tracker_stats
     camera_tracker_mode=("DETECTOR_ONLY_ENFORCE" if camera_enforce and camera_source=="detector"
                          else ("BLOCKED_SOURCE:%s"%camera_source if camera_enforce else "DISABLED"))
     print("      [CAMERA GROUND TRACKER INPUT] Mode:%s Queued:%d Consumed:%d SourceReject:%d ClassReject:%d DedupeReject:%d | Total Q/C/S/K/D:%d/%d/%d/%d/%d | one-cycle delay"%(
      camera_tracker_mode,camera_tracker.get("last_queued",0),camera_tracker.get("last_consumed",0),camera_tracker.get("last_source_rejected",0),camera_tracker.get("last_class_rejected",0),camera_tracker.get("last_dedupe_rejected",0),camera_tracker.get("queued_total",0),camera_tracker.get("consumed_total",0),camera_tracker.get("source_rejected_total",0),camera_tracker.get("class_rejected_total",0),camera_tracker.get("dedupe_rejected_total",0)))
+    camera_enforced=(evaluator.report_camera_ground_enforcement()
+                     if evaluator is not None else {});camera_current=camera_enforced.get("current",{})
+    print("      [CAMERA ENFORCED TRACK EVAL] Current T/M/FP/Dup:%d/%d/%d/%d CameraOnly:%d LiDARTakeover:%d | Run Samples:%d Match:%d FP:%d Precision:%s Dup:%d UniqueTracks:%d UniqueActors:%d States:%s Classes:%s"%(
+     camera_current.get("tracks",0),camera_current.get("matched",0),camera_current.get("fp",0),camera_current.get("duplicate_tracks",0),camera_current.get("camera_only",0),camera_current.get("lidar_takeover",0),camera_enforced.get("track_samples",0),camera_enforced.get("matched",0),camera_enforced.get("fp",0),_pct(camera_enforced.get("precision")),camera_enforced.get("duplicate_tracks",0),camera_enforced.get("unique_tracks",0),camera_enforced.get("unique_actors",0),camera_enforced.get("states",{}),camera_enforced.get("classes",{})))
     if camera_detector is not None:
      detector_report=camera_detector.report()
      print("      [CAMERA DETECTOR RUNTIME] Name:%s Runtime:%s Frames:%d Detections:%d AvgLatency:%.1fms MaxLatency:%.1fms Classes:%s"%(

@@ -234,12 +234,21 @@ class CameraGroundInitiationTests(unittest.TestCase):
         track=tracker.update([{
             "x":16.0,"y":0.0,"z":.85,"extent":[.6,.6,1.7],
             "confidence":.9,"sources":["camera"],"object_type":"person",
-            "camera_ground_initiated":True,"candidate_score_bypass":True,
+            "camera_ground_initiated":True,"camera_ground_tracker_enforced":True,
+            "candidate_score_bypass":True,
             "sensor_range":16.0}],timestamp=1.0)[0]
         self.assertEqual("C",track["track_sensors"])
         self.assertEqual(1,track["track_camera_hits"])
         self.assertEqual(0,track["track_lidar_hits"])
         self.assertEqual("person",track["object_type"])
+        self.assertTrue(track["track_camera_ground_origin"])
+        lidar=dict(track);lidar.update({"x":16.1,"sources":["lidar"],
+                                       "camera_ground_tracker_enforced":False})
+        updated=tracker.update([lidar],timestamp=1.1)[0]
+        self.assertTrue(updated["track_camera_ground_origin"])
+        self.assertFalse(updated["track_camera_ground_current"])
+        self.assertEqual(1,updated["track_camera_ground_enforced_hits"])
+        self.assertEqual(1,updated["track_lidar_hits"])
 
     def test_fusion_consumes_camera_candidate_into_common_tracker(self):
         fusion=SimpleFusion("RSU_TEST",{
@@ -260,6 +269,26 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(["camera"],track["sources"])
         self.assertEqual("C",track["track_sensors"])
         self.assertTrue(track["camera_ground_tracker_enforced"])
+
+    def test_actual_camera_origin_track_attribution_counts_duplicates(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[
+            {"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_enforcement([
+            {"id":"vehicle_1","x":16.1,"y":0.0,"track_state":"confirmed",
+             "track_camera_ground_origin":True,"track_lidar_hits":0},
+            {"id":"vehicle_2","x":16.3,"y":0.0,"track_state":"new",
+             "track_camera_ground_origin":True,"track_lidar_hits":1},
+            {"id":"vehicle_3","x":30.0,"y":0.0,
+             "track_camera_ground_origin":False}],frame_id=10)
+        self.assertEqual(2,report["track_samples"])
+        self.assertEqual(1,report["matched"]);self.assertEqual(1,report["fp"])
+        self.assertEqual(.5,report["precision"])
+        self.assertEqual(1,report["duplicate_tracks"])
+        self.assertEqual(1,report["unique_actors"])
+        self.assertEqual(1,report["current"]["camera_only"])
+        self.assertEqual(1,report["current"]["lidar_takeover"])
 
 
 if __name__ == "__main__":unittest.main()

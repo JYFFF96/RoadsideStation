@@ -64,6 +64,9 @@ class GroundTruthEvaluator(object):
             "frames":0,"truth":0,"base_matched":0,"camera_candidates":0,
             "camera_truth":0,"camera_fp":0,"incremental_matched":0,
             "combined_matched":0,"classes":{},"sources":{}}
+        self._camera_ground_enforcement_last_frame = None
+        self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
+        self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -103,6 +106,18 @@ class GroundTruthEvaluator(object):
                 for name in ("confirm", "expired")),
         }
 
+    @staticmethod
+    def _empty_camera_enforcement_totals():
+        return {"frames":0,"track_samples":0,"matched":0,"fp":0,
+                "camera_only":0,"lidar_takeover":0,"duplicate_tracks":0,
+                "duplicate_truth_frames":0,"states":{},"track_ids":{},
+                "actor_ids":{},"classes":{}}
+
+    @staticmethod
+    def _empty_camera_enforcement_current():
+        return {"tracks":0,"matched":0,"fp":0,"camera_only":0,
+                "lidar_takeover":0,"duplicate_tracks":0,"duplicate_truth":0}
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -141,6 +156,9 @@ class GroundTruthEvaluator(object):
             "frames":0,"truth":0,"base_matched":0,"camera_candidates":0,
             "camera_truth":0,"camera_fp":0,"incremental_matched":0,
             "combined_matched":0,"classes":{},"sources":{}}
+        self._camera_ground_enforcement_last_frame = None
+        self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
+        self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -502,6 +520,58 @@ class GroundTruthEvaluator(object):
         elif all(checks.values()):status="READY"
         else:status="MORE_EVIDENCE"
         return {"status":status,"source":source,"checks":checks}
+
+    def observe_camera_ground_enforcement(self, tracks, frame_id=None):
+        """Truth-attribute actual camera-origin Tracker output after admission."""
+        if frame_id is not None and frame_id==self._camera_ground_enforcement_last_frame:
+            return self.report_camera_ground_enforcement()
+        self._camera_ground_enforcement_last_frame=frame_id
+        detected=self._detected_with_range([
+            item for item in (tracks or [])
+            if item.get("track_camera_ground_origin",False)])
+        truth=self.truth_objects();pairs=self._match(truth,detected)
+        totals=self._camera_ground_enforcement_totals;totals["frames"]+=1
+        totals["track_samples"]+=len(detected);totals["matched"]+=len(pairs)
+        totals["fp"]+=len(detected)-len(pairs)
+        for item in detected:
+            state=str(item.get("track_state","unknown"))
+            totals["states"][state]=totals["states"].get(state,0)+1
+            track_id=str(item.get("id","unknown"));totals["track_ids"][track_id]=1
+            if int(item.get("track_lidar_hits",0))>0:totals["lidar_takeover"]+=1
+            else:totals["camera_only"]+=1
+        for truth_index,unused_detected,unused_distance in pairs:
+            gt=truth[truth_index];name=str(gt.get("object_type","unknown_obstacle"))
+            totals["classes"][name]=totals["classes"].get(name,0)+1
+            actor_id=gt.get("actor_id")
+            if actor_id is not None:totals["actor_ids"][int(actor_id)]=name
+        duplicate_tracks=0;duplicate_truth=0
+        for gt in truth:
+            count=sum(1 for item in detected if math.hypot(
+                float(item.get("x",0.0))-float(gt["x"]),
+                float(item.get("y",0.0))-float(gt["y"]))<=self.match_distance)
+            if count>1:
+                duplicate_truth+=1;duplicate_tracks+=count-1
+        totals["duplicate_tracks"]+=duplicate_tracks
+        totals["duplicate_truth_frames"]+=duplicate_truth
+        self._camera_ground_enforcement_current={
+            "tracks":len(detected),"matched":len(pairs),
+            "fp":len(detected)-len(pairs),"camera_only":sum(
+                1 for x in detected if int(x.get("track_lidar_hits",0))==0),
+            "lidar_takeover":sum(
+                1 for x in detected if int(x.get("track_lidar_hits",0))>0),
+            "duplicate_tracks":duplicate_tracks,"duplicate_truth":duplicate_truth}
+        return self.report_camera_ground_enforcement()
+
+    def report_camera_ground_enforcement(self):
+        totals=self._camera_ground_enforcement_totals;item=dict(totals)
+        item["states"]=dict(totals["states"]);item["classes"]=dict(totals["classes"])
+        item["unique_tracks"]=len(totals["track_ids"])
+        item["unique_actors"]=len(totals["actor_ids"])
+        item["precision"]=(float(totals["matched"])/totals["track_samples"]
+                           if totals["track_samples"] else None)
+        item["current"]=dict(self._camera_ground_enforcement_current)
+        item.pop("track_ids",None);item.pop("actor_ids",None)
+        return item
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
         """Measure selected-output contribution without feeding truth to runtime.

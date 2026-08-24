@@ -695,3 +695,16 @@ originated tracks keep receiving camera measurements until LiDAR takes
 precedence; their class and camera source continue through the public fused
 object list. Runtime logs expose queued, consumed, source-rejected, and LiDAR-
 deduplicated counts.
+
+V0.6.12.8.2.2.66 adds post-enforcement attribution without widening the
+camera policy. The V0.6.12.8.2.2.65 run queued and consumed all 162 confirmed
+real-detector person samples with no source, class, or LiDAR-deduplication
+failure. Camera candidates that were still incremental over the now-combined
+Tracker fell to 39, while cumulative base coverage rose from the preceding
+roughly 33 percent to about 42 percent. The old counterfactual deployment
+verdict is therefore marked retired after enforcement. Camera-origin provenance
+now survives later LiDAR takeover and coasting, allowing evaluator-only reports
+of current and cumulative matched tracks, false positives, duplicate tracks,
+camera-only samples, LiDAR takeovers, unique tracks, unique truth actors, states,
+and classes. CARLA truth remains confined to the evaluator and cannot influence
+Tracker admission.

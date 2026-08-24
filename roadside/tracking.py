@@ -225,6 +225,12 @@ class NearestTracker(object):
         item["track_lidar_hits"] = int(t.get("lidar_hits", 0))
         item["track_radar_hits"] = int(t.get("radar_confirmations", 0))
         item["track_camera_hits"] = int(t.get("camera_confirmations", 0))
+        item["track_camera_ground_origin"] = bool(
+            t.get("camera_ground_origin", False))
+        item["track_camera_ground_current"] = bool(
+            item.get("camera_ground_tracker_enforced", False))
+        item["track_camera_ground_enforced_hits"] = int(
+            t.get("camera_ground_enforced_hits", 0))
         return item
 
     def _coast_item(self, tid, t, now):
@@ -359,6 +365,8 @@ class NearestTracker(object):
             detection_sources = list(det.get("sources", ["lidar"]))
             has_lidar = "lidar" in detection_sources
             has_camera = "camera" in detection_sources
+            camera_ground_current = bool(det.get(
+                "camera_ground_tracker_enforced", False))
             selected_hits = int(old.get("selected_enforced_hits", 0) if old else 0)
             non_selected_hits = int(old.get("non_selected_hits", 0) if old else 0)
             if selected_current:
@@ -376,6 +384,12 @@ class NearestTracker(object):
                 "camera_confirmations": int(old.get("camera_confirmations", 0) if old else 0) + (1 if has_camera else 0),
                 "last_radar_time": old.get("last_radar_time") if old else None,
                 "last_camera_time": old.get("last_camera_time") if old else None,
+                "camera_ground_origin": bool(
+                    old.get("camera_ground_origin", False)
+                    if old else camera_ground_current),
+                "camera_ground_enforced_hits": int(
+                    old.get("camera_ground_enforced_hits", 0) if old else 0) +
+                    (1 if camera_ground_current else 0),
                 "selected_enforced_hits": selected_hits,
                 "non_selected_hits": non_selected_hits,
                 "selected_enforced_origin": bool(
