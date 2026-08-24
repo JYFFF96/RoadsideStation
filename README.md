@@ -607,3 +607,13 @@ its own pending lifecycle and two-frame/three-frame decisions. Every variant
 reports confirmation, LiDAR deduplication, road ROI rejection, would-emit and
 CARLA truth precision independently. The 2.5m production matching boundary is
 unchanged, and all ablation candidates remain outside Tracker and ObjectList.
+
+V0.6.12.8.2.2.57 adds a separate singleton-to-component morphology Shadow
+bridge. The V0.6.12.8.2.2.56 run confirmed that every singleton-only bridge
+candidate was either already represented by LiDAR or outside the road ROI,
+including the wider 4m and 6m gates. This version therefore stops widening the
+singleton association and tests whether a moving singleton reappears as a
+multi-return radar component within 2.5m or 4.0m. It reports matches, moving
+matches, average component size, expiration, LiDAR deduplication, ROI rejection,
+would-emit count and CARLA truth precision. The experiment remains sensor-only
+and cannot change Tracker or ObjectList output.

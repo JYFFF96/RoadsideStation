@@ -37,6 +37,11 @@ class NearRadarTrackInitiator(object):
         self.seed_bridge_match_gates = sorted(set(
             float(value) for value in c.get(
                 "radar_initiation_seed_bridge_match_gates", [2.5, 4.0, 6.0])))
+        self.seed_to_component_shadow_enabled = bool(c.get(
+            "radar_initiation_seed_to_component_shadow_enabled", False))
+        self.seed_to_component_match_gates = sorted(set(
+            float(value) for value in c.get(
+                "radar_initiation_seed_to_component_match_gates", [2.5, 4.0])))
         self.required_frames = max(1, int(c.get("radar_initiation_required_frames", 2)))
         self.match_gate = float(c.get("radar_initiation_match_gate", 2.5))
         self.ttl = float(c.get("radar_initiation_ttl", 0.6))
@@ -55,10 +60,13 @@ class NearRadarTrackInitiator(object):
         self._seed_bridge_gate_pending = dict(
             ("%.1f" % gate, []) for gate in self.seed_bridge_match_gates
             if abs(gate - self.match_gate) > 1e-6)
+        self._seed_to_component_pending = dict(
+            ("%.1f" % gate, []) for gate in self.seed_to_component_match_gates)
         self._last_frame = None
         self.last_shadow_candidates = []
         self.last_seed_bridge_shadow_candidates = {}
         self.seed_bridge_stats = self._empty_seed_bridge_stats()
+        self.seed_to_component_stats = self._empty_seed_to_component_stats()
         self.cumulative_stats = self._empty_cumulative_stats()
         self.last_stats = self._empty_stats()
 
@@ -83,6 +91,14 @@ class NearRadarTrackInitiator(object):
                     (str(frames), {"confirmed": 0, "dedupe_rejected": 0,
                                    "roi_rejected": 0, "would_emit": 0})
                     for frames in self.seed_bridge_required_frames)}
+
+    def _empty_seed_to_component_stats(self):
+        return dict(
+            ("%.1f" % gate,
+             {"seeds": 0, "matches": 0, "moving_matches": 0,
+              "matched_points": 0, "expired": 0,
+              "dedupe_rejected": 0, "roi_rejected": 0, "would_emit": 0})
+            for gate in self.seed_to_component_match_gates)
 
     def _empty_cumulative_stats(self):
         return {"frames": 0, "range_points": 0, "components": 0,
@@ -140,6 +156,9 @@ class NearRadarTrackInitiator(object):
                 (key, dict(rule)) for key, rule in value["rules"].items())
             bridge["gate_ablation"][gate] = copied
         stats["seed_bridge_shadow"] = bridge
+        stats["seed_to_component_shadow"] = dict(
+            (key, dict(value))
+            for key, value in self.seed_to_component_stats.items())
 
     def _accumulate(self, stats):
         scalar_keys = ("range_points", "components", "single_point_components",
@@ -366,6 +385,90 @@ class NearRadarTrackInitiator(object):
                     variant, []).append(item)
         self._seed_bridge_gate_pending[gate_key] = pending
 
+    def _update_seed_to_component_shadow(self, singleton_groups,
+                                         component_groups, existing, now,
+                                         token, validator):
+        """Profile singleton-to-cluster morphology changes without emitting.
+
+        A moving singleton is the only allowed seed.  On a later frame, any
+        multi-return component may terminate that seed.  This deliberately
+        measures representation changes separately from the singleton-only
+        bridge and never contributes candidates to the production output.
+        """
+        if not self.seed_to_component_shadow_enabled:
+            return
+        for gate in self.seed_to_component_match_gates:
+            key = "%.1f" % gate
+            stats = self.seed_to_component_stats[key]
+            pending = []
+            for old in self._seed_to_component_pending[key]:
+                if now - float(old.get("last_time", now)) <= self.single_point_ttl:
+                    pending.append(old)
+                else:
+                    stats["expired"] += 1
+            existing_pending = len(pending)
+            used_pending = set()
+            matched_pending = set()
+            for group in component_groups:
+                candidate = self._candidate(
+                    group, mode="single_seed_to_component_shadow")
+                best = None
+                for index, old in enumerate(pending[:existing_pending]):
+                    if index in used_pending:
+                        continue
+                    distance = math.hypot(
+                        float(candidate["x"]) - float(old["x"]),
+                        float(candidate["y"]) - float(old["y"]))
+                    if distance <= gate and (best is None or distance < best[0]):
+                        best = (distance, index, old)
+                if best is None:
+                    continue
+                unused_distance, index, old = best
+                used_pending.add(index)
+                matched_pending.add(index)
+                stats["matches"] += 1
+                stats["matched_points"] += len(group)
+                if abs(float(candidate.get("radar_radial_velocity", 0.0))) >= \
+                        self.single_point_min_abs_speed:
+                    stats["moving_matches"] += 1
+                item = dict(candidate)
+                item["radar_initiation_frames"] = 2
+                item["radar_seed_abs_speed"] = float(old.get("seed_speed", 0.0))
+                if self._near_existing(item, existing):
+                    stats["dedupe_rejected"] += 1
+                    continue
+                if validator is not None:
+                    try:
+                        valid = bool(validator(item))
+                    except Exception:
+                        valid = False
+                    if not valid:
+                        stats["roi_rejected"] += 1
+                        continue
+                stats["would_emit"] += 1
+                variant = "morph_g%s" % key
+                self.last_seed_bridge_shadow_candidates.setdefault(
+                    variant, []).append(item)
+            pending = [old for index, old in enumerate(pending)
+                       if index not in matched_pending]
+            for group in singleton_groups:
+                candidate = self._candidate(
+                    group, mode="single_seed_to_component_shadow")
+                speed = abs(float(candidate.get("radar_radial_velocity", 0.0)))
+                if speed < self.single_point_min_abs_speed:
+                    continue
+                if any(math.hypot(
+                        float(candidate["x"]) - float(old["x"]),
+                        float(candidate["y"]) - float(old["y"])) <= gate
+                       for old in pending):
+                    continue
+                entry = dict(candidate)
+                entry.update({"last_time": now, "last_frame": token,
+                              "seed_speed": speed})
+                pending.append(entry)
+                stats["seeds"] += 1
+            self._seed_to_component_pending[key] = pending
+
     def _near_existing(self, candidate, existing):
         return any(math.hypot(float(candidate["x"]) - float(item["x"]),
                               float(candidate["y"]) - float(item["y"])) <=
@@ -448,6 +551,10 @@ class NearRadarTrackInitiator(object):
             for threshold in self.single_speed_shadow_thresholds)
         self._update_seed_bridge_shadow(
             singleton_groups, existing, now, token, validator)
+        self._update_seed_to_component_shadow(
+            singleton_groups,
+            [group for group in components if len(group) >= self.min_points],
+            existing, now, token, validator)
         stats["clusters"] = len(groups)
         stats["point_rejected"] = max(
             0, len(ranged) - sum(len(group) for group, unused_mode in groups))

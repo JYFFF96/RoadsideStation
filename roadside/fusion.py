@@ -1131,6 +1131,8 @@ class SimpleFusion(object):
                 radar_init_stats.get("cumulative",{}) or {}),
             "radar_seed_bridge_shadow": dict(
                 radar_init_stats.get("seed_bridge_shadow",{}) or {}),
+            "radar_seed_to_component_shadow": dict(
+                radar_init_stats.get("seed_to_component_shadow",{}) or {}),
             "radar_initiation_speed_p50": radar_init_stats.get("confirmed_abs_speed_p50"),
             "radar_initiation_speed_max": radar_init_stats.get("confirmed_abs_speed_max"),
             "radar_initiation_speed_shadow_counts": dict(

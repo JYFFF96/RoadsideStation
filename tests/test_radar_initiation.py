@@ -31,6 +31,8 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             "radar_initiation_seed_bridge_shadow_enabled": True,
             "radar_initiation_seed_bridge_required_frames": [2, 3],
             "radar_initiation_seed_bridge_match_gates": [2.5, 4.0, 6.0],
+            "radar_initiation_seed_to_component_shadow_enabled": True,
+            "radar_initiation_seed_to_component_match_gates": [2.5, 4.0],
             "radar_initiation_match_gate": 2.5,
             "radar_initiation_ttl": .6,
             "radar_initiation_min_abs_speed": .6,
@@ -224,6 +226,44 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         self.assertEqual(0, stats["seeds"])
         for value in stats["gate_ablation"].values():
             self.assertEqual(0, value["seeds"])
+
+    def test_moving_singleton_can_match_later_multi_point_component_in_shadow(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(8.0, velocity=.33), [], 1.0,
+                         frame_id=10, validator=lambda unused: True)
+        emitted = initiator.update(self._points(8.2, velocity=.0), [], 1.1,
+                                   frame_id=11, validator=lambda unused: True)
+        self.assertEqual([], emitted)
+        stats = initiator.last_stats["seed_to_component_shadow"]["2.5"]
+        self.assertEqual(1, stats["matches"])
+        self.assertEqual(0, stats["moving_matches"])
+        self.assertEqual(2, stats["matched_points"])
+        self.assertEqual(1, stats["would_emit"])
+        self.assertEqual(1, len(
+            initiator.last_seed_bridge_shadow_candidates["morph_g2.5"]))
+
+    def test_singleton_to_component_bridge_keeps_dedupe_and_roi_gates(self):
+        duplicate = NearRadarTrackInitiator(self._config())
+        duplicate.update(self._single(), [], 1.0, frame_id=10)
+        duplicate.update(self._points(8.1), [{"x": 8.0, "y": 0.0}], 1.1,
+                         frame_id=11, validator=lambda unused: True)
+        self.assertEqual(1, duplicate.last_stats[
+            "seed_to_component_shadow"]["2.5"]["dedupe_rejected"])
+
+        rejected = NearRadarTrackInitiator(self._config())
+        rejected.update(self._single(), [], 1.0, frame_id=10)
+        rejected.update(self._points(8.1), [], 1.1, frame_id=11,
+                        validator=lambda unused: False)
+        self.assertEqual(1, rejected.last_stats[
+            "seed_to_component_shadow"]["2.5"]["roi_rejected"])
+
+    def test_singleton_to_component_bridge_does_not_duplicate_nearby_seed(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(8.0), [], 1.0, frame_id=10)
+        initiator.update(self._single(8.1), [], 1.1, frame_id=11)
+        stats = initiator.last_stats["seed_to_component_shadow"]
+        self.assertEqual(1, stats["2.5"]["seeds"])
+        self.assertEqual(1, stats["4.0"]["seeds"])
 
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())
