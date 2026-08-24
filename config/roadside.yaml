@@ -506,7 +506,7 @@ evaluation:
     - {name: distance_le_020_gap_le_30, max_distance: 0.20, max_gap: 3.0}
     - {name: distance_le_035_gap_le_30, max_distance: 0.35, max_gap: 3.0}
     - {name: slow_gap_le_30, max_tombstone_speed: 0.10, max_temporal_motion: 0.20, max_gap: 3.0}
-  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
+  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot, rsu_test_stopped_vehicle]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]
   report_interval: 2.0
@@ -663,6 +663,18 @@ v2x_events:
     max_stationary_speed_mps: 0.5
     dwell_seconds: 5.0
     direction: 1
+    # V0.6.12.8.2.2.78: the supplied ONNX model emitted only person labels in
+    # the AVW run. Use persistent sensor-derived vehicle geometry as fallback.
+    vehicle_geometry_fallback_enabled: true
+    geometry_min_track_age: 5
+    geometry_min_confidence: 0.70
+    geometry_min_track_quality: 0.60
+    geometry_min_length_m: 2.80
+    geometry_max_length_m: 7.50
+    geometry_min_width_m: 1.20
+    geometry_max_width_m: 3.20
+    geometry_min_height_m: 1.00
+    geometry_max_height_m: 3.00
   slw:
     enabled: true
     speed_limit_kmh: 40

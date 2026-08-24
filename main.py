@@ -522,7 +522,7 @@ def main():
    config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
  _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.77 Event-Focused AVW starting...")
+ print("RoadsideStation V0.6.12.8.2.2.78 AVW Geometry Fallback starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -643,7 +643,7 @@ def main():
   "enabled" if event_engine.enabled else "disabled",args.event_scenario.upper()))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
- last=0.0;last_eval=0.0;last_json_sample=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
+ last=0.0;last_eval=0.0;last_json_sample=0.0;last_event_diag=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
  try:
   while not _STOP_REQUESTED:
    cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None,radar_frame_id=radar[0] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
@@ -912,7 +912,14 @@ def main():
     last_eval=now
    m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj)
    ego_speed=(config.get("v2x_events",{}) or {}).get("test_ego_speed_kmh")
-   for event in event_engine.update(fol,{"speed_kmh":ego_speed} if ego_speed is not None else {}):
+   event_results=event_engine.update(fol,{"speed_kmh":ego_speed} if ego_speed is not None else {})
+   if args.event_scenario=="avw" and now-last_event_diag>=1.0:
+    avw_diag=event_engine.last_diagnostics.get("avw",{})
+    print("  [V2X AVW INPUT] Typed:%d Geometry:%d Stopped:%d Dwell:%.1fs"%(
+     avw_diag.get("typed",0),avw_diag.get("geometry",0),
+     avw_diag.get("stopped",0),float(avw_diag.get("dwell_seconds",0.0))))
+    last_event_diag=now
+   for event in event_results:
     payload=encode_v2x_event(event);pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload);print("[V2X EVENT] %s"%payload)
    time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True

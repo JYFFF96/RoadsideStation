@@ -103,6 +103,35 @@ class V2XEventTest(unittest.TestCase):
         self.assertEqual("car_99",event["data"]["object_id"])
         self.assertEqual(1,event["data"]["vehicle_count"])
 
+    def test_avw_uses_sensor_vehicle_geometry_when_camera_label_is_missing(self):
+        engine=V2XEventEngine("R",{"enabled":True,"cooldown_seconds":5,
+            "vrucw":{"enabled":False},"hlw":{"enabled":False},
+            "avw":{"enabled":True,"dwell_seconds":3},
+            "slw":{"enabled":False}})
+        evidence={"trackQuality":.68}
+        first=FusedObject("unknown_1",size=[4.5,1.9,1.6],confidence=.72,
+                          age=8,track_state="confirmed",
+                          perception_evidence=evidence)
+        replacement=FusedObject("unknown_22",size=[4.3,2.0,1.7],
+                          confidence=.72,age=9,track_state="confirmed",
+                          perception_evidence=evidence)
+        self.assertEqual([],engine.update(FusedObjectList("R",[first],20)))
+        event=engine.update(FusedObjectList("R",[replacement],23))[0]
+        self.assertEqual("AVW",event["data"]["category"])
+        self.assertEqual("lidar_vehicle_geometry",
+                         event["data"]["classification_source"])
+
+    def test_avw_geometry_fallback_rejects_thin_structure(self):
+        engine=V2XEventEngine("R",{"enabled":True,
+            "vrucw":{"enabled":False},"hlw":{"enabled":False},
+            "avw":{"enabled":True,"dwell_seconds":0},
+            "slw":{"enabled":False}})
+        item=FusedObject("thin",size=[6.0,.3,2.0],confidence=.72,age=20,
+                         track_state="confirmed",
+                         perception_evidence={"trackQuality":.9})
+        self.assertEqual([],engine.update(FusedObjectList("R",[item],1)))
+        self.assertEqual(0,engine.last_diagnostics["avw"]["geometry"])
+
     def test_moving_vehicle_resets_avw_dwell(self):
         engine=V2XEventEngine("R",{"enabled":True,"avw":{"dwell_seconds":2},
                                     "slw":{"enabled":False}})

@@ -839,3 +839,13 @@ the default `all` mode remains unchanged. The `.76` obstacle-only log produced
 12 valid HLW events, but also exposed repeated false `person` classifications.
 VRUCW now applies a basic fused LiDAR-size sanity gate that rejects the observed
 0.11 m-high and 3.05 m-high false-person clusters without using CARLA truth.
+
+V0.6.12.8.2.2.78 closes the missing-classification gap found in the `.77` AVW
+run. The stopped vehicle was not visible to the evaluator because its dedicated
+role was absent from `include_roles`, and the supplied ONNX model emitted only
+`person` labels across 396 frames. The evaluator now recognizes the tagged
+vehicle, while production AVW can conservatively classify a confirmed,
+persistent, stationary 2.8--7.5 m by 1.2--3.2 m fused LiDAR track as vehicle
+geometry. This fallback uses only FusedObjectList sensor fields; CARLA actor
+identity remains evaluation-only. A once-per-second `V2X AVW INPUT` line shows
+typed, geometry-fallback, stopped, and dwell counts when AVW is isolated.

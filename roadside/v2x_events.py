@@ -22,6 +22,7 @@ class V2XEventEngine(object):
         self._vru_presence_hits=0
         self._hlw_presence_hits=0
         self._avw_presence_since=None
+        self.last_diagnostics={}
 
     def _envelope(self, category, event_sort, description, timestamp,
                   direction=-1, speed=None, extra=None):
@@ -83,6 +84,27 @@ class V2XEventEngine(object):
             if width>float(config.get("max_width_m",1.20)):return False
         return True
 
+    def _stopped_vehicle_geometry(self, obj, config):
+        if not config.get("vehicle_geometry_fallback_enabled",True):return False
+        if str(obj.object_type).lower()!="unknown_obstacle":return False
+        if str(getattr(obj,"track_state","confirmed")).lower()!="confirmed":return False
+        if int(getattr(obj,"age",1))<int(config.get("geometry_min_track_age",5)):
+            return False
+        if float(getattr(obj,"confidence",0.0))<float(
+                config.get("geometry_min_confidence",.70)):return False
+        size=list(getattr(obj,"size",[]) or [])
+        if len(size)<3:return False
+        length,width,height=[float(value) for value in size[:3]]
+        if not (float(config.get("geometry_min_length_m",2.8))<=length<=
+                float(config.get("geometry_max_length_m",7.5))):return False
+        if not (float(config.get("geometry_min_width_m",1.2))<=width<=
+                float(config.get("geometry_max_width_m",3.2))):return False
+        if not (float(config.get("geometry_min_height_m",1.0))<=height<=
+                float(config.get("geometry_max_height_m",3.0))):return False
+        evidence=dict(getattr(obj,"perception_evidence",{}) or {})
+        quality=float(evidence.get("trackQuality",0.0))
+        return quality>=float(config.get("geometry_min_track_quality",.60))
+
     def update(self, object_list, ego=None):
         if not self.enabled:return []
         ego=ego or {};now=float(object_list.timestamp);events=[]
@@ -135,15 +157,23 @@ class V2XEventEngine(object):
             max_speed=float(avw.get("max_stationary_speed_mps",.5))
             dwell=float(avw.get("dwell_seconds",5.0))
             direction=int(avw.get("direction",1))
-            stopped=[]
+            typed=[];geometry=[]
             for obj in object_list.objects:
-                if str(obj.object_type).lower() not in self.VEHICLE_TYPES:continue
-                if (str(getattr(obj,"track_state","confirmed")).lower()==
-                        "confirmed" and math.hypot(float(obj.vx),float(obj.vy))<=
-                        max_speed):stopped.append(obj)
+                speed=math.hypot(float(obj.vx),float(obj.vy))
+                if speed>max_speed:continue
+                if (str(obj.object_type).lower() in self.VEHICLE_TYPES and
+                        str(getattr(obj,"track_state","confirmed")).lower()==
+                        "confirmed"):typed.append(obj)
+                elif self._stopped_vehicle_geometry(obj,avw):geometry.append(obj)
+            stopped=typed+geometry
             if stopped:
                 if self._avw_presence_since is None:self._avw_presence_since=now
             else:self._avw_presence_since=None
+            elapsed=(0.0 if self._avw_presence_since is None else
+                     now-self._avw_presence_since)
+            self.last_diagnostics["avw"]={"typed":len(typed),
+                "geometry":len(geometry),"stopped":len(stopped),
+                "dwell_seconds":round(elapsed,2)}
             key=("AVW","stopped_vehicle_presence")
             if (self._avw_presence_since is not None and
                     now-self._avw_presence_since>=dwell and
@@ -154,6 +184,8 @@ class V2XEventEngine(object):
                     {"object_id":str(stopped[0].object_id),
                      "vehicle_count":len(stopped),
                      "stationary_seconds":round(now-self._avw_presence_since,2),
+                     "classification_source":("camera_label" if typed else
+                                              "lidar_vehicle_geometry"),
                      "trigger_mode":"stopped_vehicle_presence"}))
                 self._last_emitted[key]=now
         slw=self.config.get("slw",{}) or {}

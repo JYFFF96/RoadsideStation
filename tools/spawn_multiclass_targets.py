@@ -187,7 +187,7 @@ def spawn_stopped_vehicles(world, world_map, center, count, rng):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.77 event-focused AVW targets")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.78 AVW geometry-fallback targets")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
@@ -205,7 +205,7 @@ def main():
     stopped_vehicles=spawn_stopped_vehicles(
         world,world_map,center,max(0,args.stopped_vehicles),rng)
     actors=walkers+obstacles+stopped_vehicles
-    print("V0.6.12.8.2.2.77 targets active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),len(stopped_vehicles),args.walker_mode,args.walker_launch_interval))
+    print("V0.6.12.8.2.2.78 targets active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),len(stopped_vehicles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
     for label,items in (("walker",walkers),("obstacle",obstacles),
                         ("stopped_vehicle",stopped_vehicles)):
@@ -234,7 +234,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.77 test targets removed.")
+        print("V0.6.12.8.2.2.78 test targets removed.")
 
 
 if __name__=="__main__":main()
