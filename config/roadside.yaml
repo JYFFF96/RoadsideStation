@@ -498,6 +498,14 @@ evaluation:
   # V0.6.12.8.2.2.72: feature profiling on the best .71 variant.
   camera_ground_tombstone_feature_mode: predicted
   camera_ground_tombstone_feature_gate: 2.0
+  # V0.6.12.8.2.2.73: evaluate sensor-only gates on exactly the same predicted
+  # 2 m candidates. Missing features fail closed. CARLA truth only labels the
+  # result and never participates in a rule decision.
+  camera_ground_tombstone_feature_rules:
+    - {name: same_camera, require_same_camera: true}
+    - {name: heading_ge_0, min_heading_cos: 0.0}
+    - {name: same_camera_heading_ge_0, require_same_camera: true, min_heading_cos: 0.0}
+    - {name: same_camera_heading_ge_05, require_same_camera: true, min_heading_cos: 0.5}
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]

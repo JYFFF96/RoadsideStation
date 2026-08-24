@@ -791,3 +791,13 @@ motion, distance, and gap distributions for the predicted 2 m variant. These
 features use detector and tracker metadata available on real equipment; CARLA
 actor identity remains evaluation-only. Production association, tombstone
 recovery, Tracker IDs, and ObjectList are unchanged.
+
+V0.6.12.8.2.2.73 evaluates sensor-only tombstone recovery rules in Shadow
+mode. The uploaded `.72`-named log actually ran V0.6.12.8.2.2.71, so it could
+not contain the feature profiling introduced by `.72`; its predicted 2 m rule
+nevertheless found three same-actor candidates and no conflicts. This version
+uses one run to compare same-camera, non-opposing heading, and two combined
+rules on exactly the same predicted 2 m population. Missing camera or motion
+features fail closed and are reported separately. CARLA actor identity only
+labels each counterfactual result. The rules never alter production matching,
+resurrect track IDs, or change Tracker and ObjectList output.

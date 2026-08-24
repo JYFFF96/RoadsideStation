@@ -36,6 +36,8 @@ class GroundTruthEvaluator(object):
             "camera_ground_tombstone_feature_mode","predicted"))
         self.camera_ground_tombstone_feature_gate = float(self.config.get(
             "camera_ground_tombstone_feature_gate",2.0))
+        self.camera_ground_tombstone_feature_rules = list(self.config.get(
+            "camera_ground_tombstone_feature_rules",[]) or [])
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
@@ -90,6 +92,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_tombstone_gates()
         self._camera_ground_enforcement_totals["tombstone_feature"] = \
             self._empty_camera_tombstone_feature()
+        self._camera_ground_enforcement_totals["tombstone_feature_rules"] = \
+            self._empty_camera_tombstone_feature_rules()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
@@ -173,6 +177,14 @@ class GroundTruthEvaluator(object):
                             "temporal_motion":[],"distances":[],"gaps":[]})
                     for label in ("same_actor","conflict","ambiguous","unknown"))
 
+    def _empty_camera_tombstone_feature_rules(self):
+        return dict((str(rule.get("name","rule_%d"%index)),{
+            "base":0,"passed":0,"feature_missing":0,"rejected":0,
+            "consistent":0,"conflict":0,"ambiguous":0,"unknown":0})
+                    for index,rule in enumerate(
+                        self.camera_ground_tombstone_feature_rules)
+                    if isinstance(rule,dict))
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -221,6 +233,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_tombstone_gates()
         self._camera_ground_enforcement_totals["tombstone_feature"] = \
             self._empty_camera_tombstone_feature()
+        self._camera_ground_enforcement_totals["tombstone_feature_rules"] = \
+            self._empty_camera_tombstone_feature_rules()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
@@ -724,6 +738,43 @@ class GroundTruthEvaluator(object):
                                         feature["heading_cos"].append(
                                             (float(tvx)*float(mdx)+float(tvy)*float(mdy))/
                                             (tombstone_speed*temporal_motion))
+                                heading_cos=None
+                                if None not in (tvx,tvy,mdx,mdy):
+                                    tombstone_speed=math.hypot(float(tvx),float(tvy))
+                                    temporal_motion=math.hypot(float(mdx),float(mdy))
+                                    if tombstone_speed>1e-3 and temporal_motion>1e-3:
+                                        heading_cos=(float(tvx)*float(mdx)+
+                                                     float(tvy)*float(mdy))/(
+                                            tombstone_speed*temporal_motion)
+                                same_camera=(current_camera!="unknown" and
+                                             prior_camera!="unknown" and
+                                             current_camera==prior_camera)
+                                camera_known=(current_camera!="unknown" and
+                                              prior_camera!="unknown")
+                                for index,rule in enumerate(
+                                        self.camera_ground_tombstone_feature_rules):
+                                    if not isinstance(rule,dict):continue
+                                    rule_name=str(rule.get("name","rule_%d"%index))
+                                    rule_bucket=totals["tombstone_feature_rules"].get(
+                                        rule_name)
+                                    if rule_bucket is None:continue
+                                    rule_bucket["base"]+=1
+                                    missing=False;passed=True
+                                    if bool(rule.get("require_same_camera",False)):
+                                        if not camera_known:missing=True
+                                        elif not same_camera:passed=False
+                                    if rule.get("min_heading_cos") is not None:
+                                        if heading_cos is None:missing=True
+                                        elif heading_cos<float(rule["min_heading_cos"]):
+                                            passed=False
+                                    if missing:
+                                        rule_bucket["feature_missing"]+=1;continue
+                                    if not passed:
+                                        rule_bucket["rejected"]+=1;continue
+                                    rule_bucket["passed"]+=1
+                                    if label=="same_actor":
+                                        rule_bucket["consistent"]+=1
+                                    else:rule_bucket[label]+=1
                 actor_tracks=totals["actor_tracks"].setdefault(actor_key,{})
                 actor_tracks[track_key]=1
                 track_actors=totals["track_actors"].setdefault(track_key,{})
@@ -853,6 +904,25 @@ class GroundTruthEvaluator(object):
             "mode":self.camera_ground_tombstone_feature_mode,
             "gate":self.camera_ground_tombstone_feature_gate,
             "labels":tombstone_feature}
+        tombstone_feature_rules={}
+        for name,bucket in totals["tombstone_feature_rules"].items():
+            known=(bucket["consistent"]+bucket["conflict"]+
+                   bucket["ambiguous"])
+            tombstone_feature_rules[name]={
+                "base":bucket["base"],"passed":bucket["passed"],
+                "feature_missing":bucket["feature_missing"],
+                "rejected":bucket["rejected"],
+                "consistent":bucket["consistent"],
+                "conflict":bucket["conflict"],
+                "ambiguous":bucket["ambiguous"],
+                "unknown":bucket["unknown"],
+                "safe_recovery":bucket["consistent"],
+                "identity_precision":(
+                    float(bucket["consistent"])/known if known else None)}
+        item["tombstone_feature_rules"]={
+            "mode":self.camera_ground_tombstone_feature_mode,
+            "gate":self.camera_ground_tombstone_feature_gate,
+            "rules":tombstone_feature_rules}
         item["association"]={
             "updates":len(totals["association_distances"]),
             "match_distance":self._distribution(totals["association_distances"]),

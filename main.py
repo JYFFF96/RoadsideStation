@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.72 Camera Tombstone Feature Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.73 Camera Tombstone Rule Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -841,6 +841,12 @@ def main():
      motion=value.get("temporal_motion",{}) or {};distance=value.get("distance",{}) or {};gap=value.get("gap",{}) or {}
      print("          [CAMERA TOMBSTONE FEATURES %s %s] N:%d SameCamera:%d/%d(%s) HeadingCos(p50/p90):%s/%s TombSpeed(p50/p90):%s/%sm/s NewMotion(p50/p90):%s/%sm/frame Dist(p50/p90):%s/%sm Gap(p50/p90):%s/%ss | EVALUATION_ONLY"%(
       feature_name,label.upper(),value.get("samples",0),value.get("same_camera",0),value.get("camera_known",0),_pct(value.get("same_camera_rate")),_num(heading.get("p50")),_num(heading.get("p90")),_num(speed.get("p50")),_num(speed.get("p90")),_num(motion.get("p50")),_num(motion.get("p90")),_num(distance.get("p50")),_num(distance.get("p90")),_num(gap.get("p50")),_num(gap.get("p90"))))
+    feature_rules=camera_enforced.get("tombstone_feature_rules",{}) or {}
+    feature_rule_name="%s_%s"%(feature_rules.get("mode","-"),
+                                _num(feature_rules.get("gate")))
+    for name,value in sorted((feature_rules.get("rules",{}) or {}).items()):
+     print("          [CAMERA TOMBSTONE RULE SHADOW %s %s] Base:%d Pass:%d Missing:%d Reject:%d SameActor:%d Conflict:%d Ambiguous:%d Unknown:%d SafeRecover:%d IdentityPrecision:%s | TrackerInput:UNCHANGED"%(
+      feature_rule_name,name,value.get("base",0),value.get("passed",0),value.get("feature_missing",0),value.get("rejected",0),value.get("consistent",0),value.get("conflict",0),value.get("ambiguous",0),value.get("unknown",0),value.get("safe_recovery",0),_pct(value.get("identity_precision"))))
     if camera_detector is not None:
      detector_report=camera_detector.report()
      print("      [CAMERA DETECTOR RUNTIME] Name:%s Runtime:%s Frames:%d Detections:%d AvgLatency:%.1fms MaxLatency:%.1fms Classes:%s"%(

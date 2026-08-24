@@ -451,7 +451,12 @@ class CameraGroundInitiationTests(unittest.TestCase):
     def test_camera_tombstone_shadow_truth_attributes_reappearance(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
             "radius":80.0,"match_distance":4.0,
-            "camera_ground_tombstone_shadow_gates":[2.0,3.5,5.0]})
+            "camera_ground_tombstone_shadow_gates":[2.0,3.5,5.0],
+            "camera_ground_tombstone_feature_rules":[
+                {"name":"same_camera","require_same_camera":True},
+                {"name":"heading_ge_0","min_heading_cos":0.0},
+                {"name":"combined","require_same_camera":True,
+                 "min_heading_cos":0.5}]})
         truth=[{"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
         evaluator.truth_objects=lambda:list(truth)
         evaluator.observe_camera_ground_enforcement([{
@@ -489,6 +494,36 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,same["same_camera"])
         self.assertEqual(1.0,same["same_camera_rate"])
         self.assertAlmostEqual(1.0,same["heading_cos"]["p50"])
+        for name in ("same_camera","heading_ge_0","combined"):
+            rule=report["tombstone_feature_rules"]["rules"][name]
+            self.assertEqual(1,rule["base"])
+            self.assertEqual(1,rule["passed"])
+            self.assertEqual(1,rule["consistent"])
+            self.assertEqual(1.0,rule["identity_precision"])
+
+    def test_camera_tombstone_rule_missing_feature_fails_closed(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":4.0,
+            "camera_ground_tombstone_shadow_gates":[2.0],
+            "camera_ground_tombstone_feature_rules":[
+                {"name":"combined","require_same_camera":True,
+                 "min_heading_cos":0.0}]})
+        truth=[{"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        evaluator.truth_objects=lambda:list(truth)
+        evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_1","x":16.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0}],frame_id=10)
+        truth[0]["x"]=17.0
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_2","x":17.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_camera_tombstone_predicted_id":"vehicle_1",
+            "track_camera_tombstone_predicted_distance":1.0}],frame_id=11)
+        rule=report["tombstone_feature_rules"]["rules"]["combined"]
+        self.assertEqual(1,rule["base"])
+        self.assertEqual(0,rule["passed"])
+        self.assertEqual(1,rule["feature_missing"])
+        self.assertEqual(0,rule["safe_recovery"])
 
 
 if __name__ == "__main__":unittest.main()
