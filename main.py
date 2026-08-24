@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.61 Camera VRU ROI Ablation starting...")
+ print("RoadsideStation V0.6.12.8.2.2.62 Camera Temporal Admission Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -553,6 +553,11 @@ def main():
   "enabled" if fc.get("camera_ground_initiation_shadow_enabled",False) else "disabled",
   float(fc.get("camera_ground_initiation_min_range",2.0)),
   float(fc.get("camera_ground_initiation_max_range",30.0))))
+ print("Camera Temporal Admission: %s | frames>=%d match<=%.1fm VRU extra=%.1fm | Shadow only"%(
+  "enabled" if fc.get("camera_ground_temporal_shadow_enabled",False) else "disabled",
+  int(fc.get("camera_ground_temporal_required_frames",2)),
+  float(fc.get("camera_ground_temporal_match_distance",2.0)),
+  float(fc.get("camera_ground_temporal_vru_extra_margin",1.0))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -679,6 +684,9 @@ def main():
     evaluator.observe_camera_ground_vru_roi_ablation(
      camera_ground_shadow.last_vru_roi_ablation_candidates,
      frame_id=camera_ground_token)
+    evaluator.observe_camera_ground_temporal(
+     camera_ground_shadow.last_temporal_candidates,
+     frame_id=camera_ground_token)
    selected_camera_stats={"held":0,"visible":0,"supported":0,"source":camera_source}
    selected_held=fusion.last_selected_track_admission_rejections
    if eval_cfg.get("selected_track_admission_camera_profiling",False):
@@ -768,6 +776,9 @@ def main():
     for margin,value in sorted(camera_vru_roi.items(),key=lambda item:float(item[0])):
      print("      [CAMERA VRU ROI +%sm SHADOW] Candidates:%d Truth:%d FP:%d Precision:%s Classes:%s | TrackerInput:UNCHANGED"%(
       margin,value.get("candidates",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("classes",{})))
+    camera_temporal=camera_ground.get("temporal",{});camera_temporal_eval=evaluator.report_camera_ground_temporal() if evaluator is not None else {}
+    print("      [CAMERA TEMPORAL ADMISSION SHADOW] Frames:%d Input:%d Seeded:%d Matched:%d Active:%d Expired:%d Confirmed:%d | Truth:%d FP:%d Precision:%s Classes:%s Source:%s | required=%d match<=%.1fm VRUExtra=%.1fm TrackerInput:UNCHANGED"%(
+     camera_temporal.get("frames",0),camera_temporal.get("input",0),camera_temporal.get("seeded",0),camera_temporal.get("matched",0),camera_temporal.get("active",0),camera_temporal.get("expired",0),camera_temporal.get("confirmed",0),camera_temporal_eval.get("matched",0),camera_temporal_eval.get("fp",0),_pct(camera_temporal_eval.get("precision")),camera_temporal_eval.get("classes",{}),camera_temporal_eval.get("sources",{}),int(fc.get("camera_ground_temporal_required_frames",2)),float(fc.get("camera_ground_temporal_match_distance",2.0)),float(fc.get("camera_ground_temporal_vru_extra_margin",1.0))))
     _print_sparse_geometry(s);_print_road_object_recovery(s);_print_discovery_diagnostics(dds);_print_rescue_gate();_print_far_geometry();_print_detection_stability(ds)
     print("  [TRACK QUALITY] Active:%d High:%d Medium:%d Low:%d Suppressed:%d AvgQuality:%.2f"%(s.get("track_quality_active",0),s.get("track_quality_high",0),s.get("track_quality_medium",0),s.get("track_quality_low",0),s.get("track_suppress",0),float(s.get("track_quality_avg",0.0))))
     print("  [TRACK LIFE GATE] low_hit_keep:%d low_new_drop:%d"%(s.get("track_low_hit_keep",0),s.get("track_low_new_drop",0)))

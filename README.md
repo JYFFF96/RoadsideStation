@@ -656,3 +656,11 @@ additional 1 m, 2 m, and 3 m margins, with cumulative truth/false-positive
 precision reported independently for each margin. No variant enters Tracker or
 ObjectList. The background READY banner also uses eight vertical `|` lines above
 and below the message so the target-spawn point is easier to spot in the log.
+
+V0.6.12.8.2.2.62 selects the most conservative VRU margin from the Shadow
+comparison and adds temporal admission profiling. The V0.6.12.8.2.2.61 run had
+12 lateral VRU rejections: extra 1 m recovered 8, extra 2 m recovered 10, and
+extra 3 m recovered 11; every recovered CARLA-truth sample matched a person.
+Normal-ROI candidates plus only the extra-1-m VRU candidates now require two
+distinct camera frames within a 2 m association gate. Confirmed candidates are
+truth-attributed and reported, but remain isolated from Tracker and ObjectList.

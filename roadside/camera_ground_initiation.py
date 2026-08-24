@@ -61,8 +61,18 @@ class CameraGroundInitiationShadow(object):
         self.vru_roi_extra_margins=sorted(set(
             float(x) for x in c.get("camera_ground_vru_roi_extra_margin_shadow",[1.0,2.0,3.0])
             if float(x)>0.0))
+        self.temporal_enabled=bool(c.get("camera_ground_temporal_shadow_enabled",False))
+        self.temporal_vru_margin=float(c.get(
+            "camera_ground_temporal_vru_extra_margin",1.0))
+        self.temporal_required_frames=max(2,int(c.get(
+            "camera_ground_temporal_required_frames",2)))
+        self.temporal_match_distance=float(c.get(
+            "camera_ground_temporal_match_distance",2.0))
+        self.temporal_max_missed_frames=max(0,int(c.get(
+            "camera_ground_temporal_max_missed_frames",2)))
         self.last_vru_roi_ablation_candidates=dict(
             (margin,[]) for margin in self.vru_roi_extra_margins)
+        self.last_temporal_candidates=[];self._temporal_states=[]
         self._last_token=None
         self.stats={"frames":0,"detections":0,"class_rejected":0,
                     "confidence_rejected":0,"projection_rejected":0,
@@ -71,13 +81,55 @@ class CameraGroundInitiationShadow(object):
                     "validator_errors":0,"would_emit":0,
                     "classes":{},"roi_rejection_reasons":{},
                     "roi_groups":{"vehicle":{"tested":0,"accepted":0,"rejected":0},
-                                  "vru":{"tested":0,"accepted":0,"rejected":0}}}
+                                  "vru":{"tested":0,"accepted":0,"rejected":0}},
+                    "temporal":{"frames":0,"input":0,"seeded":0,"matched":0,
+                                "confirmed":0,"expired":0,"active":0}}
 
     @staticmethod
     def _near(item, others, distance):
         return any(math.hypot(float(item["x"])-float(old["x"]),
                               float(item["y"])-float(old["y"]))<=distance
                    for old in (others or []))
+
+    def _update_temporal(self, candidates):
+        self.last_temporal_candidates=[]
+        if not self.temporal_enabled:return
+        frame_index=self.stats["frames"];stats=self.stats["temporal"]
+        stats["frames"]+=1;stats["input"]+=len(candidates or [])
+        unused=set(range(len(self._temporal_states)));next_states=[]
+        for candidate in candidates or []:
+            best=None;best_distance=None
+            for index in unused:
+                state=self._temporal_states[index]
+                if state.get("object_type")!=candidate.get("object_type"):
+                    continue
+                distance=math.hypot(float(candidate["x"])-state["x"],
+                                    float(candidate["y"])-state["y"])
+                if distance<=self.temporal_match_distance and (
+                        best_distance is None or distance<best_distance):
+                    best=index;best_distance=distance
+            if best is None:
+                state={"x":float(candidate["x"]),"y":float(candidate["y"]),
+                       "object_type":candidate.get("object_type"),
+                       "hits":1,"last_frame":frame_index};stats["seeded"]+=1
+            else:
+                unused.remove(best);old=self._temporal_states[best]
+                state={"x":float(candidate["x"]),"y":float(candidate["y"]),
+                       "object_type":candidate.get("object_type"),
+                       "hits":int(old["hits"])+1,"last_frame":frame_index}
+                stats["matched"]+=1
+            next_states.append(state)
+            if state["hits"]>=self.temporal_required_frames:
+                item=dict(candidate);item["camera_ground_temporal_confirmed"]=True
+                item["camera_ground_temporal_hits"]=state["hits"]
+                item["camera_ground_temporal_vru_margin"]=self.temporal_vru_margin
+                self.last_temporal_candidates.append(item);stats["confirmed"]+=1
+        for index in unused:
+            state=self._temporal_states[index]
+            if frame_index-int(state["last_frame"])<=self.temporal_max_missed_frames:
+                next_states.append(state)
+            else:stats["expired"]+=1
+        self._temporal_states=next_states;stats["active"]=len(next_states)
 
     def update(self, camera_views, existing, ground_z, validator=None,
                frame_token=None):
@@ -161,6 +213,13 @@ class CameraGroundInitiationShadow(object):
                     self.stats["roi_groups"][group]["accepted"]+=1
                 candidates.append(item);self.stats["would_emit"]+=1
                 self.stats["classes"][class_name]=self.stats["classes"].get(class_name,0)+1
+        temporal_input=list(candidates)
+        selected_variant=self.last_vru_roi_ablation_candidates.get(
+            self.temporal_vru_margin,[])
+        for item in selected_variant:
+            if not self._near(item,temporal_input,self.cross_camera_distance):
+                temporal_input.append(item)
+        self._update_temporal(temporal_input)
         return candidates
 
     def report(self):
@@ -169,4 +228,5 @@ class CameraGroundInitiationShadow(object):
         result["roi_groups"]=dict((name,dict(value))
                                   for name,value in self.stats["roi_groups"].items())
         result["vru_roi_extra_margins"]=list(self.vru_roi_extra_margins)
+        result["temporal"]=dict(self.stats["temporal"])
         return result

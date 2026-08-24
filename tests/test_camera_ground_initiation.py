@@ -98,6 +98,25 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertAlmostEqual(1.75,shadow.last_vru_roi_ablation_candidates[2.0][0][
             "vru_roi_lateral_excess"])
 
+    def test_temporal_shadow_requires_two_distinct_frames(self):
+        config=self._config()
+        config.update({"camera_ground_temporal_shadow_enabled":True,
+                       "camera_ground_temporal_required_frames":2,
+                       "camera_ground_temporal_match_distance":2.0,
+                       "camera_ground_temporal_vru_extra_margin":1.0})
+        shadow=CameraGroundInitiationShadow(config)
+        shadow.update([self._view()],[],0.0,validator=lambda item:(True,"ok",{}),
+                      frame_token=10)
+        self.assertEqual([],shadow.last_temporal_candidates)
+        shadow.update([self._view()],[],0.0,validator=lambda item:(True,"ok",{}),
+                      frame_token=11)
+        self.assertEqual(1,len(shadow.last_temporal_candidates))
+        self.assertEqual(2,shadow.last_temporal_candidates[0][
+            "camera_ground_temporal_hits"])
+        report=shadow.report()["temporal"]
+        self.assertEqual(1,report["seeded"]);self.assertEqual(1,report["matched"])
+        self.assertEqual(1,report["confirmed"])
+
     def test_truth_evaluation_is_isolated_and_counts_precision(self):
         evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
             "radius":80.0,"match_distance":2.0})
@@ -121,6 +140,16 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1.0,report["2"]["precision"])
         self.assertEqual(1,report["3"]["fp"])
         self.assertEqual(.5,report["3"]["precision"])
+
+    def test_temporal_truth_evaluation_is_independent(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":2.0})
+        evaluator.truth_objects=lambda:[
+            {"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_temporal([
+            {"x":16.2,"y":0.0,"camera_source":"detector"}],frame_id=11)
+        self.assertEqual(1,report["matched"]);self.assertEqual(0,report["fp"])
+        self.assertEqual(1.0,report["precision"])
 
 
 if __name__ == "__main__":unittest.main()
