@@ -1,4 +1,4 @@
-__version__ = "0.6.12.8.2.2.48"
+__version__ = "0.6.12.8.2.2.50"
 
 from .track_stale_cleanup import install_stale_cleanup_patch
 from .far_geometry_stability import install_far_geometry_stability_patch
