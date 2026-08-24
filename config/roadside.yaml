@@ -629,6 +629,12 @@ v2x_events:
   cooldown_seconds: 5.0
   # Leave unset in normal perception runs. A real OBU adapter will provide it.
   test_ego_speed_kmh:
+  # V0.6.12.8.2.2.75: event-focused, ID-independent pedestrian warning.
+  # FusedObjectList already contains only road-ROI-approved camera persons.
+  vrucw:
+    enabled: true
+    required_updates: 2
+    direction: 1
   avw:
     enabled: true
     max_stationary_speed_mps: 0.5

@@ -810,3 +810,13 @@ after 2.42--2.50 seconds; five conflicts appeared around 0.99--1.25 m after
 4.99--5.91 seconds. This version evaluates 0.20 m and 0.35 m distance limits,
 a 3.0-second gap, and a low-speed combination. Missing features fail closed.
 All rules remain evaluator-only and leave Tracker IDs and ObjectList unchanged.
+
+V0.6.12.8.2.2.75 pivots the first deliverable from long-lived pedestrian
+identity recovery to an event-focused VRUCW warning. The Dachuan event2hmi
+manual requires category VRUCW, event_sort 10, participant type, direction,
+speed, and time; it does not require a permanent perception track ID. After
+two consecutive road-ROI-approved person observations, the event engine now
+emits one area-level warning per cooldown window. Multiple fragmented person
+IDs are aggregated into one event. Both `ptc_type` from the manual table and
+`spc_type` from its JSON example are included pending real-RSU verification.
+AVW and SLW remain available, and perception/Tracker output is unchanged.

@@ -7,6 +7,32 @@ from roadside.v2x_events import V2XEventEngine,encode_v2x_event
 
 
 class V2XEventTest(unittest.TestCase):
+    def test_vrucw_requires_presence_confirmation_and_matches_manual(self):
+        engine=V2XEventEngine("RSU_001",{"enabled":True,
+            "vrucw":{"enabled":True,"required_updates":2,"direction":1},
+            "avw":{"enabled":False},"slw":{"enabled":False}})
+        person=DetectedObject("person_fragment_1",1,2,object_type="person")
+        self.assertEqual([],engine.update(ObjectList("RSU_001",[person],100.0)))
+        event=engine.update(ObjectList("RSU_001",[person],100.1),
+                            {"speed_kmh":5})[0]
+        data=event["data"]
+        self.assertEqual(("VRUCW",10,3),
+                         (data["category"],data["event_sort"],data["ptc_type"]))
+        self.assertEqual(3,data["spc_type"])
+        self.assertEqual(5,data["speed"])
+        self.assertEqual("road_presence",data["trigger_mode"])
+
+    def test_vrucw_aggregates_fragmented_ids_into_one_event(self):
+        engine=V2XEventEngine("R",{"enabled":True,"cooldown_seconds":5,
+            "vrucw":{"enabled":True,"required_updates":1},
+            "avw":{"enabled":False},"slw":{"enabled":False}})
+        fragments=[DetectedObject("person_1",0,0,object_type="person"),
+                   DetectedObject("person_9",.2,.1,object_type="person")]
+        events=engine.update(ObjectList("R",fragments,10.0))
+        self.assertEqual(1,len(events))
+        self.assertEqual(2,events[0]["data"]["participant_count"])
+        self.assertEqual([],engine.update(ObjectList("R",fragments,11.0)))
+
     def test_avw_requires_vehicle_dwell_and_uses_manual_fields(self):
         engine=V2XEventEngine("RSU_001",{"enabled":True,"cooldown_seconds":5,
             "avw":{"enabled":True,"dwell_seconds":3,"max_stationary_speed_mps":.5},

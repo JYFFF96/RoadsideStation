@@ -12,11 +12,14 @@ class V2XEventEngine(object):
     confirmed with the vendor.
     """
     VEHICLE_TYPES=set(("vehicle","car","truck","bus","motorcycle"))
+    PEDESTRIAN_TYPES=set(("person","pedestrian"))
+    CYCLIST_TYPES=set(("bicycle","cyclist"))
 
     def __init__(self, station_id, config=None):
         self.station_id=str(station_id);self.config=config or {}
         self.enabled=bool(self.config.get("enabled",False))
         self._stationary_since={};self._last_emitted={};self._event_count=0
+        self._vru_presence_hits=0
 
     def _envelope(self, category, event_sort, description, timestamp,
                   direction=-1, speed=None, extra=None):
@@ -36,6 +39,34 @@ class V2XEventEngine(object):
     def update(self, object_list, ego=None):
         if not self.enabled:return []
         ego=ego or {};now=float(object_list.timestamp);events=[];active=set()
+        vrucw=self.config.get("vrucw",{}) or {}
+        if vrucw.get("enabled",True):
+            vru=[]
+            for obj in object_list.objects:
+                object_type=str(obj.object_type).lower()
+                if (object_type in self.PEDESTRIAN_TYPES or
+                        object_type in self.CYCLIST_TYPES):vru.append(obj)
+            if vru:self._vru_presence_hits+=1
+            else:self._vru_presence_hits=0
+            required=max(1,int(vrucw.get("required_updates",2)))
+            key=("VRUCW","road_presence")
+            if (self._vru_presence_hits>=required and
+                    self._cooldown_ready(key,now)):
+                participant_type=(3 if any(str(obj.object_type).lower() in
+                                           self.PEDESTRIAN_TYPES for obj in vru)
+                                  else 2)
+                events.append(self._envelope(
+                    "VRUCW",10,("请注意行人" if participant_type==3
+                                 else "请注意非机动车"),now,
+                    int(vrucw.get("direction",1)),
+                    float(ego.get("speed_kmh",0.0)),
+                    {"ptc_type":participant_type,
+                     # Dachuan's example spells the table field as spc_type.
+                     # Keep both spellings until the RSU firmware is verified.
+                     "spc_type":participant_type,
+                     "participant_count":len(vru),
+                     "trigger_mode":"road_presence"}))
+                self._last_emitted[key]=now
         avw=self.config.get("avw",{}) or {}
         if avw.get("enabled",True):
             max_speed=float(avw.get("max_stationary_speed_mps",.5))
