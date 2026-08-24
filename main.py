@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.67 Camera Track Identity Attribution starting...")
+ print("RoadsideStation V0.6.12.8.2.2.68 Camera Identity Gate Ablation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -812,6 +812,10 @@ def main():
      camera_current.get("tracks",0),camera_current.get("matched",0),camera_current.get("fp",0),camera_current.get("duplicate_like_fp",0),camera_current.get("spatial_fp",0),camera_current.get("camera_only",0),camera_current.get("lidar_takeover",0),camera_enforced.get("track_samples",0),camera_enforced.get("matched",0),camera_enforced.get("fp",0),_pct(camera_enforced.get("precision")),camera_enforced.get("duplicate_like_fp",0),camera_enforced.get("spatial_fp",0),camera_enforced.get("camera_only",0),camera_enforced.get("lidar_takeover",0)))
     print("        [CAMERA TRACK IDENTITY] UniqueTracks:%d UniqueActors:%d FragmentedActors:%d IDFragments:%d IdentitySwitchTracks:%d Life(avg/max):%.1f/%d frames | States:%s Classes:%s"%(
      camera_enforced.get("unique_tracks",0),camera_enforced.get("unique_actors",0),camera_enforced.get("fragmented_actors",0),camera_enforced.get("id_fragments",0),camera_enforced.get("identity_switch_tracks",0),float(camera_enforced.get("avg_track_frames",0.0)),camera_enforced.get("max_track_frames",0),camera_enforced.get("states",{}),camera_enforced.get("classes",{})))
+    for gate,value in sorted((camera_enforced.get("identity_gates",{}) or {}).items(),
+                             key=lambda item:float(item[0])):
+     print("        [CAMERA ID GATE %sm] Samples:%d Match:%d FP:%d Precision:%s DupLike:%d SpatialFP:%d Actors:%d Fragmented:%d IDFragments:%d SwitchTracks:%d Error(avg/max):%s/%s"%(
+      gate,value.get("track_samples",0),value.get("matched",0),value.get("fp",0),_pct(value.get("precision")),value.get("duplicate_like_fp",0),value.get("spatial_fp",0),value.get("unique_actors",0),value.get("fragmented_actors",0),value.get("id_fragments",0),value.get("identity_switch_tracks",0),_num(value.get("error_avg")),_num(value.get("error_max"))))
     if camera_detector is not None:
      detector_report=camera_detector.report()
      print("      [CAMERA DETECTOR RUNTIME] Name:%s Runtime:%s Frames:%d Detections:%d AvgLatency:%.1fms MaxLatency:%.1fms Classes:%s"%(

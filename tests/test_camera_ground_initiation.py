@@ -299,5 +299,28 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertAlmostEqual(1.5,report["avg_track_frames"])
         self.assertEqual(2,report["max_track_frames"])
 
+    def test_camera_identity_gate_ablation_is_evaluator_only(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":4.0,
+            "camera_ground_identity_match_gates":[1.0,2.0,3.0,4.0]})
+        evaluator.truth_objects=lambda:[
+            {"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_1","x":17.5,"y":0.0,"track_state":"confirmed",
+            "track_camera_ground_origin":True,"track_lidar_hits":0}],frame_id=10)
+        gates=report["identity_gates"]
+        self.assertEqual(0,gates["1"]["matched"])
+        self.assertEqual(1,gates["1"]["spatial_fp"])
+        self.assertEqual(0.0,gates["1"]["precision"])
+        for gate in ("2","3","4"):
+            self.assertEqual(1,gates[gate]["matched"])
+            self.assertEqual(0,gates[gate]["fp"])
+            self.assertEqual(1.0,gates[gate]["precision"])
+            self.assertAlmostEqual(1.5,gates[gate]["error_avg"])
+        # The established report remains governed by match_distance, proving
+        # that the parallel gates do not alter admission or primary metrics.
+        self.assertEqual(1,report["matched"])
+        self.assertEqual(1.0,report["precision"])
+
 
 if __name__ == "__main__":unittest.main()

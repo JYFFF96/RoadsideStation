@@ -721,3 +721,17 @@ actors, extra ID fragments, identity-switching tracks, and average/maximum
 track lifetime. Cumulative camera-only and LiDAR-takeover samples are also
 printed. These additions remain CARLA evaluator diagnostics and do not alter
 the detector-only person enforcement policy or public object output.
+
+V0.6.12.8.2.2.68 adds evaluator-only camera identity-gate ablation. The
+V0.6.12.8.2.2.67 run produced 171 actual camera-origin track samples: 164
+matched truth, seven were unmatched, six of those remained near truth, and
+precision was 95.9 percent. However, the shared 4 m evaluation gate attributed
+12 track IDs to 11 actors while simultaneously reporting nine fragmented
+actors and six identity-switching tracks, which can be caused by ambiguous
+nearest-neighbour assignments among dense pedestrians. This version therefore
+runs independent 1 m, 2 m, 3 m, and 4 m truth associations in parallel and
+reports precision, duplicate-like and spatial false positives, fragmented
+actors, extra ID fragments, switching tracks, and position error for each
+gate. The experiment is confined to GroundTruthEvaluator: Tracker matching,
+camera admission, detector-only person enforcement, and ObjectList output are
+unchanged.

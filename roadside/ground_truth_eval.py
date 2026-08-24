@@ -20,6 +20,10 @@ class GroundTruthEvaluator(object):
         self.config = config or {}
         self.radius = float(self.config.get("radius", 80.0))
         self.match_distance = float(self.config.get("match_distance", 4.0))
+        self.camera_ground_identity_match_gates = sorted(set(
+            float(x) for x in self.config.get(
+                "camera_ground_identity_match_gates", [1.0,2.0,3.0,4.0])
+            if float(x)>0.0))
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
@@ -66,6 +70,8 @@ class GroundTruthEvaluator(object):
             "combined_matched":0,"classes":{},"sources":{}}
         self._camera_ground_enforcement_last_frame = None
         self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
+        self._camera_ground_enforcement_totals["identity_gates"] = \
+            self._empty_camera_identity_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
@@ -119,6 +125,13 @@ class GroundTruthEvaluator(object):
         return {"tracks":0,"matched":0,"fp":0,"camera_only":0,
                 "lidar_takeover":0,"duplicate_like_fp":0,"spatial_fp":0}
 
+    def _empty_camera_identity_gates(self):
+        return dict(("%g"%gate,{"track_samples":0,"matched":0,"fp":0,
+                                "duplicate_like_fp":0,"spatial_fp":0,
+                                "errors":[],"actor_tracks":{},
+                                "track_actors":{},"actor_ids":{}})
+                    for gate in self.camera_ground_identity_match_gates)
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -159,6 +172,8 @@ class GroundTruthEvaluator(object):
             "combined_matched":0,"classes":{},"sources":{}}
         self._camera_ground_enforcement_last_frame = None
         self._camera_ground_enforcement_totals = self._empty_camera_enforcement_totals()
+        self._camera_ground_enforcement_totals["identity_gates"] = \
+            self._empty_camera_identity_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
@@ -275,17 +290,20 @@ class GroundTruthEvaluator(object):
             if item["range"] <= self.radius:out.append(item)
         return out
 
-    def _match(self, truth, detected):
+    def _match_gate(self, truth, detected, gate):
         candidates=[]
         for ti,gt in enumerate(truth):
             for di,det in enumerate(detected or []):
                 d=math.hypot(float(det.get("x",0.0))-gt["x"],float(det.get("y",0.0))-gt["y"])
-                if d<=self.match_distance:candidates.append((d,ti,di))
+                if d<=float(gate):candidates.append((d,ti,di))
         candidates.sort(key=lambda x:x[0]);used_t=set();used_d=set();pairs=[]
         for d,ti,di in candidates:
             if ti in used_t or di in used_d:continue
             used_t.add(ti);used_d.add(di);pairs.append((ti,di,d))
         return pairs
+
+    def _match(self, truth, detected):
+        return self._match_gate(truth,detected,self.match_distance)
 
     @staticmethod
     def _metrics(truth_n, detected_n, pairs):
@@ -563,6 +581,29 @@ class GroundTruthEvaluator(object):
         spatial_fp=(len(detected)-len(pairs))-duplicate_like_fp
         totals["duplicate_like_fp"]+=duplicate_like_fp
         totals["spatial_fp"]+=spatial_fp
+        for gate in self.camera_ground_identity_match_gates:
+            key="%g"%gate;bucket=totals["identity_gates"][key]
+            gate_pairs=self._match_gate(truth,detected,gate)
+            gate_matched=set(x[1] for x in gate_pairs)
+            gate_duplicate=0
+            for index,item in enumerate(detected):
+                if index in gate_matched:continue
+                if any(math.hypot(float(item.get("x",0.0))-float(gt["x"]),
+                                  float(item.get("y",0.0))-float(gt["y"]))<=gate
+                       for gt in truth):gate_duplicate+=1
+            gate_fp=len(detected)-len(gate_pairs)
+            bucket["track_samples"]+=len(detected);bucket["matched"]+=len(gate_pairs)
+            bucket["fp"]+=gate_fp;bucket["duplicate_like_fp"]+=gate_duplicate
+            bucket["spatial_fp"]+=gate_fp-gate_duplicate
+            bucket["errors"].extend(x[2] for x in gate_pairs)
+            for truth_index,detected_index,unused_distance in gate_pairs:
+                actor_id=truth[truth_index].get("actor_id")
+                if actor_id is None:continue
+                actor_key=int(actor_id);track_key=str(
+                    detected[detected_index].get("id","unknown"))
+                bucket["actor_ids"][actor_key]=1
+                bucket["actor_tracks"].setdefault(actor_key,{})[track_key]=1
+                bucket["track_actors"].setdefault(track_key,{})[actor_key]=1
         self._camera_ground_enforcement_current={
             "tracks":len(detected),"matched":len(pairs),
             "fp":len(detected)-len(pairs),"camera_only":sum(
@@ -588,6 +629,26 @@ class GroundTruthEvaluator(object):
         item["max_track_frames"]=(max(samples) if samples else 0)
         item["precision"]=(float(totals["matched"])/totals["track_samples"]
                            if totals["track_samples"] else None)
+        identity_gates={}
+        for key,bucket in totals["identity_gates"].items():
+            errors=bucket["errors"]
+            identity_gates[key]={
+                "track_samples":bucket["track_samples"],"matched":bucket["matched"],
+                "fp":bucket["fp"],"precision":(
+                    float(bucket["matched"])/bucket["track_samples"]
+                    if bucket["track_samples"] else None),
+                "duplicate_like_fp":bucket["duplicate_like_fp"],
+                "spatial_fp":bucket["spatial_fp"],
+                "unique_actors":len(bucket["actor_ids"]),
+                "fragmented_actors":sum(
+                    1 for tracks in bucket["actor_tracks"].values() if len(tracks)>1),
+                "id_fragments":sum(max(0,len(tracks)-1)
+                                   for tracks in bucket["actor_tracks"].values()),
+                "identity_switch_tracks":sum(
+                    1 for actors in bucket["track_actors"].values() if len(actors)>1),
+                "error_avg":(sum(errors)/len(errors) if errors else None),
+                "error_max":(max(errors) if errors else None)}
+        item["identity_gates"]=identity_gates
         item["current"]=dict(self._camera_ground_enforcement_current)
         for key in ("track_ids","actor_ids","actor_tracks","track_actors","per_track_samples"):
             item.pop(key,None)
