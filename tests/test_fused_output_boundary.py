@@ -21,6 +21,10 @@ class FusedOutputBoundaryTest(unittest.TestCase):
             "confidence": .72, "sources": ["lidar", "radar"],
             "radar_radial_velocity": 4.5, "track_hits": 7,
             "track_state": "confirmed",
+            "track_selected_enforced_ever": True,
+            "track_selected_enforced_hits": 3,
+            "track_quality": .82,
+            "track_sensors": "LR",
         }]
         cameras = [CameraObject("CAM_01", "car", .91, [10, 20, 110, 180])]
         pairs = [{"lidar_index": 0, "camera_index": 0,
@@ -41,6 +45,8 @@ class FusedOutputBoundaryTest(unittest.TestCase):
         self.assertEqual(7, obj["age"])
         self.assertEqual(["lidar", "radar", "camera"], obj["sources"])
         self.assertEqual(5.0, obj["speedMps"])
+        self.assertTrue(obj["perceptionEvidence"]["roadObjectSelectedEver"])
+        self.assertEqual(.82,obj["perceptionEvidence"]["trackQuality"])
 
     def test_local_rsm_is_derived_from_same_fused_objects(self):
         payload = json.loads(encode_rsm(self._fused()))

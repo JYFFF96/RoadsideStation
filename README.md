@@ -820,3 +820,12 @@ emits one area-level warning per cooldown window. Multiple fragmented person
 IDs are aggregated into one event. Both `ptc_type` from the manual table and
 `spc_type` from its JSON example are included pending real-RSU verification.
 AVW and SLW remain available, and perception/Tracker output is unchanged.
+
+V0.6.12.8.2.2.76 adds the second first-deliverable scene: an ID-independent
+road-hazard warning (`HLW`, event_sort 8). The event engine consumes only the
+canonical sensor-derived FusedObjectList. It requires a confirmed, persistent,
+stationary, compact unknown obstacle and selected-road, multi-sensor, or high-
+quality track evidence. Long thin structures and low-quality clutter are
+rejected. Multiple fragmented track IDs still produce one area-level warning
+per cooldown window. The message includes the Dachuan HLW fields and event_type
+37; CARLA truth remains evaluator-only.

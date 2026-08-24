@@ -3,6 +3,7 @@ import json
 import unittest
 
 from roadside.models import DetectedObject,ObjectList
+from roadside.fused_objects import FusedObject,FusedObjectList
 from roadside.v2x_events import V2XEventEngine,encode_v2x_event
 
 
@@ -32,6 +33,38 @@ class V2XEventTest(unittest.TestCase):
         self.assertEqual(1,len(events))
         self.assertEqual(2,events[0]["data"]["participant_count"])
         self.assertEqual([],engine.update(ObjectList("R",fragments,11.0)))
+
+    def test_hlw_aggregates_fragmented_ids_and_matches_manual(self):
+        engine=V2XEventEngine("RSU_001",{"enabled":True,"cooldown_seconds":5,
+            "vrucw":{"enabled":False},"hlw":{"enabled":True,
+                "required_updates":2,"min_track_age":3},
+            "avw":{"enabled":False},"slw":{"enabled":False}})
+        evidence={"roadObjectSelectedEver":True,"trackQuality":.8}
+        first=FusedObject("fragment_1",size=[.9,.6,.5],confidence=.72,
+                          age=3,track_state="confirmed",
+                          perception_evidence=evidence)
+        second=FusedObject("fragment_9",x=.2,y=.1,size=[.8,.5,.5],
+                           confidence=.72,age=4,track_state="confirmed",
+                           perception_evidence=evidence)
+        self.assertEqual([],engine.update(FusedObjectList("RSU_001",[first],10)))
+        event=engine.update(FusedObjectList("RSU_001",[second],10.1))[0]
+        data=event["data"]
+        self.assertEqual(("HLW",8,37),(data["category"],data["event_sort"],
+                                      data["event_type"]))
+        self.assertEqual("road_obstacle_presence",data["trigger_mode"])
+        self.assertNotIn("object_id",data)
+
+    def test_hlw_rejects_long_thin_or_untrusted_clutter(self):
+        config={"enabled":True,"vrucw":{"enabled":False},
+                "hlw":{"enabled":True,"required_updates":1},
+                "avw":{"enabled":False},"slw":{"enabled":False}}
+        engine=V2XEventEngine("R",config)
+        selected={"roadObjectSelectedEver":True,"trackQuality":.8}
+        thin=FusedObject("thin",size=[5.5,.25,1.8],confidence=.72,age=8,
+                         perception_evidence=selected)
+        untrusted=FusedObject("noise",size=[.8,.5,.7],confidence=.72,age=8,
+                              perception_evidence={"trackQuality":.5})
+        self.assertEqual([],engine.update(FusedObjectList("R",[thin,untrusted],1)))
 
     def test_avw_requires_vehicle_dwell_and_uses_manual_fields(self):
         engine=V2XEventEngine("RSU_001",{"enabled":True,"cooldown_seconds":5,

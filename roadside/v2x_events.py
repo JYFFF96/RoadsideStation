@@ -20,6 +20,7 @@ class V2XEventEngine(object):
         self.enabled=bool(self.config.get("enabled",False))
         self._stationary_since={};self._last_emitted={};self._event_count=0
         self._vru_presence_hits=0
+        self._hlw_presence_hits=0
 
     def _envelope(self, category, event_sort, description, timestamp,
                   direction=-1, speed=None, extra=None):
@@ -35,6 +36,32 @@ class V2XEventEngine(object):
     def _cooldown_ready(self, key, now):
         cooldown=float(self.config.get("cooldown_seconds",5.0))
         return now-float(self._last_emitted.get(key,-1e30))>=cooldown
+
+    def _credible_road_obstacle(self, obj, config):
+        if str(obj.object_type).lower()!="unknown_obstacle":return False
+        if str(getattr(obj,"track_state","confirmed")).lower()!="confirmed":return False
+        if int(getattr(obj,"age",1))<int(config.get("min_track_age",3)):return False
+        if float(getattr(obj,"confidence",0.0))<float(config.get("min_confidence",.70)):
+            return False
+        if math.hypot(float(obj.vx),float(obj.vy))>float(
+                config.get("max_stationary_speed_mps",.5)):return False
+        size=list(getattr(obj,"size",[]) or [])
+        if len(size)<3:return False
+        length,width,height=[float(value) for value in size[:3]]
+        if not (float(config.get("min_length_m",.20))<=length<=
+                float(config.get("max_length_m",2.5))):return False
+        if not (float(config.get("min_width_m",.15))<=width<=
+                float(config.get("max_width_m",2.0))):return False
+        if not (float(config.get("min_height_m",.08))<=height<=
+                float(config.get("max_height_m",2.0))):return False
+        if length/max(width,.01)>float(config.get("max_aspect_ratio",6.0)):
+            return False
+        evidence=dict(getattr(obj,"perception_evidence",{}) or {})
+        selected=bool(evidence.get("roadObjectSelectedEver",False))
+        multisensor=len(set(getattr(obj,"sources",[]) or []))>=2
+        quality=float(evidence.get("trackQuality",0.0))>=float(
+            config.get("min_track_quality",.75))
+        return selected or multisensor or quality
 
     def update(self, object_list, ego=None):
         if not self.enabled:return []
@@ -66,6 +93,24 @@ class V2XEventEngine(object):
                      "spc_type":participant_type,
                      "participant_count":len(vru),
                      "trigger_mode":"road_presence"}))
+                self._last_emitted[key]=now
+        hlw=self.config.get("hlw",{}) or {}
+        if hlw.get("enabled",True):
+            obstacles=[obj for obj in object_list.objects
+                       if self._credible_road_obstacle(obj,hlw)]
+            if obstacles:self._hlw_presence_hits+=1
+            else:self._hlw_presence_hits=0
+            required=max(1,int(hlw.get("required_updates",3)))
+            key=("HLW","road_obstacle_presence")
+            if (self._hlw_presence_hits>=required and
+                    self._cooldown_ready(key,now)):
+                events.append(self._envelope(
+                    "HLW",8,"道路存在障碍物",now,
+                    int(hlw.get("direction",1)),
+                    float(ego.get("speed_kmh",0.0)),
+                    {"event_type":int(hlw.get("event_type",37)),
+                     "obstacle_count":len(obstacles),
+                     "trigger_mode":"road_obstacle_presence"}))
                 self._last_emitted[key]=now
         avw=self.config.get("avw",{}) or {}
         if avw.get("enabled",True):

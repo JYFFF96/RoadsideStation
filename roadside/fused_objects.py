@@ -7,7 +7,8 @@ import time
 class FusedObject(object):
     def __init__(self, object_id, object_type="unknown_obstacle", x=0.0, y=0.0, z=0.0,
                  vx=0.0, vy=0.0, size=None, confidence=0.0, sources=None,
-                 camera=None, radar_speed=None, age=1, track_state="confirmed"):
+                 camera=None, radar_speed=None, age=1, track_state="confirmed",
+                 perception_evidence=None):
         self.object_id = str(object_id)
         self.object_type = str(object_type)
         self.x = float(x); self.y = float(y); self.z = float(z)
@@ -19,6 +20,7 @@ class FusedObject(object):
         self.radar_speed = None if radar_speed is None else float(radar_speed)
         self.age = max(1, int(age))
         self.track_state = str(track_state)
+        self.perception_evidence = dict(perception_evidence or {})
 
     def to_dict(self):
         out = {
@@ -39,6 +41,8 @@ class FusedObject(object):
             out["radarRadialVelocity"] = self.radar_speed
         if self.camera is not None:
             out["camera"] = dict(self.camera)
+        if self.perception_evidence:
+            out["perceptionEvidence"] = dict(self.perception_evidence)
         return out
 
 
@@ -121,6 +125,16 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
                 },
             }
         radar_velocity = item.get("radar_radial_velocity")
+        perception_evidence = {
+            "roadObjectSelectedCurrent": bool(
+                item.get("track_selected_enforced_current", False)),
+            "roadObjectSelectedEver": bool(
+                item.get("track_selected_enforced_ever", False)),
+            "roadObjectSelectedHits": int(
+                item.get("track_selected_enforced_hits", 0)),
+            "trackQuality": float(item.get("track_quality", 0.0)),
+            "trackSensors": str(item.get("track_sensors", "-")),
+        }
         objects.append(FusedObject(
             item.get("id", "unknown"), object_type=object_type,
             x=item.get("x", 0.0), y=item.get("y", 0.0), z=item.get("z", 0.0),
@@ -128,6 +142,7 @@ def build_fused_object_list(station_id, tracked_candidates, timestamp=None,
             confidence=confidence, sources=sources, camera=camera_meta,
             radar_speed=radar_velocity,
             age=item.get("track_hits", item.get("hits", 1)),
-            track_state=item.get("track_state", "confirmed")))
+            track_state=item.get("track_state", "confirmed"),
+            perception_evidence=perception_evidence))
     return FusedObjectList(station_id, objects, timestamp, frame_id,
                            coordinate_frame)
