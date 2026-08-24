@@ -8,6 +8,7 @@ from roadside.camera_ground_initiation import (
 from roadside.ground_truth_eval import GroundTruthEvaluator
 from roadside.fusion import SimpleFusion
 from roadside.tracking import NearestTracker
+from roadside.track_stale_cleanup import cleanup_stale_tracks
 
 
 class _Transform(object):
@@ -405,6 +406,67 @@ class CameraGroundInitiationTests(unittest.TestCase):
         self.assertEqual(1,value["conflict"])
         self.assertEqual(.5,value["identity_precision"])
         self.assertEqual(1,value["safe_recovery"])
+
+    def test_expired_camera_track_becomes_diagnostic_tombstone(self):
+        tracker=NearestTracker(max_distance=2.0,max_age=.5)
+        first=tracker.update([{
+            "x":16.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_ground_tracker_enforced":True}],timestamp=1.0)[0]
+        tracker.update([],timestamp=2.0)
+        self.assertNotIn(first["id"],tracker._tracks)
+        born=tracker.update([{
+            "x":17.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_ground_tracker_enforced":True}],timestamp=2.1)[0]
+        self.assertEqual("new",born["track_state"])
+        for mode in ("frozen","predicted"):
+            self.assertEqual(first["id"],born[
+                "track_camera_tombstone_%s_id"%mode])
+            self.assertAlmostEqual(1.0,born[
+                "track_camera_tombstone_%s_distance"%mode])
+            self.assertAlmostEqual(1.1,born[
+                "track_camera_tombstone_%s_gap"%mode])
+
+    def test_quality_stale_cleanup_also_keeps_camera_tombstone(self):
+        tracker=NearestTracker(max_age=10.0)
+        first=tracker.update([{
+            "x":16.0,"y":0.0,"z":.85,"sources":["camera"],
+            "camera_ground_tracker_enforced":True}],timestamp=1.0)[0]
+        tracker._tracks[first["id"]]["misses"]=1
+        cleanup_stale_tracks(tracker,[first],2.0,{
+            "track_stale_cleanup_enabled":True,
+            "track_stale_cleanup_min_misses":1,
+            "track_stale_cleanup_max_quality":1.1,
+            "track_stale_cleanup_sensor_memory":.1})
+        self.assertNotIn(first["id"],tracker._tracks)
+        self.assertIn(first["id"],tracker._camera_tombstones)
+
+    def test_camera_tombstone_shadow_truth_attributes_reappearance(self):
+        evaluator=GroundTruthEvaluator(None,lambda:_Center(),{
+            "radius":80.0,"match_distance":4.0,
+            "camera_ground_tombstone_shadow_gates":[2.0,3.5,5.0]})
+        truth=[{"actor_id":7,"x":16.0,"y":0.0,"object_type":"person"}]
+        evaluator.truth_objects=lambda:list(truth)
+        evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_1","x":16.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0}],frame_id=10)
+        truth[0]["x"]=17.0
+        report=evaluator.observe_camera_ground_enforcement([{
+            "id":"vehicle_2","x":17.0,"y":0.0,"track_state":"new",
+            "track_camera_ground_origin":True,"track_lidar_hits":0,
+            "track_camera_tombstone_frozen_id":"vehicle_1",
+            "track_camera_tombstone_frozen_distance":1.0,
+            "track_camera_tombstone_frozen_gap":2.0,
+            "track_camera_tombstone_predicted_id":"vehicle_1",
+            "track_camera_tombstone_predicted_distance":1.5,
+            "track_camera_tombstone_predicted_gap":2.0}],frame_id=11)
+        for name in ("frozen_2","frozen_3.5","frozen_5",
+                     "predicted_2","predicted_3.5","predicted_5"):
+            value=report["tombstone_gates"][name]
+            self.assertEqual(1,value["eligible"])
+            self.assertEqual(1,value["consistent"])
+            self.assertEqual(1,value["safe_recovery"])
+            self.assertEqual(1.0,value["identity_precision"])
+            self.assertAlmostEqual(2.0,value["gap"]["p50"])
 
 
 if __name__ == "__main__":unittest.main()

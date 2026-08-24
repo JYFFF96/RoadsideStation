@@ -429,6 +429,8 @@ fusion:
   track_stale_cleanup_min_misses: 2
   track_stale_cleanup_max_quality: 0.55
   track_stale_cleanup_sensor_memory: 1.5
+  # V0.6.12.8.2.2.71: diagnostic-only memory of expired camera tracks.
+  camera_tombstone_shadow_ttl: 5.0
 
   velocity_alpha: 0.25
   velocity_window: 5
@@ -492,6 +494,7 @@ evaluation:
   # V0.6.12.8.2.2.70: evaluator-only source-aware recovery comparison for
   # camera births outside the production 3.5 m Tracker association gate.
   camera_ground_reassociation_shadow_gates: [4.0, 5.0, 6.0, 8.0]
+  camera_ground_tombstone_shadow_gates: [2.0, 3.5, 5.0]
   include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]

@@ -764,3 +764,17 @@ recovery when that prior track is already claimed by another detection. Only
 an available, single-actor-consistent association is counted as safe recovery.
 The experiment does not change production assignment, the 3.5 m gate, Tracker
 IDs, camera admission, or ObjectList output.
+
+V0.6.12.8.2.2.71 profiles expired camera-track reappearance in Shadow mode.
+The V0.6.12.8.2.2.70 run rejected active-track gate widening: 4 m through 8 m
+produced zero safe recoveries and zero-percent identity precision. Nearly every
+candidate was already claimed by another detection or belonged to a different
+or ambiguous actor. To test whether fragmentation instead follows detection
+gaps and track deletion, an expired camera-origin track is now retained for
+five seconds as a diagnostic tombstone. New camera tracks compare both its
+frozen last position and velocity-predicted position at 2 m, 3.5 m, and 5 m.
+Each variant reports truth-consistent, conflicting, ambiguous, and unknown
+matches, safe recovery count, identity precision, distance, and last-seen gap.
+Both normal max-age deletion and the quality-based stale-cleanup path populate
+the tombstone memory. Tombstones never enter matching, never resurrect an ID,
+and do not change admission, Tracker output, or ObjectList.

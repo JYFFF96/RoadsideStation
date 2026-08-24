@@ -28,6 +28,10 @@ class GroundTruthEvaluator(object):
             float(x) for x in self.config.get(
                 "camera_ground_reassociation_shadow_gates", [4.0,5.0,6.0,8.0])
             if float(x)>0.0))
+        self.camera_ground_tombstone_shadow_gates = sorted(set(
+            float(x) for x in self.config.get(
+                "camera_ground_tombstone_shadow_gates", [2.0,3.5,5.0])
+            if float(x)>0.0))
         self.range_bins = self._parse_bins(self.config.get("range_bins", [30.0, 50.0, 80.0]))
         self.include_roles = set(self.config.get("include_roles", ["autopilot", "roadside_autopilot", "rsu_local_autopilot"]))
         self._far_admission_last_frame = None
@@ -78,6 +82,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_identity_gates()
         self._camera_ground_enforcement_totals["reassociation_gates"] = \
             self._empty_camera_reassociation_gates()
+        self._camera_ground_enforcement_totals["tombstone_gates"] = \
+            self._empty_camera_tombstone_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     @staticmethod
@@ -147,6 +153,13 @@ class GroundTruthEvaluator(object):
                                 "unknown":0,"safe_recovery":0,"distances":[]})
                     for gate in self.camera_ground_reassociation_shadow_gates)
 
+    def _empty_camera_tombstone_gates(self):
+        return dict(("%s_%g"%(mode,gate),{
+            "eligible":0,"consistent":0,"conflict":0,"ambiguous":0,
+            "unknown":0,"safe_recovery":0,"distances":[],"gaps":[]})
+                    for mode in ("frozen","predicted")
+                    for gate in self.camera_ground_tombstone_shadow_gates)
+
     def _reset_road_object_run_metrics(self):
         self._road_object_samples = {"classes": {}, "false": []}
         self._adaptive_temporal_samples = {"classes": {}, "false": []}
@@ -191,6 +204,8 @@ class GroundTruthEvaluator(object):
             self._empty_camera_identity_gates()
         self._camera_ground_enforcement_totals["reassociation_gates"] = \
             self._empty_camera_reassociation_gates()
+        self._camera_ground_enforcement_totals["tombstone_gates"] = \
+            self._empty_camera_tombstone_gates()
         self._camera_ground_enforcement_current = self._empty_camera_enforcement_current()
 
     def _sync_road_object_benchmark_session(self, truth):
@@ -632,6 +647,34 @@ class GroundTruthEvaluator(object):
                             else:bucket["ambiguous"]+=1
                         else:
                             bucket["conflict"]+=1
+                if str(detection.get("track_state",""))=="new":
+                    for mode in ("frozen","predicted"):
+                        tombstone_id=detection.get(
+                            "track_camera_tombstone_%s_id"%mode)
+                        tombstone_distance=detection.get(
+                            "track_camera_tombstone_%s_distance"%mode)
+                        tombstone_gap=detection.get(
+                            "track_camera_tombstone_%s_gap"%mode)
+                        if tombstone_id is None or tombstone_distance is None:
+                            continue
+                        previous_actors=totals["track_actors"].get(
+                            str(tombstone_id),{})
+                        for gate in self.camera_ground_tombstone_shadow_gates:
+                            if float(tombstone_distance)>gate:continue
+                            bucket=totals["tombstone_gates"][
+                                "%s_%g"%(mode,gate)]
+                            bucket["eligible"]+=1
+                            bucket["distances"].append(float(tombstone_distance))
+                            if tombstone_gap is not None:
+                                bucket["gaps"].append(float(tombstone_gap))
+                            if not previous_actors:
+                                bucket["unknown"]+=1
+                            elif actor_key in previous_actors:
+                                if len(previous_actors)==1:
+                                    bucket["consistent"]+=1
+                                    bucket["safe_recovery"]+=1
+                                else:bucket["ambiguous"]+=1
+                            else:bucket["conflict"]+=1
                 actor_tracks=totals["actor_tracks"].setdefault(actor_key,{})
                 actor_tracks[track_key]=1
                 track_actors=totals["track_actors"].setdefault(track_key,{})
@@ -727,6 +770,22 @@ class GroundTruthEvaluator(object):
                     float(bucket["consistent"])/known if known else None),
                 "distance":self._distribution(bucket["distances"])}
         item["reassociation_gates"]=reassociation_gates
+        tombstone_gates={}
+        for key,bucket in totals["tombstone_gates"].items():
+            known=(bucket["consistent"]+bucket["conflict"]+
+                   bucket["ambiguous"])
+            tombstone_gates[key]={
+                "eligible":bucket["eligible"],
+                "consistent":bucket["consistent"],
+                "conflict":bucket["conflict"],
+                "ambiguous":bucket["ambiguous"],
+                "unknown":bucket["unknown"],
+                "safe_recovery":bucket["safe_recovery"],
+                "identity_precision":(
+                    float(bucket["consistent"])/known if known else None),
+                "distance":self._distribution(bucket["distances"]),
+                "gap":self._distribution(bucket["gaps"])}
+        item["tombstone_gates"]=tombstone_gates
         item["association"]={
             "updates":len(totals["association_distances"]),
             "match_distance":self._distribution(totals["association_distances"]),

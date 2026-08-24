@@ -7,7 +7,7 @@ if PROJECT_ROOT not in sys.path:sys.path.insert(0,PROJECT_ROOT)
 from roadside.camera_runtime_config import apply_camera_runtime_overrides
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.70 camera reassociation shadow preflight")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.71 camera tombstone shadow preflight")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--camera-model",default=None);args=parser.parse_args()
     with open(args.config,"r") as stream:config=yaml.safe_load(stream)

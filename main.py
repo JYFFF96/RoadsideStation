@@ -516,7 +516,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.70 Camera Reassociation Gate Shadow starting...")
+ print("RoadsideStation V0.6.12.8.2.2.71 Camera Tombstone Reappearance Shadow starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -829,6 +829,10 @@ def main():
      distance=value.get("distance",{}) or {}
      print("        [CAMERA REASSOC SHADOW %sm] Eligible:%d Available:%d Claimed:%d SameActor:%d Conflict:%d Ambiguous:%d Unknown:%d SafeRecover:%d IdentityPrecision:%s Dist(avg/p90):%s/%sm | TrackerInput:UNCHANGED"%(
       gate,value.get("eligible",0),value.get("available",0),value.get("claimed",0),value.get("consistent",0),value.get("conflict",0),value.get("ambiguous",0),value.get("unknown",0),value.get("safe_recovery",0),_pct(value.get("identity_precision")),_num(distance.get("mean")),_num(distance.get("p90"))))
+    for name,value in sorted((camera_enforced.get("tombstone_gates",{}) or {}).items()):
+     distance=value.get("distance",{}) or {};gap=value.get("gap",{}) or {}
+     print("        [CAMERA TOMBSTONE SHADOW %s] Eligible:%d SameActor:%d Conflict:%d Ambiguous:%d Unknown:%d SafeRecover:%d IdentityPrecision:%s Dist(avg/p90):%s/%sm Gap(p50/p90):%s/%ss | TrackerInput:UNCHANGED"%(
+      name,value.get("eligible",0),value.get("consistent",0),value.get("conflict",0),value.get("ambiguous",0),value.get("unknown",0),value.get("safe_recovery",0),_pct(value.get("identity_precision")),_num(distance.get("mean")),_num(distance.get("p90")),_num(gap.get("p50")),_num(gap.get("p90"))))
     if camera_detector is not None:
      detector_report=camera_detector.report()
      print("      [CAMERA DETECTOR RUNTIME] Name:%s Runtime:%s Frames:%d Detections:%d AvgLatency:%.1fms MaxLatency:%.1fms Classes:%s"%(

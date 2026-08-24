@@ -47,6 +47,8 @@ def cleanup_stale_tracks(tracker, output_items, now, config=None):
 
     for tid in remove_ids:
         if tid in internal:
+            remember=getattr(tracker,"_remember_camera_tombstone",None)
+            if remember is not None:remember(tid,internal.get(tid),now)
             del internal[tid]
             stats["cleaned"] += 1
 

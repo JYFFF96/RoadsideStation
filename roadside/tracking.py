@@ -53,6 +53,8 @@ class NearestTracker(object):
         self.quality_low_min_hits_for_coast = 3
 
         self._tracks = {}
+        self._camera_tombstones = {}
+        self.camera_tombstone_shadow_ttl = 5.0
         self._next_id = 1
         self.last_stats = {"new": 0, "update": 0, "coast": 0,
                            "drop": 0, "suppress": 0,
@@ -70,6 +72,36 @@ class NearestTracker(object):
         self.quality_sensor_memory = max(.1, float(c.get("track_quality_sensor_memory", 1.5)))
         self.quality_coast_penalty = max(0.0, float(c.get("track_quality_coast_penalty", .10)))
         self.quality_low_min_hits_for_coast = max(1, int(c.get("track_quality_low_min_hits_for_coast", 3)))
+        self.camera_tombstone_shadow_ttl = max(.1, float(c.get(
+            "camera_tombstone_shadow_ttl", 5.0)))
+
+    def _remember_camera_tombstone(self, tid, track, now):
+        if not track or not track.get("camera_ground_origin",False):return
+        self._camera_tombstones[str(tid)]={
+            "x":float(track.get("x",0.0)),"y":float(track.get("y",0.0)),
+            "vx":float(track.get("vx",0.0)),"vy":float(track.get("vy",0.0)),
+            "last_seen":float(track.get("timestamp",now)),
+            "expired_at":float(now)}
+
+    def _prune_camera_tombstones(self, now):
+        stale=[tid for tid,item in self._camera_tombstones.items()
+               if now-float(item.get("expired_at",now))>
+               self.camera_tombstone_shadow_ttl]
+        for tid in stale:self._camera_tombstones.pop(tid,None)
+
+    def _nearest_camera_tombstones(self, det, now):
+        best={"frozen":None,"predicted":None}
+        for tid,item in self._camera_tombstones.items():
+            gap=max(0.0,now-float(item.get("last_seen",now)))
+            points={
+                "frozen":(float(item["x"]),float(item["y"])),
+                "predicted":(float(item["x"])+float(item["vx"])*gap,
+                             float(item["y"])+float(item["vy"])*gap)}
+            for mode,(px,py) in points.items():
+                distance=math.hypot(float(det["x"])-px,float(det["y"])-py)
+                if best[mode] is None or distance<best[mode][0]:
+                    best[mode]=(distance,tid,gap)
+        return best
 
     def _clamp_velocity(self, vx, vy):
         s = math.hypot(vx, vy)
@@ -295,6 +327,7 @@ class NearestTracker(object):
 
     def update(self, detections, timestamp=None):
         now = time.time() if timestamp is None else float(timestamp)
+        self._prune_camera_tombstones(now)
         unmatched = set(self._tracks)
         results = []
         pending = []
@@ -328,6 +361,9 @@ class NearestTracker(object):
                 "nearest_camera_id":nearest_camera_id,
                 "candidates": candidate_count,
                 "camera_candidates": camera_candidate_count}
+            tombstones=self._nearest_camera_tombstones(det,now)
+            for mode,value in tombstones.items():
+                association_meta[di]["tombstone_"+mode]=value
         pending.sort()
         assigned_det = {}
         assigned_distance = {}
@@ -452,6 +488,14 @@ class NearestTracker(object):
                 meta.get("nearest_camera_id")
             item["track_association_nearest_camera_origin_claimed"] = bool(
                 meta.get("nearest_camera_id") in assigned_track)
+            for mode in ("frozen","predicted"):
+                tombstone=meta.get("tombstone_"+mode)
+                item["track_camera_tombstone_%s_id"%mode] = (
+                    tombstone[1] if tombstone is not None else None)
+                item["track_camera_tombstone_%s_distance"%mode] = (
+                    tombstone[0] if tombstone is not None else None)
+                item["track_camera_tombstone_%s_gap"%mode] = (
+                    tombstone[2] if tombstone is not None else None)
             if old is None:
                 if meta.get("nearest") is None:
                     reason = "no_active_tracks"
@@ -486,6 +530,7 @@ class NearestTracker(object):
         stale = [tid for tid, t in self._tracks.items()
                  if now - t["timestamp"] > self.max_age]
         for tid in stale:
+            self._remember_camera_tombstone(tid,self._tracks.get(tid),now)
             del self._tracks[tid]
             stats["drop"] += 1
 
