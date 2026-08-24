@@ -565,3 +565,13 @@ profiles the absolute radial speed of every temporally confirmed cluster and
 reports p50, maximum and shadow counts at 0.10/0.20/0.40/0.60m/s. These
 threshold comparisons are diagnostic-only; the enforced 0.60m/s gate remains
 unchanged until a log demonstrates a safe lower boundary.
+
+V0.6.12.8.2.2.53 adds a dedicated path for sparse moving radar returns. The
+previous log showed moving pedestrians with non-zero radial velocity but only
+one radar return, while the existing initiator required a two-point spatial
+cluster. A single return at or above 0.20m/s may now initiate a candidate only
+after three distinct radar frames. It remains subject to the configured road
+ROI and LiDAR deduplication, and cannot share temporal confirmation with the
+existing multi-point cluster path. `[RADAR INIT]` separately reports component,
+single-candidate, single-confirmation and single-emission counts. Static
+single-point returns remain rejected before temporal confirmation.

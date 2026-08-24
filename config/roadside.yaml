@@ -348,6 +348,13 @@ fusion:
   radar_initiation_cluster_z_gate: 1.5
   radar_initiation_min_points: 2
   radar_initiation_required_frames: 2
+  # V0.6.12.8.2.2.53: CARLA moving pedestrians often produce one MR76-like
+  # radar return. Admit only moving single returns after a stricter 3-frame
+  # confirmation; the road ROI and LiDAR dedupe gates still apply.
+  radar_initiation_single_point_enabled: true
+  radar_initiation_single_point_min_abs_speed: 0.20
+  radar_initiation_single_point_required_frames: 3
+  radar_initiation_single_point_ttl: 1.0
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

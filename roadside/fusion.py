@@ -1107,14 +1107,21 @@ class SimpleFusion(object):
             "radar_initiation_enabled": bool(self.radar_initiator.enabled),
             "radar_initiation_shadow_mode": bool(self.radar_initiator.shadow_mode),
             "radar_initiation_range_points": int(radar_init_stats.get("range_points",0)),
+            "radar_initiation_components": int(radar_init_stats.get("components",0)),
             "radar_initiation_clusters": int(radar_init_stats.get("clusters",0)),
+            "radar_initiation_single_point_candidates": int(
+                radar_init_stats.get("single_point_candidates",0)),
             "radar_initiation_pending": int(radar_init_stats.get("pending",0)),
             "radar_initiation_confirmed": int(radar_init_stats.get("confirmed",0)),
+            "radar_initiation_single_point_confirmed": int(
+                radar_init_stats.get("single_point_confirmed",0)),
             "radar_initiation_moving": int(radar_init_stats.get("moving_confirmed",0)),
             "radar_initiation_static_rejected": int(radar_init_stats.get("static_rejected",0)),
             "radar_initiation_dedupe_rejected": int(radar_init_stats.get("dedupe_rejected",0)),
             "radar_initiation_roi_rejected": int(radar_init_stats.get("roi_rejected",0)),
             "radar_initiation_emitted": int(radar_init_stats.get("emitted",0)),
+            "radar_initiation_single_point_emitted": int(
+                radar_init_stats.get("single_point_emitted",0)),
             "radar_initiation_speed_p50": radar_init_stats.get("confirmed_abs_speed_p50"),
             "radar_initiation_speed_max": radar_init_stats.get("confirmed_abs_speed_max"),
             "radar_initiation_speed_shadow_counts": dict(

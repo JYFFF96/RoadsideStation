@@ -514,7 +514,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.52 Radar-Speed Profiling starting...")
+ print("RoadsideStation V0.6.12.8.2.2.53 Sparse Moving Radar Initiation starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -531,7 +531,12 @@ def main():
   "enabled" if fc.get("radar_initiation_enabled",False) else "disabled",radar_init_mode,
   float(fc.get("radar_initiation_min_range",2.0)),float(fc.get("radar_initiation_max_range",30.0)),
   int(fc.get("radar_initiation_min_points",2)),int(fc.get("radar_initiation_required_frames",2)),
-  float(fc.get("radar_initiation_min_abs_speed",.6)),float(fc.get("radar_initiation_dedupe_distance",3.0))))
+ float(fc.get("radar_initiation_min_abs_speed",.6)),float(fc.get("radar_initiation_dedupe_distance",3.0))))
+ print("Sparse Radar Return Initiation: %s | single point | |radial speed|>=%.2fm/s | frames>=%d ttl=%.1fs | road ROI + LiDAR dedupe"%(
+  "enabled" if fc.get("radar_initiation_single_point_enabled",False) else "disabled",
+  float(fc.get("radar_initiation_single_point_min_abs_speed",.2)),
+  int(fc.get("radar_initiation_single_point_required_frames",3)),
+  float(fc.get("radar_initiation_single_point_ttl",1.0))))
  print("Sparse Geometry Rescue: %s | range=%.0f..%.0fm stable_hits>=%d | mid(q>=%.2f streak<=%d) far(q>=%.2f streak<=%d) | radius mid/far=%.1f/%.1fm | points mid/far>=%d/%d | score_bonus=%.2f"%("enabled" if fc.get("sparse_geometry_rescue_enabled",False) else "disabled",float(fc.get("sparse_geometry_rescue_min_range",30.0)),float(fc.get("sparse_geometry_rescue_max_range",80.0)),int(fc.get("sparse_geometry_rescue_min_track_hits",3)),float(fc.get("sparse_geometry_rescue_mid_min_quality",0.55)),int(fc.get("sparse_geometry_rescue_mid_max_streak",2)),float(fc.get("sparse_geometry_rescue_far_min_quality",0.47)),int(fc.get("sparse_geometry_rescue_far_max_streak",3)),float(fc.get("sparse_geometry_rescue_mid_radius",2.2)),float(fc.get("sparse_geometry_rescue_far_radius",3.0)),int(fc.get("sparse_geometry_rescue_mid_min_points",3)),int(fc.get("sparse_geometry_rescue_far_min_points",2)),float(fc.get("sparse_geometry_rescue_score_bonus",0.08))))
  print("Far Geometry Builder: %s | range=%.0f..%.0fm cell=%.2fm neighbor=%d min_points=%d max=%d"%("enabled" if fc.get("far_geometry_builder_enabled",True) else "disabled",float(fc.get("far_geometry_builder_min_range",50.0)),float(fc.get("far_geometry_builder_max_range",80.0)),float(fc.get("far_geometry_builder_cell_size",1.0)),int(fc.get("far_geometry_builder_neighbor_cells",1)),int(fc.get("far_geometry_builder_min_points",2)),int(fc.get("far_geometry_builder_max_candidates",30))))
  print("Far Geometry Recovery: %s | bridge<=%.1fm z_gate<=%.1fm fragments<=%d max=%d"%("enabled" if fc.get("far_geometry_recovery_enabled",False) else "disabled",float(fc.get("far_geometry_recovery_bridge_distance",3.0)),float(fc.get("far_geometry_recovery_z_gate",1.0)),int(fc.get("far_geometry_recovery_max_fragments",3)),int(fc.get("far_geometry_recovery_max_candidates",8))))
@@ -660,13 +665,15 @@ def main():
      background_ready_announced=True
     print("  [BACKGROUND] Status:%s Remaining:%.1fs Cells:%d Rejected:%d"%(
      "READY" if s.get("background_ready",False) else "LEARNING",float(s.get("background_remaining",0.0)),int(s.get("background_cells",0)),int(s.get("background_rejected",0))))
-    print("  [RADAR INIT] Mode:%s RangePts:%d Clusters:%d Pending:%d Confirmed:%d Moving:%d StaticReject:%d DedupeReject:%d ROIReject:%d Emitted:%d"%(
+    print("  [RADAR INIT] Mode:%s RangePts:%d Components:%d Accepted:%d SingleCand:%d Pending:%d Confirmed:%d SingleConfirm:%d Moving:%d StaticReject:%d DedupeReject:%d ROIReject:%d Emitted:%d SingleEmit:%d"%(
      "SHADOW" if s.get("radar_initiation_shadow_mode",True) else "ENFORCE",
-     s.get("radar_initiation_range_points",0),s.get("radar_initiation_clusters",0),
+     s.get("radar_initiation_range_points",0),s.get("radar_initiation_components",0),
+     s.get("radar_initiation_clusters",0),s.get("radar_initiation_single_point_candidates",0),
      s.get("radar_initiation_pending",0),s.get("radar_initiation_confirmed",0),
+     s.get("radar_initiation_single_point_confirmed",0),
      s.get("radar_initiation_moving",0),s.get("radar_initiation_static_rejected",0),
      s.get("radar_initiation_dedupe_rejected",0),s.get("radar_initiation_roi_rejected",0),
-     s.get("radar_initiation_emitted",0)))
+     s.get("radar_initiation_emitted",0),s.get("radar_initiation_single_point_emitted",0)))
     radar_speed_p50=s.get("radar_initiation_speed_p50");radar_speed_max=s.get("radar_initiation_speed_max");radar_speed_counts=s.get("radar_initiation_speed_shadow_counts",{}) or {}
     radar_speed_shadow=" ".join(">=%sm/s:%d"%(key,radar_speed_counts[key]) for key in sorted(radar_speed_counts,key=float)) or "-"
     print("  [RADAR SPEED SHADOW] ConfirmedAbsSpeed P50:%s Max:%s | WouldMove %s | TrackerInput:UNCHANGED"%(

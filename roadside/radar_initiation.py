@@ -21,6 +21,14 @@ class NearRadarTrackInitiator(object):
         self.cluster_radius = float(c.get("radar_initiation_cluster_radius", 1.5))
         self.cluster_z_gate = float(c.get("radar_initiation_cluster_z_gate", 1.5))
         self.min_points = max(1, int(c.get("radar_initiation_min_points", 2)))
+        self.single_point_enabled = bool(c.get(
+            "radar_initiation_single_point_enabled", False))
+        self.single_point_min_abs_speed = float(c.get(
+            "radar_initiation_single_point_min_abs_speed", .20))
+        self.single_point_required_frames = max(2, int(c.get(
+            "radar_initiation_single_point_required_frames", 3)))
+        self.single_point_ttl = float(c.get(
+            "radar_initiation_single_point_ttl", 1.0))
         self.required_frames = max(1, int(c.get("radar_initiation_required_frames", 2)))
         self.match_gate = float(c.get("radar_initiation_match_gate", 2.5))
         self.ttl = float(c.get("radar_initiation_ttl", 0.6))
@@ -37,10 +45,13 @@ class NearRadarTrackInitiator(object):
         self.last_stats = self._empty_stats()
 
     def _empty_stats(self):
-        return {"world_points": 0, "range_points": 0, "clusters": 0,
+        return {"world_points": 0, "range_points": 0, "components": 0,
+                "clusters": 0, "single_point_candidates": 0,
                 "point_rejected": 0, "pending": 0, "confirmed": 0,
+                "single_point_confirmed": 0,
                 "moving_confirmed": 0, "static_rejected": 0,
                 "dedupe_rejected": 0, "roi_rejected": 0, "emitted": 0,
+                "single_point_emitted": 0,
                 "confirmed_abs_speed_p50": None,
                 "confirmed_abs_speed_max": None,
                 "speed_shadow_counts": {},
@@ -68,11 +79,10 @@ class NearRadarTrackInitiator(object):
                     remaining.remove(index)
                     group.append(index)
                     queue.append(index)
-            if len(group) >= self.min_points:
-                groups.append([points[index] for index in group])
+            groups.append([points[index] for index in group])
         return groups
 
-    def _candidate(self, points):
+    def _candidate(self, points, mode="cluster"):
         velocities = [float(p.get("velocity", 0.0)) for p in points]
         velocity = float(statistics.median(velocities))
         use = min(points, key=lambda p: abs(float(p.get("velocity", 0.0)) - velocity))
@@ -87,6 +97,7 @@ class NearRadarTrackInitiator(object):
                 "radar_los_x": float(use.get("los_x", 0.0)),
                 "radar_los_y": float(use.get("los_y", 0.0)),
                 "radar_hits": len(points), "radar_initiated": True,
+                "radar_initiation_mode": mode,
                 "sensor_range": float(use.get("sensor_range", math.hypot(x, y)))}
 
     def _near_existing(self, candidate, existing):
@@ -96,7 +107,8 @@ class NearRadarTrackInitiator(object):
 
     def _expire(self, now):
         self._pending = [item for item in self._pending
-                         if now - float(item.get("last_time", now)) <= self.ttl]
+                         if now - float(item.get("last_time", now)) <=
+                         float(item.get("ttl", self.ttl))]
 
     def update(self, world_points, existing, now, frame_id=None, validator=None):
         stats = self._empty_stats()
@@ -116,17 +128,30 @@ class NearRadarTrackInitiator(object):
         ranged = [p for p in (world_points or [])
                   if self.min_range <= float(p.get("sensor_range", 0.0)) <= self.max_range]
         stats["range_points"] = len(ranged)
-        groups = self._clusters(ranged)
+        components = self._clusters(ranged)
+        stats["components"] = len(components)
+        groups = []
+        for group in components:
+            if len(group) >= self.min_points:
+                groups.append((group, "cluster"))
+            elif (self.single_point_enabled and len(group) == 1 and
+                  abs(float(group[0].get("velocity", 0.0))) >=
+                  self.single_point_min_abs_speed):
+                groups.append((group, "single_moving"))
+                stats["single_point_candidates"] += 1
         stats["clusters"] = len(groups)
-        stats["point_rejected"] = max(0, len(ranged) - sum(len(g) for g in groups))
+        stats["point_rejected"] = max(
+            0, len(ranged) - sum(len(group) for group, unused_mode in groups))
         confirmed = []
         existing_pending = len(self._pending)
         used_pending = set()
-        for group in groups:
-            candidate = self._candidate(group)
+        for group, mode in groups:
+            candidate = self._candidate(group, mode=mode)
             best = None
             for index, old in enumerate(self._pending[:existing_pending]):
                 if index in used_pending:
+                    continue
+                if old.get("radar_initiation_mode", "cluster") != mode:
                     continue
                 distance = math.hypot(float(candidate["x"]) - float(old["x"]),
                                       float(candidate["y"]) - float(old["y"]))
@@ -134,7 +159,9 @@ class NearRadarTrackInitiator(object):
                     best = (distance, index, old)
             if best is None:
                 entry = dict(candidate)
-                entry.update({"hits": 1, "last_time": now, "last_frame": token})
+                entry.update({"hits": 1, "last_time": now, "last_frame": token,
+                              "ttl": (self.single_point_ttl
+                                      if mode == "single_moving" else self.ttl)})
                 self._pending.append(entry)
                 continue
             unused_distance, unused_index, old = best
@@ -143,13 +170,19 @@ class NearRadarTrackInitiator(object):
             old["hits"] = int(old.get("hits", 1)) + 1
             old["last_time"] = now
             old["last_frame"] = token
-            if int(old["hits"]) < self.required_frames:
+            required = (self.single_point_required_frames
+                        if mode == "single_moving" else self.required_frames)
+            if int(old["hits"]) < required:
                 continue
             item = dict(candidate)
             item["radar_initiation_frames"] = int(old["hits"])
+            item["radar_initiation_required_frames"] = required
             confirmed.append(item)
         stats["pending"] = len(self._pending)
         stats["confirmed"] = len(confirmed)
+        stats["single_point_confirmed"] = sum(
+            1 for item in confirmed
+            if item.get("radar_initiation_mode") == "single_moving")
         confirmed_speeds = [abs(float(item.get("radar_radial_velocity", 0.0)))
                             for item in confirmed]
         if confirmed_speeds:
@@ -163,7 +196,10 @@ class NearRadarTrackInitiator(object):
         self.last_shadow_candidates = [dict(item) for item in confirmed]
         emitted = []
         for item in confirmed:
-            if abs(float(item.get("radar_radial_velocity", 0.0))) < self.min_abs_speed:
+            min_speed = (self.single_point_min_abs_speed
+                         if item.get("radar_initiation_mode") == "single_moving"
+                         else self.min_abs_speed)
+            if abs(float(item.get("radar_radial_velocity", 0.0))) < min_speed:
                 stats["static_rejected"] += 1
                 continue
             stats["moving_confirmed"] += 1
@@ -182,5 +218,8 @@ class NearRadarTrackInitiator(object):
             if len(emitted) >= self.max_candidates:
                 break
         stats["emitted"] = len(emitted)
+        stats["single_point_emitted"] = sum(
+            1 for item in emitted
+            if item.get("radar_initiation_mode") == "single_moving")
         self.last_stats = stats
         return [] if self.shadow_mode else emitted

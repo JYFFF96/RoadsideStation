@@ -18,6 +18,10 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             "radar_initiation_cluster_z_gate": 1.5,
             "radar_initiation_min_points": 2,
             "radar_initiation_required_frames": 2,
+            "radar_initiation_single_point_enabled": True,
+            "radar_initiation_single_point_min_abs_speed": .2,
+            "radar_initiation_single_point_required_frames": 3,
+            "radar_initiation_single_point_ttl": 1.0,
             "radar_initiation_match_gate": 2.5,
             "radar_initiation_ttl": .6,
             "radar_initiation_min_abs_speed": .6,
@@ -33,6 +37,49 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             {"x": x + .4, "y": .2, "z": 1.1, "velocity": velocity + .2,
              "los_x": 1.0, "los_y": 0.0, "sensor_range": x + .4},
         ]
+
+    def _single(self, x=8.0, velocity=.33):
+        return [{"x": x, "y": 0.0, "z": 1.0, "velocity": velocity,
+                 "los_x": 1.0, "los_y": 0.0, "sensor_range": x}]
+
+    def test_moving_single_point_requires_three_distinct_frames(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        self.assertEqual([], initiator.update(
+            self._single(), [], 1.0, frame_id=10, validator=lambda unused: True))
+        self.assertEqual([], initiator.update(
+            self._single(8.1), [], 1.1, frame_id=11, validator=lambda unused: True))
+        emitted = initiator.update(
+            self._single(8.2), [], 1.2, frame_id=12, validator=lambda unused: True)
+        self.assertEqual(1, len(emitted))
+        self.assertEqual("single_moving", emitted[0]["radar_initiation_mode"])
+        self.assertEqual(1, emitted[0]["radar_hits"])
+        self.assertEqual(3, emitted[0]["radar_initiation_frames"])
+        self.assertEqual(1, initiator.last_stats["single_point_confirmed"])
+        self.assertEqual(1, initiator.last_stats["single_point_emitted"])
+
+    def test_static_single_point_is_rejected_before_confirmation(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        for frame in range(10, 14):
+            self.assertEqual([], initiator.update(
+                self._single(velocity=.0), [], frame / 10.0, frame_id=frame))
+        self.assertEqual(0, initiator.last_stats["single_point_candidates"])
+        self.assertEqual(0, initiator.last_stats["confirmed"])
+
+    def test_single_point_does_not_confirm_with_cluster_mode(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(), [], 1.0, frame_id=10)
+        self.assertEqual([], initiator.update(
+            self._points(8.1), [], 1.1, frame_id=11))
+        self.assertEqual(0, initiator.last_stats["confirmed"])
+
+    def test_confirmed_single_point_still_uses_lidar_dedupe(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(), [], 1.0, frame_id=10)
+        initiator.update(self._single(8.1), [], 1.1, frame_id=11)
+        emitted = initiator.update(
+            self._single(8.2), [{"x": 8.0, "y": 0.0}], 1.2, frame_id=12)
+        self.assertEqual([], emitted)
+        self.assertEqual(1, initiator.last_stats["dedupe_rejected"])
 
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())
