@@ -37,16 +37,44 @@ class NearRadarTrackInitiator(object):
         self.max_candidates = max(1, int(c.get("radar_initiation_max_candidates", 24)))
         self.speed_shadow_thresholds = [float(value) for value in c.get(
             "radar_initiation_speed_shadow_thresholds", [.10, .20, .40, .60])]
+        self.single_speed_shadow_thresholds = [float(value) for value in c.get(
+            "radar_initiation_single_speed_shadow_thresholds",
+            [.05, .10, .20, .40, .60])]
         self.default_extent = list(c.get(
             "radar_initiation_default_extent", [4.5, 1.8, 1.6]))
         self._pending = []
         self._last_frame = None
         self.last_shadow_candidates = []
+        self.cumulative_stats = self._empty_cumulative_stats()
         self.last_stats = self._empty_stats()
+
+    def _empty_cumulative_stats(self):
+        return {"frames": 0, "range_points": 0, "components": 0,
+                "single_point_components": 0,
+                "mixed_moving_components": 0,
+                "moving_points_in_multi_components": 0,
+                "single_point_candidates": 0,
+                "single_point_started": 0, "single_point_matched": 0,
+                "single_point_below_speed_near_pending": 0,
+                "single_point_expired": 0,
+                "single_point_confirmed": 0,
+                "single_point_emitted": 0,
+                "single_point_speed_counts": dict(
+                    ("%.2f" % threshold, 0)
+                    for threshold in self.single_speed_shadow_thresholds),
+                "single_point_expired_hits": {"1": 0, "2": 0, "3+": 0}}
 
     def _empty_stats(self):
         return {"world_points": 0, "range_points": 0, "components": 0,
                 "clusters": 0, "single_point_candidates": 0,
+                "single_point_components": 0,
+                "mixed_moving_components": 0,
+                "moving_points_in_multi_components": 0,
+                "single_point_started": 0, "single_point_matched": 0,
+                "single_point_below_speed_near_pending": 0,
+                "single_point_expired": 0,
+                "single_point_expired_hits": {"1": 0, "2": 0, "3+": 0},
+                "single_point_speed_counts": {},
                 "point_rejected": 0, "pending": 0, "confirmed": 0,
                 "single_point_confirmed": 0,
                 "moving_confirmed": 0, "static_rejected": 0,
@@ -56,6 +84,33 @@ class NearRadarTrackInitiator(object):
                 "confirmed_abs_speed_max": None,
                 "speed_shadow_counts": {},
                 "shadow_mode": self.shadow_mode, "new_frame": False}
+
+    def _attach_cumulative(self, stats):
+        stats["cumulative"] = dict(self.cumulative_stats)
+        stats["cumulative"]["single_point_speed_counts"] = dict(
+            self.cumulative_stats["single_point_speed_counts"])
+        stats["cumulative"]["single_point_expired_hits"] = dict(
+            self.cumulative_stats["single_point_expired_hits"])
+
+    def _accumulate(self, stats):
+        scalar_keys = ("range_points", "components", "single_point_components",
+                       "mixed_moving_components",
+                       "moving_points_in_multi_components",
+                       "single_point_candidates", "single_point_started",
+                       "single_point_matched",
+                       "single_point_below_speed_near_pending",
+                       "single_point_expired", "single_point_confirmed",
+                       "single_point_emitted")
+        self.cumulative_stats["frames"] += 1
+        for key in scalar_keys:
+            self.cumulative_stats[key] += int(stats.get(key, 0))
+        for key, value in stats.get("single_point_speed_counts", {}).items():
+            self.cumulative_stats["single_point_speed_counts"][key] = (
+                self.cumulative_stats["single_point_speed_counts"].get(key, 0) +
+                int(value))
+        for key, value in stats.get("single_point_expired_hits", {}).items():
+            self.cumulative_stats["single_point_expired_hits"][key] += int(value)
+        self._attach_cumulative(stats)
 
     def _clusters(self, points):
         remaining = set(range(len(points)))
@@ -106,39 +161,75 @@ class NearRadarTrackInitiator(object):
                    self.dedupe_distance for item in (existing or []))
 
     def _expire(self, now):
-        self._pending = [item for item in self._pending
-                         if now - float(item.get("last_time", now)) <=
-                         float(item.get("ttl", self.ttl))]
+        kept = []
+        expired = []
+        for item in self._pending:
+            if now - float(item.get("last_time", now)) <= float(
+                    item.get("ttl", self.ttl)):
+                kept.append(item)
+            else:
+                expired.append(item)
+        self._pending = kept
+        return expired
 
     def update(self, world_points, existing, now, frame_id=None, validator=None):
         stats = self._empty_stats()
         stats["world_points"] = len(world_points or [])
         if not self.enabled:
             self.last_shadow_candidates = []
+            self._attach_cumulative(stats)
             self.last_stats = stats
             return []
         token = frame_id if frame_id is not None else now
         if token == self._last_frame:
             stats["pending"] = len(self._pending)
+            self._attach_cumulative(stats)
             self.last_stats = stats
             return []
         self._last_frame = token
         stats["new_frame"] = True
-        self._expire(now)
+        expired = self._expire(now)
+        expired_single = [item for item in expired
+                          if item.get("radar_initiation_mode") == "single_moving"]
+        stats["single_point_expired"] = len(expired_single)
+        for item in expired_single:
+            hits = int(item.get("hits", 1))
+            key = "3+" if hits >= 3 else str(hits)
+            stats["single_point_expired_hits"][key] += 1
         ranged = [p for p in (world_points or [])
                   if self.min_range <= float(p.get("sensor_range", 0.0)) <= self.max_range]
         stats["range_points"] = len(ranged)
         components = self._clusters(ranged)
         stats["components"] = len(components)
         groups = []
+        singleton_speeds = []
         for group in components:
             if len(group) >= self.min_points:
+                moving_points = sum(
+                    1 for point in group
+                    if abs(float(point.get("velocity", 0.0))) >=
+                    self.single_point_min_abs_speed)
+                if moving_points:
+                    stats["mixed_moving_components"] += 1
+                    stats["moving_points_in_multi_components"] += moving_points
                 groups.append((group, "cluster"))
-            elif (self.single_point_enabled and len(group) == 1 and
-                  abs(float(group[0].get("velocity", 0.0))) >=
-                  self.single_point_min_abs_speed):
-                groups.append((group, "single_moving"))
-                stats["single_point_candidates"] += 1
+            elif len(group) == 1:
+                stats["single_point_components"] += 1
+                speed = abs(float(group[0].get("velocity", 0.0)))
+                singleton_speeds.append(speed)
+                if self.single_point_enabled and speed >= self.single_point_min_abs_speed:
+                    groups.append((group, "single_moving"))
+                    stats["single_point_candidates"] += 1
+                elif any(
+                        old.get("radar_initiation_mode") == "single_moving" and
+                        math.hypot(float(group[0]["x"]) - float(old["x"]),
+                                   float(group[0]["y"]) - float(old["y"])) <=
+                        self.match_gate for old in self._pending):
+                    stats["single_point_below_speed_near_pending"] += 1
+        stats["single_point_speed_counts"] = dict(
+            ("%.2f" % threshold,
+             sum(1 for speed in singleton_speeds if speed >= threshold))
+            for threshold in self.single_speed_shadow_thresholds)
         stats["clusters"] = len(groups)
         stats["point_rejected"] = max(
             0, len(ranged) - sum(len(group) for group, unused_mode in groups))
@@ -163,9 +254,13 @@ class NearRadarTrackInitiator(object):
                               "ttl": (self.single_point_ttl
                                       if mode == "single_moving" else self.ttl)})
                 self._pending.append(entry)
+                if mode == "single_moving":
+                    stats["single_point_started"] += 1
                 continue
             unused_distance, unused_index, old = best
             used_pending.add(unused_index)
+            if mode == "single_moving":
+                stats["single_point_matched"] += 1
             old.update(candidate)
             old["hits"] = int(old.get("hits", 1)) + 1
             old["last_time"] = now
@@ -221,5 +316,6 @@ class NearRadarTrackInitiator(object):
         stats["single_point_emitted"] = sum(
             1 for item in emitted
             if item.get("radar_initiation_mode") == "single_moving")
+        self._accumulate(stats)
         self.last_stats = stats
         return [] if self.shadow_mode else emitted

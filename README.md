@@ -575,3 +575,15 @@ ROI and LiDAR deduplication, and cannot share temporal confirmation with the
 existing multi-point cluster path. `[RADAR INIT]` separately reports component,
 single-candidate, single-confirmation and single-emission counts. Static
 single-point returns remain rejected before temporal confirmation.
+
+V0.6.12.8.2.2.54 adds full-frame cumulative lifecycle profiling for sparse
+radar returns. The one-second status sample in V0.6.12.8.2.2.53 observed only
+one moving singleton and could not distinguish a genuinely rare return from a
+short-lived event between log samples. The new cumulative line counts every
+radar frame, singleton component, speed-threshold crossing, pending start,
+temporal match, below-threshold return near an active pending candidate,
+expiration grouped by hit count, confirmation and emission. It also counts
+moving points buried inside multi-point components, where a static median
+could otherwise conceal the return. The profiling remains
+sensor-only and diagnostic-only; the enforced three-frame, 0.20m/s single-
+return policy and the public fused target list are unchanged.

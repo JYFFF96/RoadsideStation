@@ -1122,6 +1122,8 @@ class SimpleFusion(object):
             "radar_initiation_emitted": int(radar_init_stats.get("emitted",0)),
             "radar_initiation_single_point_emitted": int(
                 radar_init_stats.get("single_point_emitted",0)),
+            "radar_initiation_cumulative": dict(
+                radar_init_stats.get("cumulative",{}) or {}),
             "radar_initiation_speed_p50": radar_init_stats.get("confirmed_abs_speed_p50"),
             "radar_initiation_speed_max": radar_init_stats.get("confirmed_abs_speed_max"),
             "radar_initiation_speed_shadow_counts": dict(

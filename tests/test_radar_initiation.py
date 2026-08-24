@@ -81,6 +81,54 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         self.assertEqual([], emitted)
         self.assertEqual(1, initiator.last_stats["dedupe_rejected"])
 
+    def test_single_point_lifecycle_is_cumulative_across_unlogged_frames(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(), [], 1.0, frame_id=10)
+        initiator.update(self._single(8.1), [], 1.1, frame_id=11)
+        initiator.update(self._single(8.2), [], 1.2, frame_id=12)
+        cumulative = initiator.last_stats["cumulative"]
+        self.assertEqual(3, cumulative["frames"])
+        self.assertEqual(3, cumulative["single_point_components"])
+        self.assertEqual(3, cumulative["single_point_candidates"])
+        self.assertEqual(1, cumulative["single_point_started"])
+        self.assertEqual(2, cumulative["single_point_matched"])
+        self.assertEqual(1, cumulative["single_point_confirmed"])
+        self.assertEqual(1, cumulative["single_point_emitted"])
+        self.assertEqual(3, cumulative["single_point_speed_counts"]["0.20"])
+
+    def test_lifecycle_profiles_below_speed_bridge_and_expired_hits(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(), [], 1.0, frame_id=10)
+        initiator.update(self._single(8.1, velocity=.0), [], 1.1, frame_id=11)
+        self.assertEqual(
+            1, initiator.last_stats["single_point_below_speed_near_pending"])
+        initiator.update([], [], 2.2, frame_id=12)
+        cumulative = initiator.last_stats["cumulative"]
+        self.assertEqual(1, cumulative["single_point_expired"])
+        self.assertEqual({"1": 1, "2": 0, "3+": 0},
+                         cumulative["single_point_expired_hits"])
+        self.assertEqual(1, cumulative["single_point_speed_counts"]["0.05"])
+
+    def test_repeated_frame_does_not_change_cumulative_lifecycle(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        initiator.update(self._single(), [], 1.0, frame_id=10)
+        before = dict(initiator.last_stats["cumulative"])
+        initiator.update(self._single(), [], 1.1, frame_id=10)
+        self.assertEqual(before["frames"], initiator.last_stats["cumulative"]["frames"])
+        self.assertEqual(before["single_point_candidates"],
+                         initiator.last_stats["cumulative"]["single_point_candidates"])
+
+    def test_lifecycle_profiles_moving_point_buried_in_multi_component(self):
+        initiator = NearRadarTrackInitiator(self._config())
+        points = self._points(velocity=.0)
+        points[0]["velocity"] = .33
+        points[1]["velocity"] = .0
+        initiator.update(points, [], 1.0, frame_id=10)
+        cumulative = initiator.last_stats["cumulative"]
+        self.assertEqual(1, cumulative["mixed_moving_components"])
+        self.assertEqual(1, cumulative["moving_points_in_multi_components"])
+        self.assertEqual(0, cumulative["single_point_candidates"])
+
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())
         self.assertEqual([], initiator.update(
