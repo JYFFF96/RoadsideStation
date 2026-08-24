@@ -46,6 +46,11 @@ class GroundTruthEvaluator(object):
                                         "unexpected_exit":0,"teleport":0}
         self._radar_seed_bridge_last_frame = None
         self._radar_seed_bridge_totals = {}
+        self._radar_camera_support_last_frame = None
+        self._radar_camera_support_totals = {
+            "candidates":0,"visible":0,"supported":0,
+            "truth":0,"fp":0,"supported_truth":0,"supported_fp":0,
+            "truth_classes":{},"camera_classes":{},"sources":{}}
 
     @staticmethod
     def _empty_road_object_cap_totals():
@@ -105,6 +110,11 @@ class GroundTruthEvaluator(object):
                                         "unexpected_exit":0,"teleport":0}
         self._radar_seed_bridge_last_frame = None
         self._radar_seed_bridge_totals = {}
+        self._radar_camera_support_last_frame = None
+        self._radar_camera_support_totals = {
+            "candidates":0,"visible":0,"supported":0,
+            "truth":0,"fp":0,"supported_truth":0,"supported_fp":0,
+            "truth_classes":{},"camera_classes":{},"sources":{}}
 
     def _sync_road_object_benchmark_session(self, truth):
         """Start a clean cumulative run when a tagged benchmark batch appears."""
@@ -285,6 +295,50 @@ class GroundTruthEvaluator(object):
                                  if item["candidates"] else None)
             result[rule] = item
         return result
+
+    def observe_radar_camera_support(self, candidates, frame_id=None):
+        """Truth-attribute camera support without exposing truth to runtime."""
+        if frame_id is not None and frame_id == self._radar_camera_support_last_frame:
+            return self.report_radar_camera_support()
+        self._radar_camera_support_last_frame = frame_id
+        detected=self._detected_with_range(candidates or [])
+        if not detected:
+            return self.report_radar_camera_support()
+        truth=self.truth_objects();pairs=self._match(truth,detected)
+        matched_detected=set(pair[1] for pair in pairs)
+        totals=self._radar_camera_support_totals
+        totals["candidates"]+=len(detected)
+        totals["visible"]+=sum(1 for item in detected
+                               if item.get("radar_camera_visible",False))
+        totals["supported"]+=sum(1 for item in detected
+                                 if item.get("radar_camera_supported",False))
+        totals["truth"]+=len(pairs);totals["fp"]+=len(detected)-len(pairs)
+        for truth_index,detected_index,unused_distance in pairs:
+            name=str(truth[truth_index].get("object_type","unknown_obstacle"))
+            totals["truth_classes"][name]=totals["truth_classes"].get(name,0)+1
+        for index,item in enumerate(detected):
+            if not item.get("radar_camera_supported",False):
+                continue
+            if index in matched_detected:totals["supported_truth"]+=1
+            else:totals["supported_fp"]+=1
+            name=str(item.get("radar_camera_class","unknown"))
+            totals["camera_classes"][name]=totals["camera_classes"].get(name,0)+1
+            source=str(item.get("radar_camera_source","none"))
+            totals["sources"][source]=totals["sources"].get(source,0)+1
+        return self.report_radar_camera_support()
+
+    def report_radar_camera_support(self):
+        item=dict(self._radar_camera_support_totals)
+        for key in ("truth_classes","camera_classes","sources"):
+            item[key]=dict(self._radar_camera_support_totals[key])
+        item["candidate_precision"]=(float(item["truth"])/item["candidates"]
+                                     if item["candidates"] else None)
+        item["support_rate"]=(float(item["supported"])/item["candidates"]
+                              if item["candidates"] else None)
+        item["supported_precision"]=(
+            float(item["supported_truth"])/item["supported"]
+            if item["supported"] else None)
+        return item
 
     def analyze_selected_enforcement_attribution(self, roi, scored, dynamic, tracks):
         """Measure selected-output contribution without feeding truth to runtime.

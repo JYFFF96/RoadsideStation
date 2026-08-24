@@ -42,6 +42,8 @@ class NearRadarTrackInitiator(object):
         self.seed_to_component_match_gates = sorted(set(
             float(value) for value in c.get(
                 "radar_initiation_seed_to_component_match_gates", [2.5, 4.0])))
+        self.camera_support_shadow_enabled = bool(c.get(
+            "radar_initiation_camera_support_shadow_enabled", False))
         self.required_frames = max(1, int(c.get("radar_initiation_required_frames", 2)))
         self.match_gate = float(c.get("radar_initiation_match_gate", 2.5))
         self.ttl = float(c.get("radar_initiation_ttl", 0.6))
@@ -65,8 +67,12 @@ class NearRadarTrackInitiator(object):
         self._last_frame = None
         self.last_shadow_candidates = []
         self.last_seed_bridge_shadow_candidates = {}
+        self.last_camera_support_shadow_candidates = []
         self.seed_bridge_stats = self._empty_seed_bridge_stats()
         self.seed_to_component_stats = self._empty_seed_to_component_stats()
+        self.camera_support_stats = {
+            "raw": 0, "dedupe_rejected": 0, "roi_rejected": 0,
+            "eligible": 0}
         self.cumulative_stats = self._empty_cumulative_stats()
         self.last_stats = self._empty_stats()
 
@@ -159,6 +165,32 @@ class NearRadarTrackInitiator(object):
         stats["seed_to_component_shadow"] = dict(
             (key, dict(value))
             for key, value in self.seed_to_component_stats.items())
+        stats["camera_support_shadow"] = dict(self.camera_support_stats)
+
+    def _update_camera_support_shadow(self, singleton_groups, existing,
+                                      validator):
+        self.last_camera_support_shadow_candidates = []
+        if not self.camera_support_shadow_enabled:
+            return
+        for group in singleton_groups:
+            item = self._candidate(group, mode="single_camera_support_shadow")
+            speed = abs(float(item.get("radar_radial_velocity", 0.0)))
+            if speed < self.single_point_min_abs_speed:
+                continue
+            self.camera_support_stats["raw"] += 1
+            if self._near_existing(item, existing):
+                self.camera_support_stats["dedupe_rejected"] += 1
+                continue
+            if validator is not None:
+                try:
+                    valid = bool(validator(item))
+                except Exception:
+                    valid = False
+                if not valid:
+                    self.camera_support_stats["roi_rejected"] += 1
+                    continue
+            self.camera_support_stats["eligible"] += 1
+            self.last_camera_support_shadow_candidates.append(item)
 
     def _accumulate(self, stats):
         scalar_keys = ("range_points", "components", "single_point_components",
@@ -499,6 +531,7 @@ class NearRadarTrackInitiator(object):
             self.last_seed_bridge_shadow_candidates = dict(
                 (str(frames), [])
                 for frames in self.seed_bridge_required_frames)
+            self.last_camera_support_shadow_candidates = []
             stats["pending"] = len(self._pending)
             self._attach_cumulative(stats)
             self.last_stats = stats
@@ -555,6 +588,8 @@ class NearRadarTrackInitiator(object):
             singleton_groups,
             [group for group in components if len(group) >= self.min_points],
             existing, now, token, validator)
+        self._update_camera_support_shadow(
+            singleton_groups, existing, validator)
         stats["clusters"] = len(groups)
         stats["point_rejected"] = max(
             0, len(ranged) - sum(len(group) for group, unused_mode in groups))

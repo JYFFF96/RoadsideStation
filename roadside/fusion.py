@@ -125,6 +125,7 @@ class SimpleFusion(object):
         self.last_selected_delayed_risk_shadow_candidates = []
         self.last_radar_initiation_candidates = []
         self.last_radar_seed_bridge_shadow_candidates = {}
+        self.last_radar_camera_support_shadow_candidates = []
 
     def set_world_transform(self, t):
         if t is None:
@@ -981,6 +982,9 @@ class SimpleFusion(object):
             (key, [dict(item) for item in value])
             for key, value in
             self.radar_initiator.last_seed_bridge_shadow_candidates.items())
+        self.last_radar_camera_support_shadow_candidates = [
+            dict(item) for item in
+            self.radar_initiator.last_camera_support_shadow_candidates]
         if radar_initiated:
             dyn = list(dyn) + list(radar_initiated)
 
@@ -1133,6 +1137,8 @@ class SimpleFusion(object):
                 radar_init_stats.get("seed_bridge_shadow",{}) or {}),
             "radar_seed_to_component_shadow": dict(
                 radar_init_stats.get("seed_to_component_shadow",{}) or {}),
+            "radar_camera_support_shadow": dict(
+                radar_init_stats.get("camera_support_shadow",{}) or {}),
             "radar_initiation_speed_p50": radar_init_stats.get("confirmed_abs_speed_p50"),
             "radar_initiation_speed_max": radar_init_stats.get("confirmed_abs_speed_max"),
             "radar_initiation_speed_shadow_counts": dict(

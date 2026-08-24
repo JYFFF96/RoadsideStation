@@ -33,6 +33,7 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
             "radar_initiation_seed_bridge_match_gates": [2.5, 4.0, 6.0],
             "radar_initiation_seed_to_component_shadow_enabled": True,
             "radar_initiation_seed_to_component_match_gates": [2.5, 4.0],
+            "radar_initiation_camera_support_shadow_enabled": True,
             "radar_initiation_match_gate": 2.5,
             "radar_initiation_ttl": .6,
             "radar_initiation_min_abs_speed": .6,
@@ -264,6 +265,28 @@ class NearRadarTrackInitiatorTests(unittest.TestCase):
         stats = initiator.last_stats["seed_to_component_shadow"]
         self.assertEqual(1, stats["2.5"]["seeds"])
         self.assertEqual(1, stats["4.0"]["seeds"])
+
+    def test_camera_support_shadow_exposes_only_roi_valid_non_lidar_singletons(self):
+        eligible = NearRadarTrackInitiator(self._config())
+        eligible.update(self._single(), [], 1.0, frame_id=10,
+                        validator=lambda unused: True)
+        self.assertEqual(1, len(eligible.last_camera_support_shadow_candidates))
+        stats=eligible.last_stats["camera_support_shadow"]
+        self.assertEqual(1, stats["raw"]);self.assertEqual(1, stats["eligible"])
+
+        duplicate = NearRadarTrackInitiator(self._config())
+        duplicate.update(self._single(), [{"x":8.0,"y":0.0}], 1.0,
+                         frame_id=10, validator=lambda unused: True)
+        self.assertEqual([], duplicate.last_camera_support_shadow_candidates)
+        self.assertEqual(1, duplicate.last_stats[
+            "camera_support_shadow"]["dedupe_rejected"])
+
+        rejected = NearRadarTrackInitiator(self._config())
+        rejected.update(self._single(), [], 1.0, frame_id=10,
+                        validator=lambda unused: False)
+        self.assertEqual([], rejected.last_camera_support_shadow_candidates)
+        self.assertEqual(1, rejected.last_stats[
+            "camera_support_shadow"]["roi_rejected"])
 
     def test_moving_cluster_emits_after_two_distinct_frames(self):
         initiator = NearRadarTrackInitiator(self._config())

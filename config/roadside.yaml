@@ -368,6 +368,9 @@ fusion:
   # multi-return radar component on the next frame. Diagnostic-only.
   radar_initiation_seed_to_component_shadow_enabled: true
   radar_initiation_seed_to_component_match_gates: [2.5, 4.0]
+  # V0.6.12.8.2.2.58: profile whether either camera can confirm a moving
+  # radar singleton that is not already covered by LiDAR and passes road ROI.
+  radar_initiation_camera_support_shadow_enabled: true
   radar_initiation_match_gate: 2.5
   radar_initiation_ttl: 0.6
   radar_initiation_min_abs_speed: 0.6

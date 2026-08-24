@@ -617,3 +617,13 @@ multi-return radar component within 2.5m or 4.0m. It reports matches, moving
 matches, average component size, expiration, LiDAR deduplication, ROI rejection,
 would-emit count and CARLA truth precision. The experiment remains sensor-only
 and cannot change Tracker or ObjectList output.
+
+V0.6.12.8.2.2.58 pivots from radar-only spatial widening to two-camera support
+profiling. The V0.6.12.8.2.2.57 run produced five moving singleton seeds but
+only one singleton-to-component transition; that two-point static component
+was already represented by LiDAR. Each moving singleton that is not LiDAR-
+deduplicated and passes the road ROI is now projected into both cameras and
+associated with generic camera objects. Cumulative visibility, support rate,
+supported truth/false positives, precision, camera classes and source are
+reported. CARLA camera truth remains an evaluation proxy, the identical path
+accepts real detector boxes, and no Shadow result enters Tracker or ObjectList.
