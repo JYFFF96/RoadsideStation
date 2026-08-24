@@ -18,9 +18,10 @@ class V2XEventEngine(object):
     def __init__(self, station_id, config=None):
         self.station_id=str(station_id);self.config=config or {}
         self.enabled=bool(self.config.get("enabled",False))
-        self._stationary_since={};self._last_emitted={};self._event_count=0
+        self._last_emitted={};self._event_count=0
         self._vru_presence_hits=0
         self._hlw_presence_hits=0
+        self._avw_presence_since=None
 
     def _envelope(self, category, event_sort, description, timestamp,
                   direction=-1, speed=None, extra=None):
@@ -63,16 +64,33 @@ class V2XEventEngine(object):
             config.get("min_track_quality",.75))
         return selected or multisensor or quality
 
+    def _credible_vru(self, obj, config):
+        object_type=str(obj.object_type).lower()
+        if (object_type not in self.PEDESTRIAN_TYPES and
+                object_type not in self.CYCLIST_TYPES):return False
+        if (config.get("require_confirmed",True) and
+                str(getattr(obj,"track_state","confirmed")).lower()!=
+                "confirmed"):return False
+        # Detector class alone is insufficient: the .76 obstacle-only run
+        # repeatedly labelled a low, thin LiDAR cluster as a person. Keep
+        # legacy ObjectList inputs compatible, but gate FusedObject geometry.
+        size=list(getattr(obj,"size",[]) or [])
+        if len(size)>=3 and any(float(value)>0.0 for value in size[:3]):
+            length,width,height=[float(value) for value in size[:3]]
+            if not (float(config.get("min_height_m",.45))<=height<=
+                    float(config.get("max_height_m",2.60))):return False
+            if length>float(config.get("max_length_m",1.50)):return False
+            if width>float(config.get("max_width_m",1.20)):return False
+        return True
+
     def update(self, object_list, ego=None):
         if not self.enabled:return []
-        ego=ego or {};now=float(object_list.timestamp);events=[];active=set()
+        ego=ego or {};now=float(object_list.timestamp);events=[]
         vrucw=self.config.get("vrucw",{}) or {}
         if vrucw.get("enabled",True):
             vru=[]
             for obj in object_list.objects:
-                object_type=str(obj.object_type).lower()
-                if (object_type in self.PEDESTRIAN_TYPES or
-                        object_type in self.CYCLIST_TYPES):vru.append(obj)
+                if self._credible_vru(obj,vrucw):vru.append(obj)
             if vru:self._vru_presence_hits+=1
             else:self._vru_presence_hits=0
             required=max(1,int(vrucw.get("required_updates",2)))
@@ -117,22 +135,27 @@ class V2XEventEngine(object):
             max_speed=float(avw.get("max_stationary_speed_mps",.5))
             dwell=float(avw.get("dwell_seconds",5.0))
             direction=int(avw.get("direction",1))
+            stopped=[]
             for obj in object_list.objects:
                 if str(obj.object_type).lower() not in self.VEHICLE_TYPES:continue
-                object_id=str(obj.object_id);active.add(object_id)
-                speed=math.hypot(float(obj.vx),float(obj.vy))
-                if speed>max_speed:
-                    self._stationary_since.pop(object_id,None);continue
-                since=self._stationary_since.setdefault(object_id,now)
-                key=("AVW",object_id)
-                if now-since>=dwell and self._cooldown_ready(key,now):
-                    events.append(self._envelope(
-                        "AVW",6,"请注意前方异常车辆",now,direction,
-                        float(ego.get("speed_kmh",0.0)),
-                        {"object_id":object_id,"stationary_seconds":round(now-since,2)}))
-                    self._last_emitted[key]=now
-            for object_id in list(self._stationary_since):
-                if object_id not in active:self._stationary_since.pop(object_id,None)
+                if (str(getattr(obj,"track_state","confirmed")).lower()==
+                        "confirmed" and math.hypot(float(obj.vx),float(obj.vy))<=
+                        max_speed):stopped.append(obj)
+            if stopped:
+                if self._avw_presence_since is None:self._avw_presence_since=now
+            else:self._avw_presence_since=None
+            key=("AVW","stopped_vehicle_presence")
+            if (self._avw_presence_since is not None and
+                    now-self._avw_presence_since>=dwell and
+                    self._cooldown_ready(key,now)):
+                events.append(self._envelope(
+                    "AVW",6,"请注意前方异常车辆",now,direction,
+                    float(ego.get("speed_kmh",0.0)),
+                    {"object_id":str(stopped[0].object_id),
+                     "vehicle_count":len(stopped),
+                     "stationary_seconds":round(now-self._avw_presence_since,2),
+                     "trigger_mode":"stopped_vehicle_presence"}))
+                self._last_emitted[key]=now
         slw=self.config.get("slw",{}) or {}
         if slw.get("enabled",True) and ego.get("speed_kmh") is not None:
             speed=float(ego["speed_kmh"]);limit=int(slw.get("speed_limit_kmh",40))

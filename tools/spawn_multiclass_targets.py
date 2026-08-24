@@ -156,11 +156,42 @@ def spawn_obstacles(world, world_map, center, count, rng):
     return actors
 
 
+def spawn_stopped_vehicles(world, world_map, center, count, rng):
+    blueprints=[]
+    for bp in world.get_blueprint_library().filter("vehicle.*"):
+        if bp.has_attribute("number_of_wheels") and int(bp.get_attribute(
+                "number_of_wheels").as_int())==4:blueprints.append(bp)
+    if not blueprints:
+        print("WARNING: no four-wheel vehicle blueprints are available.")
+        return []
+    points=[]
+    for wp in world_map.generate_waypoints(2.0):
+        d=distance(wp.transform.location,center)
+        if (15.0<=d<=32.0 and not wp.is_junction and
+                all(distance(wp.transform.location,x.transform.location)>10.0
+                    for x in points)):points.append(wp)
+    rng.shuffle(points);actors=[]
+    for wp in points:
+        if len(actors)>=count:break
+        bp=rng.choice(blueprints)
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name","rsu_test_stopped_vehicle")
+        transform=wp.transform;transform.location.z+=0.30
+        actor=world.try_spawn_actor(bp,transform)
+        if actor is None:continue
+        actor.set_autopilot(False)
+        actor.apply_control(carla.VehicleControl(
+            throttle=0.0,brake=1.0,hand_brake=True))
+        actors.append(actor)
+    return actors
+
+
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.76 event-focused HLW targets")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.77 event-focused AVW targets")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
+    parser.add_argument("--stopped-vehicles",type=int,default=0)
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--walker-mode",choices=("static","manual","ai"),default="manual",
                         help="static holds walkers in place; manual moves across roads; ai requires a pedestrian navmesh")
@@ -170,10 +201,14 @@ def main():
     client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
     world,world_map,center=junction_center(client,config)
     walkers,movements=spawn_walkers(world,world_map,center,max(0,args.walkers),rng,args.walker_mode,max(.1,args.walker_speed),max(0.0,args.walker_launch_interval))
-    obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng);actors=walkers+obstacles
-    print("V0.6.12.8.2.2.76 targets active: seed=%d walkers=%d road_obstacles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),args.walker_mode,args.walker_launch_interval))
+    obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng)
+    stopped_vehicles=spawn_stopped_vehicles(
+        world,world_map,center,max(0,args.stopped_vehicles),rng)
+    actors=walkers+obstacles+stopped_vehicles
+    print("V0.6.12.8.2.2.77 targets active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),len(stopped_vehicles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
-    for label,items in (("walker",walkers),("obstacle",obstacles)):
+    for label,items in (("walker",walkers),("obstacle",obstacles),
+                        ("stopped_vehicle",stopped_vehicles)):
         for actor in items:
             loc=actor.get_location();suffix=""
             if actor.id in movement_by_id:
@@ -199,7 +234,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.76 test targets removed.")
+        print("V0.6.12.8.2.2.77 test targets removed.")
 
 
 if __name__=="__main__":main()

@@ -512,11 +512,17 @@ def main():
  parser.add_argument("--camera-model",default=None)
  parser.add_argument("--sensor-sync",choices=["latest","aligned"],default="aligned",
                      help="aligned selects each camera at the LiDAR frame; latest is a legacy diagnostic mode")
+ parser.add_argument("--event-scenario",choices=["all","vrucw","hlw","avw","slw"],
+                     default="all",help="enable one warning scene for focused validation")
  args=parser.parse_args()
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
- config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model);_try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
+ config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model)
+ if args.event_scenario!="all":
+  for category in ("vrucw","hlw","avw","slw"):
+   config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
+ _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.76 Event-Focused HLW starting...")
+ print("RoadsideStation V0.6.12.8.2.2.77 Event-Focused AVW starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
@@ -633,7 +639,8 @@ def main():
  print("ARCH: Ground Truth is evaluation-only and never enters perception/fusion/FusedObjectList.")
  print("Camera fusion source: %s"%camera_source)
  camera_ground_shadow=CameraGroundInitiationShadow(fc)
- print("V2X Event Engine: %s | VRUCW + HLW + AVW + SLW | canonical FusedObjectList input"%("enabled" if event_engine.enabled else "disabled"))
+ print("V2X Event Engine: %s | scenario=%s | canonical FusedObjectList input"%(
+  "enabled" if event_engine.enabled else "disabled",args.event_scenario.upper()))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
  last=0.0;last_eval=0.0;last_json_sample=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}

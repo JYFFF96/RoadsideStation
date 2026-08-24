@@ -635,6 +635,11 @@ v2x_events:
     enabled: true
     required_updates: 2
     direction: 1
+    require_confirmed: true
+    min_height_m: 0.45
+    max_height_m: 2.60
+    max_length_m: 1.50
+    max_width_m: 1.20
   # V0.6.12.8.2.2.76: ID-independent road-hazard warning. Reject long/thin
   # structures and require selected-road, multi-sensor, or high-quality tracks.
   hlw:

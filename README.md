@@ -829,3 +829,13 @@ quality track evidence. Long thin structures and low-quality clutter are
 rejected. Multiple fragmented track IDs still produce one area-level warning
 per cooldown window. The message includes the Dachuan HLW fields and event_type
 37; CARLA truth remains evaluator-only.
+
+V0.6.12.8.2.2.77 adds the focused abnormal-stopped-vehicle (`AVW`, event_sort
+6) validation path. AVW dwell is now area-level, so a fragmented Tracker ID
+does not restart the five-second timer. `spawn_multiclass_targets.py` can place
+a hand-braked four-wheel vehicle on an approach with `--stopped-vehicles 1`.
+`main.py --event-scenario avw` isolates this event during acceptance testing;
+the default `all` mode remains unchanged. The `.76` obstacle-only log produced
+12 valid HLW events, but also exposed repeated false `person` classifications.
+VRUCW now applies a basic fused LiDAR-size sanity gate that rejects the observed
+0.11 m-high and 3.05 m-high false-person clusters without using CARLA truth.
