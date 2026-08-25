@@ -849,3 +849,11 @@ persistent, stationary 2.8--7.5 m by 1.2--3.2 m fused LiDAR track as vehicle
 geometry. This fallback uses only FusedObjectList sensor fields; CARLA actor
 identity remains evaluation-only. A once-per-second `V2X AVW INPUT` line shows
 typed, geometry-fallback, stopped, and dwell counts when AVW is isolated.
+
+V0.6.12.8.2.2.79 adds a focused speed-limit-warning (`SLW`, event_sort 9)
+acceptance path. `main.py --event-scenario slw --test-ego-speed-kmh 55`
+injects an explicit bench-only ego speed and compares it with the configured
+40 km/h limit, producing `spd_Flag=2`. Without an OBU speed or this explicit
+test input, SLW fails closed and prints `Speed:UNAVAILABLE Event:SUPPRESSED`
+instead of fabricating an event. The event schema and comparison logic can be
+kept when the bench input is replaced by live OBU vehicle speed.

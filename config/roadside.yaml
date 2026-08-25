@@ -627,7 +627,8 @@ output_diagnostics:
 v2x_events:
   enabled: true
   cooldown_seconds: 5.0
-  # Leave unset in normal perception runs. A real OBU adapter will provide it.
+  # Leave unset in normal perception runs. For the focused SLW bench test use
+  # --test-ego-speed-kmh; a real OBU adapter will replace this input later.
   test_ego_speed_kmh:
   # V0.6.12.8.2.2.75: event-focused, ID-independent pedestrian warning.
   # FusedObjectList already contains only road-ROI-approved camera persons.

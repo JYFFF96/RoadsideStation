@@ -148,5 +148,18 @@ class V2XEventTest(unittest.TestCase):
         self.assertEqual(9,event["data"]["event_sort"])
         self.assertEqual(2,event["data"]["spd_Flag"])
 
+    def test_slw_suppresses_event_without_ego_speed(self):
+        engine=V2XEventEngine("R",{"enabled":True,"avw":{"enabled":False},
+            "slw":{"enabled":True,"speed_limit_kmh":40}})
+        self.assertEqual([],engine.update(ObjectList("R",[],10)))
+        self.assertFalse(engine.last_diagnostics["slw"]["speed_available"])
+
+    def test_slw_marks_speed_at_or_below_limit_as_display_only(self):
+        engine=V2XEventEngine("R",{"enabled":True,"avw":{"enabled":False},
+            "slw":{"enabled":True,"speed_limit_kmh":40}})
+        event=engine.update(ObjectList("R",[],10),{"speed_kmh":40})[0]
+        self.assertEqual(1,event["data"]["spd_Flag"])
+        self.assertEqual(40,event["data"]["speed"])
+
 
 if __name__=="__main__":unittest.main()

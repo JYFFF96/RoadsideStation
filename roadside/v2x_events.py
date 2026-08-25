@@ -189,9 +189,14 @@ class V2XEventEngine(object):
                      "trigger_mode":"stopped_vehicle_presence"}))
                 self._last_emitted[key]=now
         slw=self.config.get("slw",{}) or {}
-        if slw.get("enabled",True) and ego.get("speed_kmh") is not None:
+        speed_available=ego.get("speed_kmh") is not None
+        self.last_diagnostics["slw"]={"speed_available":speed_available,
+            "speed_limit_kmh":int(slw.get("speed_limit_kmh",40))}
+        if slw.get("enabled",True) and speed_available:
             speed=float(ego["speed_kmh"]);limit=int(slw.get("speed_limit_kmh",40))
             flag=2 if speed>float(limit) else 1;key=("SLW",flag)
+            self.last_diagnostics["slw"].update({"speed_kmh":speed,
+                                                  "spd_Flag":flag})
             if self._cooldown_ready(key,now):
                 events.append(self._envelope(
                     "SLW",9,"请注意限速",now,-1,None,
