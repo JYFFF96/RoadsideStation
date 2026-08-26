@@ -506,7 +506,7 @@ evaluation:
     - {name: distance_le_020_gap_le_30, max_distance: 0.20, max_gap: 3.0}
     - {name: distance_le_035_gap_le_30, max_distance: 0.35, max_gap: 3.0}
     - {name: slow_gap_le_30, max_tombstone_speed: 0.10, max_temporal_motion: 0.20, max_gap: 3.0}
-  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot, rsu_test_stopped_vehicle]
+  include_roles: [autopilot, roadside_autopilot, rsu_local_autopilot, rsu_test_stopped_vehicle, rsu_test_speeding_vehicle]
   include_walkers: true
   obstacle_actor_patterns: [static.prop.*, dynamic.prop.*]
   report_interval: 2.0
@@ -615,10 +615,37 @@ mqtt:
   enabled: false
   host: 127.0.0.1
   port: 1883
+  client_id: roadside-mec
+  username:
+  # Export ROADSIDE_MQTT_PASSWORD instead of committing a password.
+  password_env: ROADSIDE_MQTT_PASSWORD
+  qos: 2
+  response_topic: command///res/#
+  publish_internal_outputs: true
   topic_object_list: roadside/RSU_001/object_list
   topic_rsm: roadside/RSU_001/rsm
   # Confirm the writable device-side topic with Dachuan before production use.
   topic_event: roadside/RSU_001/event2hmi
+
+# V0.6.12.8.2.2.80: protocol-correct MEC -> RSU -> PC5 bridge. Keep disabled
+# until the surveyed WGS84 reference is supplied. event2hmi is HMI output;
+# participant warnings travel as RSM and road events/signs travel as RSI.
+dachuan_rsu:
+  enabled: false
+  reference_latitude_deg:
+  reference_longitude_deg:
+  reference_elevation_m: 0.0
+  # Direction of CARLA/world +X measured counter-clockwise from geographic east.
+  world_x_heading_from_east_deg: 0.0
+  rsm_publish_hz: 10.0
+  # Requested first workflow is continuous RSM-only. Enable later when the
+  # vendor RSI event/sign mappings have been confirmed.
+  publish_rsi_events: false
+  rsm_id: dc-rsm-roadside-1
+  event_radius_m: 100
+  # The supplied manual does not define the numeric RTS signType for a speed
+  # limit sign. Obtain it from Dachuan/RSU firmware before enabling SLW RSI.
+  slw_sign_type:
 
 output_diagnostics:
   fused_json_sample_enabled: true
@@ -630,6 +657,9 @@ v2x_events:
   # Leave unset in normal perception runs. For the focused SLW bench test use
   # --test-ego-speed-kmh; a real OBU adapter will replace this input later.
   test_ego_speed_kmh:
+  # Simulation-only: tools/scenario_slw.py creates this tagged vehicle. The
+  # real deployment replaces it with live OBU speed.
+  test_ego_role: rsu_test_speeding_vehicle
   # V0.6.12.8.2.2.75: event-focused, ID-independent pedestrian warning.
   # FusedObjectList already contains only road-ROI-approved camera persons.
   vrucw:

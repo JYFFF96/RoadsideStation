@@ -186,29 +186,75 @@ def spawn_stopped_vehicles(world, world_map, center, count, rng):
     return actors
 
 
+def spawn_speeding_vehicles(world,world_map,center,count,rng,speed_kmh=55.0):
+    blueprints=[]
+    for bp in world.get_blueprint_library().filter("vehicle.*"):
+        if bp.has_attribute("number_of_wheels") and int(bp.get_attribute(
+                "number_of_wheels").as_int())==4:blueprints.append(bp)
+    if not blueprints:
+        print("WARNING: no four-wheel vehicle blueprints are available for SLW.")
+        return []
+    points=[]
+    for wp in world_map.generate_waypoints(2.0):
+        d=distance(wp.transform.location,center)
+        if 35.0<=d<=55.0 and not wp.is_junction:points.append(wp)
+    rng.shuffle(points);items=[];speed_mps=max(0.1,float(speed_kmh)/3.6)
+    for wp in points:
+        if len(items)>=count:break
+        bp=rng.choice(blueprints)
+        if bp.has_attribute("role_name"):
+            bp.set_attribute("role_name","rsu_test_speeding_vehicle")
+        transform=wp.transform;transform.location.z+=0.30
+        actor=world.try_spawn_actor(bp,transform)
+        if actor is None:continue
+        forward=transform.get_forward_vector()
+        velocity=carla.Vector3D(x=float(forward.x)*speed_mps,
+                                y=float(forward.y)*speed_mps,z=0.0)
+        actor.set_autopilot(False);actor.set_target_velocity(velocity)
+        items.append({"actor":actor,"velocity":velocity,"speed_kmh":float(speed_kmh)})
+    return items
+
+
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.78 AVW geometry-fallback targets")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.80 on-demand warning scenarios")
     parser.add_argument("--config",default="config/roadside.yaml")
+    parser.add_argument("--scenario",choices=("custom","vrucw","hlw","avw","slw"),
+                        default="custom")
     parser.add_argument("--walkers",type=int,default=12)
     parser.add_argument("--obstacles",type=int,default=6)
     parser.add_argument("--stopped-vehicles",type=int,default=0)
+    parser.add_argument("--speeding-vehicles",type=int,default=0)
+    parser.add_argument("--ego-speed-kmh",type=float,default=55.0)
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--walker-mode",choices=("static","manual","ai"),default="manual",
                         help="static holds walkers in place; manual moves across roads; ai requires a pedestrian navmesh")
     parser.add_argument("--walker-speed",type=float,default=1.2)
     parser.add_argument("--walker-launch-interval",type=float,default=0.8)
-    args=parser.parse_args();rng=random.Random(args.seed);config=load_config(args.config);cc=config.get("carla",{})
+    args=parser.parse_args()
+    if args.scenario=="vrucw":
+        args.walkers=12;args.obstacles=0;args.stopped_vehicles=0;args.speeding_vehicles=0
+    elif args.scenario=="hlw":
+        args.walkers=0;args.obstacles=6;args.stopped_vehicles=0;args.speeding_vehicles=0
+    elif args.scenario=="avw":
+        args.walkers=0;args.obstacles=0;args.stopped_vehicles=1;args.speeding_vehicles=0
+    elif args.scenario=="slw":
+        args.walkers=0;args.obstacles=0;args.stopped_vehicles=0;args.speeding_vehicles=1
+    rng=random.Random(args.seed);config=load_config(args.config);cc=config.get("carla",{})
     client=carla.Client(cc.get("host","127.0.0.1"),int(cc.get("port",2000)));client.set_timeout(float(cc.get("timeout",60.0)))
     world,world_map,center=junction_center(client,config)
     walkers,movements=spawn_walkers(world,world_map,center,max(0,args.walkers),rng,args.walker_mode,max(.1,args.walker_speed),max(0.0,args.walker_launch_interval))
     obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng)
     stopped_vehicles=spawn_stopped_vehicles(
         world,world_map,center,max(0,args.stopped_vehicles),rng)
-    actors=walkers+obstacles+stopped_vehicles
-    print("V0.6.12.8.2.2.78 targets active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.seed,len(walkers),len(obstacles),len(stopped_vehicles),args.walker_mode,args.walker_launch_interval))
+    speeding=spawn_speeding_vehicles(world,world_map,center,
+        max(0,args.speeding_vehicles),rng,args.ego_speed_kmh)
+    speeding_vehicles=[item["actor"] for item in speeding]
+    actors=walkers+obstacles+stopped_vehicles+speeding_vehicles
+    print("V0.6.12.8.2.2.80 scenario=%s active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d speeding_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.scenario.upper(),args.seed,len(walkers),len(obstacles),len(stopped_vehicles),len(speeding_vehicles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
     for label,items in (("walker",walkers),("obstacle",obstacles),
-                        ("stopped_vehicle",stopped_vehicles)):
+                        ("stopped_vehicle",stopped_vehicles),
+                        ("speeding_vehicle",speeding_vehicles)):
         for actor in items:
             loc=actor.get_location();suffix=""
             if actor.id in movement_by_id:
@@ -218,7 +264,12 @@ def main():
     print("Keep this process running; Ctrl+C removes only these test targets.")
     started_at=time.time()
     try:
-        while True:launch_due_walkers(movements,time.time()-started_at);time.sleep(0.1)
+        while True:
+            launch_due_walkers(movements,time.time()-started_at)
+            for item in speeding:
+                try:item["actor"].set_target_velocity(item["velocity"])
+                except Exception:pass
+            time.sleep(0.1)
     except KeyboardInterrupt:pass
     finally:
         for movement in movements:
@@ -234,7 +285,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.78 test targets removed.")
+        print("V0.6.12.8.2.2.80 test targets removed.")
 
 
 if __name__=="__main__":main()

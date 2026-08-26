@@ -857,3 +857,14 @@ injects an explicit bench-only ego speed and compares it with the configured
 test input, SLW fails closed and prints `Speed:UNAVAILABLE Event:SUPPRESSED`
 instead of fabricating an event. The event schema and comparison logic can be
 kept when the bench input is replaced by live OBU vehicle speed.
+
+V0.6.12.8.2.2.80 adds the protocol-correct Dachuan MEC-to-RSU MQTT bridge.
+`main.py` now stays running with all four first-release warnings enabled and
+publishes the canonical fused participant list as Dachuan RSM at 10 Hz. Four
+independent `tools/scenario_*.py` launchers add and remove VRUCW, HLW, AVW, or
+SLW test actors without restarting the station. The SLW launcher supplies a
+tagged CARLA ego vehicle whose measured velocity replaces the earlier command-
+line-only speed injection. RSM requests use a UUID topic, QoS 2, and monitor
+`command///res/#`; surveyed WGS84 coordinates remain mandatory. Optional RSI
+support stays disabled pending vendor HLW/SLW mapping confirmation. See
+`docs/FIRST_RELEASE_SCENARIOS_AND_RSU_MQTT.md` for the complete workflow.

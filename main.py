@@ -23,6 +23,8 @@ from roadside.sim_camera_truth import make_truth_camera_objects
 from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
 from roadside.v2x_events import V2XEventEngine,encode_v2x_event
+from roadside.dachuan_rsu import DachuanRsuBridge
+from roadside.sim_ego import find_test_ego_speed_kmh
 from roadside.map_selection import carla_map_short_name,town05_switch_target
 
 _STOP_REQUESTED=False
@@ -516,19 +518,49 @@ def main():
                      default="all",help="enable one warning scene for focused validation")
  parser.add_argument("--test-ego-speed-kmh",type=float,default=None,
                      help="bench-only ego speed for SLW validation; omit when no OBU speed is available")
+ parser.add_argument("--rsu-mqtt-host",default=None,
+                     help="enable Dachuan RSU publishing through this MQTT broker")
+ parser.add_argument("--rsu-mqtt-port",type=int,default=None)
+ parser.add_argument("--rsu-mqtt-user",default=None)
+ parser.add_argument("--rsu-reference-latitude",type=float,default=None)
+ parser.add_argument("--rsu-reference-longitude",type=float,default=None)
+ parser.add_argument("--rsu-world-x-heading-from-east",type=float,default=None)
+ parser.add_argument("--rsu-slw-sign-type",type=int,default=None)
  args=parser.parse_args()
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model)
  if args.test_ego_speed_kmh is not None:
   if args.test_ego_speed_kmh<0:parser.error("--test-ego-speed-kmh must be non-negative")
   config.setdefault("v2x_events",{})["test_ego_speed_kmh"]=args.test_ego_speed_kmh
+ if args.rsu_mqtt_host is not None:
+  mc=config.setdefault("mqtt",{});dc=config.setdefault("dachuan_rsu",{})
+  mc["enabled"]=True;mc["host"]=args.rsu_mqtt_host;mc["publish_internal_outputs"]=False
+  if args.rsu_mqtt_port is not None:mc["port"]=args.rsu_mqtt_port
+  if args.rsu_mqtt_user is not None:mc["username"]=args.rsu_mqtt_user
+  dc["enabled"]=True
+ if args.rsu_reference_latitude is not None:
+  config.setdefault("dachuan_rsu",{})["reference_latitude_deg"]=args.rsu_reference_latitude
+ if args.rsu_reference_longitude is not None:
+  config.setdefault("dachuan_rsu",{})["reference_longitude_deg"]=args.rsu_reference_longitude
+ if args.rsu_world_x_heading_from_east is not None:
+  config.setdefault("dachuan_rsu",{})["world_x_heading_from_east_deg"]=args.rsu_world_x_heading_from_east
+ if args.rsu_slw_sign_type is not None:
+  config.setdefault("dachuan_rsu",{})["slw_sign_type"]=args.rsu_slw_sign_type
  if args.event_scenario!="all":
   for category in ("vrucw","hlw","avw","slw"):
    config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
- _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}))
+ _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}));rsu_bridge=DachuanRsuBridge(config.get("dachuan_rsu",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.79 Focused SLW Validation starting...")
+ print("RoadsideStation V0.6.12.8.2.2.80 Dachuan RSU MQTT Bridge starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
+ origin=(station.junction_center if station.junction_center is not None else station.base_transform.location)
+ rsu_bridge.set_world_origin(origin.x,origin.y,origin.z)
+ if rsu_bridge.enabled:
+  rsi_enabled=bool(config.get("dachuan_rsu",{}).get("publish_rsi_events",False))
+  print("Dachuan RSU bridge: ENABLED | RSM=10Hz continuous | RSI=%s | response=command///res/#"%(
+   "event-driven" if rsi_enabled else "disabled"))
+  if rsi_enabled and config.get("dachuan_rsu",{}).get("slw_sign_type") is None:
+   print("WARNING: SLW RSI is suppressed until Dachuan confirms slw_sign_type; RSM and HLW RSI remain active.")
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
   gz=station.junction_center.z if station.junction_center is not None else None;print("Ground removal: enabled reference_z=%s clearance=%.2fm"%(("-" if gz is None else "%.2f"%gz),float(fc.get("ground_clearance",0.30))))
@@ -648,7 +680,7 @@ def main():
   "enabled" if event_engine.enabled else "disabled",args.event_scenario.upper()))
  print("Sensor snapshot mode: %s%s"%(args.sensor_sync," (default multi-camera alignment)" if args.sensor_sync=="aligned" else " (legacy diagnostic)"))
  if camera_source=="carla_truth":print("NOTE: CamObjects is simulation truth visibility, NOT real camera detector recall. Tracker receives only generic association confirmation, not truth actor data.")
- last=0.0;last_eval=0.0;last_json_sample=0.0;last_event_diag=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
+ last=0.0;last_eval=0.0;last_json_sample=0.0;last_event_diag=0.0;last_rsu_diag=0.0;background_ready_announced=False;eval_interval=float(eval_cfg.get("report_interval",2.0));output_diag=config.get("output_diagnostics",{}) or {}
  try:
   while not _STOP_REQUESTED:
    cameras,lidar,radar=(station.cache.snapshot_all_aligned() if args.sensor_sync=="aligned" else station.cache.snapshot_all());ol=fusion.fuse(lidar[1] if lidar else None,radar[1] if radar else None,frame_id=lidar[0] if lidar else None,radar_frame_id=radar[0] if radar else None);ds=detdiag.update(fusion.last_dynamic_candidates);dds=discdiag.update(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);camera_objects=[];camera_objects_by_id={};pairs=[]
@@ -915,10 +947,30 @@ def main():
      for item in false_rejects[:max(0,limit)]:
       print("    truth=%s range=%.1fm reason=%s gate=%.2fm lateral=%s allowed=%s excess=%s overlap=%s margin=%s"%(item.get("actor_id"),float(item.get("truth_range",0.0)),item.get("reason"),float(item.get("candidate_distance",0.0)),_num(item.get("lateral")),_num(item.get("allowed_lateral")),_num(item.get("center_excess")),_num(item.get("bbox_overlap")),_num(item.get("roi_margin"))))
     last_eval=now
-   m=config["mqtt"];pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj)
-   ego_speed=(config.get("v2x_events",{}) or {}).get("test_ego_speed_kmh")
+   m=config["mqtt"]
+   if m.get("publish_internal_outputs",True):
+    pub.publish(m["topic_object_list"],oj);pub.publish(m["topic_rsm"],rj)
+   rsu_rsm=rsu_bridge.build_rsm(fol)
+   if rsu_rsm is not None:
+    pub.publish(rsu_rsm[0],rsu_rsm[1])
+    if now-last_rsu_diag>=1.0:
+     print("[RSU MQTT TX] type=RSM topic=%s participants=%d"%(
+      rsu_rsm[0],rsu_bridge.last_diagnostic.get("participants",0)))
+     last_rsu_diag=now
+   event_cfg=(config.get("v2x_events",{}) or {})
+   ego_speed=event_cfg.get("test_ego_speed_kmh")
+   if ego_speed is None:
+    ego_speed=find_test_ego_speed_kmh(station.world,event_cfg.get(
+     "test_ego_role","rsu_test_speeding_vehicle"))
    event_results=event_engine.update(fol,{"speed_kmh":ego_speed} if ego_speed is not None else {})
-   if args.event_scenario=="avw" and now-last_event_diag>=1.0:
+   if ego_speed is not None and now-last_event_diag>=1.0:
+    slw_diag=event_engine.last_diagnostics.get("slw",{})
+    print("  [V2X SLW INPUT] Source:%s Speed:%.1fkm/h Limit:%dkm/h Flag:%d"%(
+     "CLI" if event_cfg.get("test_ego_speed_kmh") is not None else "CARLA_SCENARIO",
+     float(slw_diag.get("speed_kmh",0.0)),int(slw_diag.get("speed_limit_kmh",0)),
+     int(slw_diag.get("spd_Flag",0))))
+    last_event_diag=now
+   elif args.event_scenario=="avw" and now-last_event_diag>=1.0:
     avw_diag=event_engine.last_diagnostics.get("avw",{})
     print("  [V2X AVW INPUT] Typed:%d Geometry:%d Stopped:%d Dwell:%.1fs"%(
      avw_diag.get("typed",0),avw_diag.get("geometry",0),
@@ -933,7 +985,15 @@ def main():
     else:print("  [V2X SLW INPUT] Speed:UNAVAILABLE Event:SUPPRESSED")
     last_event_diag=now
    for event in event_results:
-    payload=encode_v2x_event(event);pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload);print("[V2X EVENT] %s"%payload)
+    payload=encode_v2x_event(event)
+    if m.get("publish_internal_outputs",True):
+     pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload)
+    print("[V2X EVENT] %s"%payload)
+    if config.get("dachuan_rsu",{}).get("publish_rsi_events",False):
+     rsu_rsi=rsu_bridge.build_rsi(event)
+     if rsu_rsi is not None:
+      pub.publish(rsu_rsi[0],rsu_rsi[1]);print("[RSU MQTT TX] type=RSI category=%s topic=%s"%(
+       event.get("data",{}).get("category","-"),rsu_rsi[0]))
    time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
  finally:
