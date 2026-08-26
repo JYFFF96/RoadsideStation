@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.80`。
+适用版本：`V0.6.12.8.2.2.81`。
 
 ## 1. 运行方式
 
@@ -25,10 +25,10 @@ CARLA和`main.py`不需要重启，可以接着运行另一个场景脚本。
 ```yaml
 mqtt:
   enabled: true
-  host: 192.168.66.81       # 改成RSU实际连接的Broker IP
+  host: 127.0.0.1           # 与已验证的 mosquitto_pub -h localhost 一致
   port: 1883
   client_id: roadside-mec
-  username: dctek           # 改成现场用户名；无认证则留空
+  username:                 # 当前本地Broker不认证，保持为空
   password_env: ROADSIDE_MQTT_PASSWORD
   qos: 2
   response_topic: command///res/#
@@ -36,6 +36,8 @@ mqtt:
 
 dachuan_rsu:
   enabled: true
+  device_id: DC887-002047
+  topic_template: command/dachuan/{device_id}/req/{uuid}/{message_type}
   reference_latitude_deg: 39.0000000   # 改成RSU/路口实测纬度
   reference_longitude_deg: 116.0000000 # 改成RSU/路口实测经度
   reference_elevation_m: 0.0
@@ -44,7 +46,8 @@ dachuan_rsu:
   publish_rsi_events: false
 ```
 
-如果Broker需要密码，在启动`main.py`的同一终端执行：
+当前已验证的`localhost`命令不需要用户名和密码，因此不用设置密码环境变量。
+只有以后Broker明确启用认证时，才填写`username`并执行：
 
 ```bash
 export ROADSIDE_MQTT_PASSWORD='实际MQTT密码'
@@ -76,8 +79,8 @@ python3.7 main.py \
 
 ```text
 Dachuan RSU bridge: ENABLED | RSM=10Hz continuous | RSI=disabled
-[MQTT] Connected broker=192.168.66.81:1883 qos=2
-[RSU MQTT TX] type=RSM topic=command/traffic/milliRadar/req/.../rsm participants=...
+[MQTT] Connected broker=127.0.0.1:1883 qos=2
+[RSU MQTT TX] type=RSM topic=command/dachuan/DC887-002047/req/.../rsm participants=...
 [MQTT RX] topic=command///res/.../200 payload={"reqid":"...","return_code":200}
 ```
 
@@ -137,7 +140,7 @@ main.py自动读取车辆速度，与配置中的40 km/h限速比较。预期：
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.80 test targets removed.
+V0.6.12.8.2.2.81 test targets removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
@@ -147,7 +150,7 @@ V0.6.12.8.2.2.80 test targets removed.
 main.py持续将融合参与者转换成大椽格式RSM，并发布到：
 
 ```text
-command/traffic/milliRadar/req/{UUID}/rsm
+command/dachuan/DC887-002047/req/{UUID}/rsm
 ```
 
 - VRUCW和AVW的行人/车辆可以通过RSM发送给RSU，再由RSU通过PC5广播。

@@ -868,3 +868,10 @@ line-only speed injection. RSM requests use a UUID topic, QoS 2, and monitor
 `command///res/#`; surveyed WGS84 coordinates remain mandatory. Optional RSI
 support stays disabled pending vendor HLW/SLW mapping confirmation. See
 `docs/FIRST_RELEASE_SCENARIOS_AND_RSU_MQTT.md` for the complete workflow.
+
+V0.6.12.8.2.2.81 aligns MQTT with the field-proven RSU command rather than the
+generic topic shown in the newer protocol note. The default RSM request topic
+is now `command/dachuan/DC887-002047/req/{UUID}/rsm`, the broker is the local
+Mosquitto instance, and authentication is optional. The device ID remains
+configurable for another RSU. The preflight command no longer requires a host
+or username when testing the verified localhost/no-auth path.

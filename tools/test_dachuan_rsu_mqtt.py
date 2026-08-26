@@ -16,7 +16,8 @@ from roadside.mqtt_pub import MqttPublisher
 def main():
     parser=argparse.ArgumentParser(description="Dachuan RSU MQTT/PC5 input preflight")
     parser.add_argument("--scenario",choices=["vrucw","hlw","avw","slw"],required=True)
-    parser.add_argument("--host",required=True);parser.add_argument("--port",type=int,default=1883)
+    parser.add_argument("--host",default="localhost");parser.add_argument("--port",type=int,default=1883)
+    parser.add_argument("--device-id",default="DC887-002047")
     parser.add_argument("--username",default=None)
     parser.add_argument("--password-env",default="ROADSIDE_MQTT_PASSWORD")
     parser.add_argument("--latitude",type=float,required=True)
@@ -29,7 +30,8 @@ def main():
         "client_id":"roadside-rsu-preflight","response_topic":"command///res/#"}
     bridge=DachuanRsuBridge({"enabled":True,
         "reference_latitude_deg":args.latitude,
-        "reference_longitude_deg":args.longitude,"slw_sign_type":args.slw_sign_type})
+        "reference_longitude_deg":args.longitude,"slw_sign_type":args.slw_sign_type,
+        "device_id":args.device_id})
     bridge.set_world_origin(0,0,0);publisher=MqttPublisher(mqtt_config);publisher.connect()
     try:
         if args.scenario=="vrucw":

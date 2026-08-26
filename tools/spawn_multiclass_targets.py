@@ -216,7 +216,7 @@ def spawn_speeding_vehicles(world,world_map,center,count,rng,speed_kmh=55.0):
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.80 on-demand warning scenarios")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.81 on-demand warning scenarios")
     parser.add_argument("--config",default="config/roadside.yaml")
     parser.add_argument("--scenario",choices=("custom","vrucw","hlw","avw","slw"),
                         default="custom")
@@ -250,7 +250,7 @@ def main():
         max(0,args.speeding_vehicles),rng,args.ego_speed_kmh)
     speeding_vehicles=[item["actor"] for item in speeding]
     actors=walkers+obstacles+stopped_vehicles+speeding_vehicles
-    print("V0.6.12.8.2.2.80 scenario=%s active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d speeding_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.scenario.upper(),args.seed,len(walkers),len(obstacles),len(stopped_vehicles),len(speeding_vehicles),args.walker_mode,args.walker_launch_interval))
+    print("V0.6.12.8.2.2.81 scenario=%s active: seed=%d walkers=%d road_obstacles=%d stopped_vehicles=%d speeding_vehicles=%d walker_mode=%s launch_interval=%.1fs"%(args.scenario.upper(),args.seed,len(walkers),len(obstacles),len(stopped_vehicles),len(speeding_vehicles),args.walker_mode,args.walker_launch_interval))
     movement_by_id=dict((x["actor"].id,x) for x in movements)
     for label,items in (("walker",walkers),("obstacle",obstacles),
                         ("stopped_vehicle",stopped_vehicles),
@@ -285,7 +285,7 @@ def main():
         for actor in actors:
             try:actor.destroy()
             except Exception:pass
-        print("V0.6.12.8.2.2.80 test targets removed.")
+        print("V0.6.12.8.2.2.81 test targets removed.")
 
 
 if __name__=="__main__":main()

@@ -49,5 +49,14 @@ class MqttPublisherTest(unittest.TestCase):
             "password_env":"DEFINITELY_MISSING_RSU_PASSWORD"})
         with self.assertRaises(RuntimeError):publisher.connect()
 
+    def test_local_broker_without_username_needs_no_password(self):
+        os.environ.pop("UNUSED_LOCAL_PASSWORD",None)
+        publisher=mqtt_pub.MqttPublisher({"enabled":True,"host":"localhost",
+            "password_env":"UNUSED_LOCAL_PASSWORD","qos":2})
+        publisher.connect()
+        self.assertIn(("connect","localhost",1883,60),self.fake.client.calls)
+        self.assertFalse(any(call[0]=="auth" for call in self.fake.client.calls))
+        publisher.close()
+
 
 if __name__=="__main__":unittest.main()

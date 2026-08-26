@@ -627,11 +627,15 @@ mqtt:
   # Confirm the writable device-side topic with Dachuan before production use.
   topic_event: roadside/RSU_001/event2hmi
 
-# V0.6.12.8.2.2.80: protocol-correct MEC -> RSU -> PC5 bridge. Keep disabled
+# V0.6.12.8.2.2.81: field-profile MEC -> RSU -> PC5 bridge. Keep disabled
 # until the surveyed WGS84 reference is supplied. event2hmi is HMI output;
 # participant warnings travel as RSM and road events/signs travel as RSI.
 dachuan_rsu:
   enabled: false
+  # Field-proven RSU topic:
+  # command/dachuan/DC887-002047/req/{UUID}/rsm
+  device_id: DC887-002047
+  topic_template: command/dachuan/{device_id}/req/{uuid}/{message_type}
   reference_latitude_deg:
   reference_longitude_deg:
   reference_elevation_m: 0.0
