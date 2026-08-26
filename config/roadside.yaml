@@ -627,7 +627,7 @@ mqtt:
   # Confirm the writable device-side topic with Dachuan before production use.
   topic_event: roadside/RSU_001/event2hmi
 
-# V0.6.12.8.2.2.82: strict RSM participant / RSI event boundary. Keep disabled
+# V0.6.12.8.2.2.83: strict RSM participant / RSI event boundary. Keep disabled
 # until the surveyed WGS84 reference is supplied. event2hmi is HMI output;
 # only classified participants travel as RSM; road events/signs travel as RSI.
 dachuan_rsu:
@@ -636,6 +636,8 @@ dachuan_rsu:
   # command/dachuan/DC887-002047/req/{UUID}/rsm
   device_id: DC887-002047
   topic_template: command/dachuan/{device_id}/req/{uuid}/{message_type}
+  # Standard RSI MQTT channel from the MEC-RSU-MQTT protocol manual.
+  rsi_topic_template: command/traffic/event/req/{uuid}/{message_type}
   reference_latitude_deg:
   reference_longitude_deg:
   reference_elevation_m: 0.0

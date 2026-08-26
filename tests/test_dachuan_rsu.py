@@ -70,7 +70,7 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         event={"type":"event","data":{"category":"HLW","event_count":4,
             "event_type":37,"description":"道路存在障碍物"}}
         topic,payload=bridge.build_rsi(event);message=json.loads(payload)
-        self.assertTrue(topic.startswith("command/dachuan/DC887-002047/req/"))
+        self.assertTrue(topic.startswith("command/traffic/event/req/"))
         self.assertTrue(topic.endswith("/rsi"))
         rte=message["value"]["rtes"][0]
         self.assertEqual(("RSI",37,5),(message["type"],rte["eventType"],rte["eventSource"]))
@@ -94,6 +94,13 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         bridge=self._bridge(device_id="RSU-0130")
         topic=bridge.build_rsm(FusedObjectList("R",[],1))[0]
         self.assertTrue(topic.startswith("command/dachuan/RSU-0130/req/"))
+
+    def test_rsi_topic_can_be_overridden_independently_from_rsm(self):
+        bridge=self._bridge(rsi_topic_template="command/custom/{uuid}/{message_type}")
+        event={"data":{"category":"HLW","event_type":37}}
+        topic=bridge.build_rsi(event)[0]
+        self.assertTrue(topic.startswith("command/custom/"))
+        self.assertTrue(topic.endswith("/rsi"))
 
 
 if __name__=="__main__":unittest.main()

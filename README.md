@@ -883,3 +883,8 @@ unknown obstacles are no longer guessed into the participant list. Filtering
 now happens before the 16-participant limit. Supported road events are emitted
 through RSI, while unconfirmed `eventType`/`signType` mappings fail closed;
 the HMI `event_sort` value is never substituted for an RSI standard type.
+
+V0.6.12.8.2.2.83 separates the two vendor MQTT routes: field-proven RSM keeps
+`command/dachuan/{device_id}/req/{uuid}/rsm`, while RSI uses the protocol-manual
+channel `command/traffic/event/req/{uuid}/rsi`. Each template is independently
+configurable.

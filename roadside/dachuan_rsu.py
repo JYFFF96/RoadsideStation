@@ -45,9 +45,12 @@ class DachuanRsuBridge(object):
         value=self.msg_cnt%128;self.msg_cnt=(self.msg_cnt+1)%128;return value
 
     def _topic(self,message_type):
-        source=("milliRadar" if message_type.lower()=="rsm" else "event")
-        template=self.config.get("topic_template",
-            "command/dachuan/{device_id}/req/{uuid}/{message_type}")
+        is_rsm=message_type.lower()=="rsm"
+        source=("milliRadar" if is_rsm else "event")
+        template=self.config.get(
+            "topic_template" if is_rsm else "rsi_topic_template",
+            ("command/dachuan/{device_id}/req/{uuid}/{message_type}" if is_rsm
+             else "command/traffic/event/req/{uuid}/{message_type}"))
         return template.format(source=source,uuid=str(uuid.uuid4()),
                                message_type=message_type.lower(),
                                device_id=str(self.config.get("device_id","DC887-002047")))

@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.82`。
+适用版本：`V0.6.12.8.2.2.83`。
 
 ## 1. 运行方式
 
@@ -140,7 +140,7 @@ main.py自动读取车辆速度，与配置中的40 km/h限速比较。预期：
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.82 test targets removed.
+V0.6.12.8.2.2.83 test targets removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
@@ -156,6 +156,7 @@ command/dachuan/DC887-002047/req/{UUID}/rsm
 - RSM只允许`ptcType=1`机动车、`ptcType=2`非机动车、`ptcType=3`行人。
 - 未明确分类的障碍物不会再按尺寸猜测成机动车并混入RSM。
 - 道路交通事件使用RSI的`rtes[]`，道路交通标志使用RSI的`rtss[]`。
+- RSI按协议发布到`command/traffic/event/req/{UUID}/rsi`，与现场RSM Topic分开配置。
 - HLW使用已经确认的`event_type=37`生成RSI RTE。
 - SLW必须取得大椽确认的`signType`后才能生成RSI RTS。
 - 本地`event_sort`是HMI预警枚举，不能直接当作RSI的`eventType`或`signType`。
