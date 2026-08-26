@@ -875,3 +875,11 @@ is now `command/dachuan/DC887-002047/req/{UUID}/rsm`, the broker is the local
 Mosquitto instance, and authentication is optional. The device ID remains
 configurable for another RSU. The preflight command no longer requires a host
 or username when testing the verified localhost/no-auth path.
+
+V0.6.12.8.2.2.82 enforces the protocol boundary between RSM and RSI. Dachuan
+RSM now contains only explicitly classified motor vehicles (`ptcType=1`),
+non-motor vehicles (`ptcType=2`) and pedestrians (`ptcType=3`); vehicle-sized
+unknown obstacles are no longer guessed into the participant list. Filtering
+now happens before the 16-participant limit. Supported road events are emitted
+through RSI, while unconfirmed `eventType`/`signType` mappings fail closed;
+the HMI `event_sort` value is never substituted for an RSI standard type.

@@ -32,11 +32,23 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         self.assertEqual((50,60,34),(ptc["pos"]["size"]["width"],
             ptc["pos"]["size"]["length"],ptc["pos"]["size"]["height"]))
 
-    def test_vehicle_geometry_fallback_is_sent_as_motor_vehicle(self):
+    def test_unknown_vehicle_sized_obstacle_is_not_sent_as_rsm_participant(self):
         bridge=self._bridge()
         obj=FusedObject("track_x",size=[4.5,1.9,1.6],x=10,y=20)
         payload=json.loads(bridge.build_rsm(FusedObjectList("R",[obj],1))[1])
-        self.assertEqual(1,payload["value"]["participants"][0]["ptcType"])
+        self.assertEqual([],payload["value"]["participants"])
+
+    def test_rsm_filters_before_applying_sixteen_participant_limit(self):
+        bridge=self._bridge()
+        unknown=[FusedObject("unknown_%d"%i,x=10,y=20) for i in range(16)]
+        people=[FusedObject("person_%d"%i,object_type="person",x=10,y=20,
+                            size=[.6,.5,1.7],sources=["camera"])
+                for i in range(20)]
+        payload=json.loads(bridge.build_rsm(
+            FusedObjectList("R",unknown+people,1))[1])
+        participants=payload["value"]["participants"]
+        self.assertEqual(16,len(participants))
+        self.assertTrue(all(item["ptcType"]==3 for item in participants))
 
     def test_rsm_rate_limit(self):
         bridge=self._bridge();items=FusedObjectList("R",[],1.0)

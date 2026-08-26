@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.81`。
+适用版本：`V0.6.12.8.2.2.82`。
 
 ## 1. 运行方式
 
@@ -78,7 +78,7 @@ python3.7 main.py \
 正常启动后应看到：
 
 ```text
-Dachuan RSU bridge: ENABLED | RSM=10Hz continuous | RSI=disabled
+Dachuan RSU bridge: ENABLED | RSM=10Hz continuous | RSI=event-driven
 [MQTT] Connected broker=127.0.0.1:1883 qos=2
 [RSU MQTT TX] type=RSM topic=command/dachuan/DC887-002047/req/.../rsm participants=...
 [MQTT RX] topic=command///res/.../200 payload={"reqid":"...","return_code":200}
@@ -140,31 +140,35 @@ main.py自动读取车辆速度，与配置中的40 km/h限速比较。预期：
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.81 test targets removed.
+V0.6.12.8.2.2.82 test targets removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
 
-## 7. RSM与预警事件的协议边界
+## 7. RSM参与者与RSI事件的协议边界
 
-main.py持续将融合参与者转换成大椽格式RSM，并发布到：
+main.py持续将明确分类的交通参与者转换成大椽格式RSM，并发布到：
 
 ```text
 command/dachuan/DC887-002047/req/{UUID}/rsm
 ```
 
-- VRUCW和AVW的行人/车辆可以通过RSM发送给RSU，再由RSU通过PC5广播。
-- 道路障碍物不是机动车、非机动车或行人，HLW语义不能只靠RSM表达。
-- 道路限速属于道路标志，SLW限速值也不能放进RSM参与者字段。
+- RSM只允许`ptcType=1`机动车、`ptcType=2`非机动车、`ptcType=3`行人。
+- 未明确分类的障碍物不会再按尺寸猜测成机动车并混入RSM。
+- 道路交通事件使用RSI的`rtes[]`，道路交通标志使用RSI的`rtss[]`。
+- HLW使用已经确认的`event_type=37`生成RSI RTE。
+- SLW必须取得大椽确认的`signType`后才能生成RSI RTS。
+- 本地`event_sort`是HMI预警枚举，不能直接当作RSI的`eventType`或`signType`。
 
-当前按要求默认持续发送RSM，本地四种场景事件都会产生。如果以后要求OBU也直接收到
-HLW和SLW语义，需要启用RSI并确认大椽映射，不能把`event2hmi`原样伪装成RSM。
+当前默认持续发送RSM并对已确认映射的事件发送RSI。映射未确认的事件会明确抑制，
+不能把`event2hmi`原样伪装成RSM或把`event_sort`冒充标准事件类型。
 
 ## 8. 完整链路判定
 
 1. main.py出现`[RSU MQTT TX] type=RSM`。
 2. main.py收到`command///res/{UUID}/200`且`return_code=200`。
 3. OBU的`rsus`或`local`中出现RSU广播的参与者数据。
-4. VRUCW/AVW再观察OBU的`event2hmi`是否触发。
+4. 道路事件确认main.py出现`[RSU MQTT TX] type=RSI`。
+5. 在OBU侧确认RSM参与者或RSI事件已通过PC5收到。
 
 只看到第1步代表MEC调用了MQTT发送，不代表RSU解析或PC5链路已经成功。

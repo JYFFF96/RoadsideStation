@@ -627,9 +627,9 @@ mqtt:
   # Confirm the writable device-side topic with Dachuan before production use.
   topic_event: roadside/RSU_001/event2hmi
 
-# V0.6.12.8.2.2.81: field-profile MEC -> RSU -> PC5 bridge. Keep disabled
+# V0.6.12.8.2.2.82: strict RSM participant / RSI event boundary. Keep disabled
 # until the surveyed WGS84 reference is supplied. event2hmi is HMI output;
-# participant warnings travel as RSM and road events/signs travel as RSI.
+# only classified participants travel as RSM; road events/signs travel as RSI.
 dachuan_rsu:
   enabled: false
   # Field-proven RSU topic:
@@ -642,9 +642,9 @@ dachuan_rsu:
   # Direction of CARLA/world +X measured counter-clockwise from geographic east.
   world_x_heading_from_east_deg: 0.0
   rsm_publish_hz: 10.0
-  # Requested first workflow is continuous RSM-only. Enable later when the
-  # vendor RSI event/sign mappings have been confirmed.
-  publish_rsi_events: false
+  # Send supported road events/signs as RSI. Unknown eventType/signType
+  # mappings fail closed instead of being inserted into RSM.
+  publish_rsi_events: true
   rsm_id: dc-rsm-roadside-1
   event_radius_m: 100
   # The supplied manual does not define the numeric RTS signType for a speed

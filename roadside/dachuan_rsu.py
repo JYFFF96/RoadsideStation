@@ -24,8 +24,9 @@ def _participant_id(value):
 class DachuanRsuBridge(object):
     """Encode the canonical FusedObjectList for Dachuan MEC-RSU MQTT.
 
-    event2hmi is a device-to-HMI result, not an RSU input. Participant causes
-    are sent as RSM, while road events/signs are sent as RSI.
+    RSM contains only explicitly classified road participants (motor vehicle,
+    non-motor vehicle or pedestrian). Road events and signs are sent as RSI;
+    event2hmi is a device-to-HMI result and is not an RSU input.
     """
     def __init__(self,config=None):
         self.config=dict(config or {});self.enabled=bool(self.config.get("enabled",False))
@@ -68,24 +69,16 @@ class DachuanRsuBridge(object):
         return (float(x)*math.cos(angle)-float(y)*math.sin(angle),
                 float(x)*math.sin(angle)+float(y)*math.cos(angle))
 
-    def _vehicle_geometry(self,obj):
-        size=list(getattr(obj,"size",[]) or [])
-        if len(size)<3:return False
-        length,width,height=[float(v) for v in size[:3]]
-        return 2.8<=length<=7.5 and 1.2<=width<=3.2 and 1.0<=height<=3.0
-
     def _ptc_type(self,obj):
         name=str(getattr(obj,"object_type","unknown_obstacle")).lower()
-        value=_PTC_TYPES.get(name)
-        if value is None and self._vehicle_geometry(obj):value=1
-        return value
+        return _PTC_TYPES.get(name)
 
     def build_rsm(self,object_list):
         if not self.enabled:return None
         now=float(object_list.timestamp);hz=max(.1,float(self.config.get("rsm_publish_hz",10.0)))
         if self._last_rsm is not None and now-self._last_rsm<1.0/hz:return None
         self._last_rsm=now;participants=[]
-        for obj in object_list.objects[:16]:
+        for obj in object_list.objects:
             ptc_type=self._ptc_type(obj)
             if ptc_type is None:continue
             lat,lon=self._geodetic(obj.x,obj.y)
@@ -109,6 +102,7 @@ class DachuanRsuBridge(object):
                     "size":{"width":_clamp(round(float(size[1])*100),0,1023),
                             "length":_clamp(round(float(size[0])*100),0,4095),
                             "height":_clamp(round(float(size[2])/0.05),0,127)}}})
+            if len(participants)>=16:break
         ref_lat=int(round(float(self.ref_lat)*1e7));ref_lon=int(round(float(self.ref_lon)*1e7))
         payload={"type":"RSM","value":{"category":"RSM",
             "msgCnt":self._next_count(),"id":str(self.config.get("rsm_id","dc-rsm-roadside-1")),
