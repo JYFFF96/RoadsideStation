@@ -1,3 +1,10 @@
+## V0.6.12.8.2.2.84 — 场景主车与独立跟随窗口
+
+四个预警场景现在统一创建/复用 `rsu_test_ego`，主程序读取主车实际状态。
+运行 `python3.7 tools/scenario_avw.py --ego-view` 可同时打开跟随窗口，
+或单独运行 `python3.7 tools/ego_view.py`。按 1/2/3 切换跟随/驾驶/俯视，Q 关闭窗口。
+查看 [完整步骤、生命周期和验证限制](docs/SCENARIO_EGO_VIEW.md)。
+
 # RoadsideStation
 
 RoadsideStation is a roadside perception prototype for CARLA 0.9.15.

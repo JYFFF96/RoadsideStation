@@ -3,9 +3,14 @@ from __future__ import print_function
 import json
 import math
 
+from .sim_ego import is_ego_detection
+
 
 class V2XEventEngine(object):
-    """Build sensor-only V2X warning events from an ObjectList.
+    """Build V2X warning events from sensor objects and optional ego state.
+
+    CARLA ego is a simulation reference only; other targets still come from
+    perception. Road-presence triggers remain independent of ego availability.
 
     The JSON envelope follows Dachuan event2hmi field names. Topic ownership is
     deliberately left in configuration until the device-side MQTT direction is
@@ -108,10 +113,13 @@ class V2XEventEngine(object):
     def update(self, object_list, ego=None):
         if not self.enabled:return []
         ego=ego or {};now=float(object_list.timestamp);events=[]
+        objects=[obj for obj in object_list.objects if not is_ego_detection(obj,ego)]
+        self.last_diagnostics["ego"]={"actor_id":ego.get("actor_id"),
+            "self_detections_excluded":len(object_list.objects)-len(objects)}
         vrucw=self.config.get("vrucw",{}) or {}
         if vrucw.get("enabled",True):
             vru=[]
-            for obj in object_list.objects:
+            for obj in objects:
                 if self._credible_vru(obj,vrucw):vru.append(obj)
             if vru:self._vru_presence_hits+=1
             else:self._vru_presence_hits=0
@@ -126,7 +134,7 @@ class V2XEventEngine(object):
                     "VRUCW",10,("请注意行人" if participant_type==3
                                  else "请注意非机动车"),now,
                     int(vrucw.get("direction",1)),
-                    float(ego.get("speed_kmh",0.0)),
+                    float(ego.get("speed_kmh") or 0.0),
                     {"ptc_type":participant_type,
                      # Dachuan's example spells the table field as spc_type.
                      # Keep both spellings until the RSU firmware is verified.
@@ -136,7 +144,7 @@ class V2XEventEngine(object):
                 self._last_emitted[key]=now
         hlw=self.config.get("hlw",{}) or {}
         if hlw.get("enabled",True):
-            obstacles=[obj for obj in object_list.objects
+            obstacles=[obj for obj in objects
                        if self._credible_road_obstacle(obj,hlw)]
             if obstacles:self._hlw_presence_hits+=1
             else:self._hlw_presence_hits=0
@@ -147,7 +155,7 @@ class V2XEventEngine(object):
                 events.append(self._envelope(
                     "HLW",8,"道路存在障碍物",now,
                     int(hlw.get("direction",1)),
-                    float(ego.get("speed_kmh",0.0)),
+                    float(ego.get("speed_kmh") or 0.0),
                     {"event_type":int(hlw.get("event_type",37)),
                      "obstacle_count":len(obstacles),
                      "trigger_mode":"road_obstacle_presence"}))
@@ -158,7 +166,7 @@ class V2XEventEngine(object):
             dwell=float(avw.get("dwell_seconds",5.0))
             direction=int(avw.get("direction",1))
             typed=[];geometry=[]
-            for obj in object_list.objects:
+            for obj in objects:
                 speed=math.hypot(float(obj.vx),float(obj.vy))
                 if speed>max_speed:continue
                 if (str(obj.object_type).lower() in self.VEHICLE_TYPES and
@@ -180,7 +188,7 @@ class V2XEventEngine(object):
                     self._cooldown_ready(key,now)):
                 events.append(self._envelope(
                     "AVW",6,"请注意前方异常车辆",now,direction,
-                    float(ego.get("speed_kmh",0.0)),
+                    float(ego.get("speed_kmh") or 0.0),
                     {"object_id":str(stopped[0].object_id),
                      "vehicle_count":len(stopped),
                      "stationary_seconds":round(now-self._avw_presence_since,2),

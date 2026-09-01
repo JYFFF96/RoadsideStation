@@ -24,7 +24,7 @@ from roadside.messages import encode_object_list,encode_rsm
 from roadside.mqtt_pub import MqttPublisher
 from roadside.v2x_events import V2XEventEngine,encode_v2x_event
 from roadside.dachuan_rsu import DachuanRsuBridge
-from roadside.sim_ego import find_test_ego_speed_kmh
+from roadside.sim_ego import EGO_ROLE,read_ego_state
 from roadside.map_selection import carla_map_short_name,town05_switch_target
 
 _STOP_REQUESTED=False
@@ -517,7 +517,7 @@ def main():
  parser.add_argument("--event-scenario",choices=["all","vrucw","hlw","avw","slw"],
                      default="all",help="enable one warning scene for focused validation")
  parser.add_argument("--test-ego-speed-kmh",type=float,default=None,
-                     help="bench-only ego speed for SLW validation; omit when no OBU speed is available")
+                     help="bench-only ego speed for SLW validation; overrides measured CARLA ego speed")
  parser.add_argument("--rsu-mqtt-host",default=None,
                      help="enable Dachuan RSU publishing through this MQTT broker")
  parser.add_argument("--rsu-mqtt-port",type=int,default=None)
@@ -531,7 +531,7 @@ def main():
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model)
  if args.test_ego_speed_kmh is not None:
-  if args.test_ego_speed_kmh<0:parser.error("--test-ego-speed-kmh must be non-negative")
+  if not math.isfinite(args.test_ego_speed_kmh) or args.test_ego_speed_kmh<0:parser.error("--test-ego-speed-kmh must be finite and non-negative")
   config.setdefault("v2x_events",{})["test_ego_speed_kmh"]=args.test_ego_speed_kmh
  if args.rsu_mqtt_host is not None:
   mc=config.setdefault("mqtt",{});dc=config.setdefault("dachuan_rsu",{})
@@ -554,7 +554,7 @@ def main():
    config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
  _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}));rsu_bridge=DachuanRsuBridge(config.get("dachuan_rsu",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.83 Strict RSM/RSI Boundary starting...")
+ print("RoadsideStation V0.6.12.8.2.2.84 Scenario Ego + Follow View starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  origin=(station.junction_center if station.junction_center is not None else station.base_transform.location)
  rsu_bridge.set_world_origin(origin.x,origin.y,origin.z)
@@ -961,31 +961,34 @@ def main():
       rsu_rsm[0],rsu_bridge.last_diagnostic.get("participants",0)))
      last_rsu_diag=now
    event_cfg=(config.get("v2x_events",{}) or {})
-   ego_speed=event_cfg.get("test_ego_speed_kmh")
-   if ego_speed is None:
-    ego_speed=find_test_ego_speed_kmh(station.world,event_cfg.get(
-     "test_ego_role","rsu_test_speeding_vehicle"))
-   event_results=event_engine.update(fol,{"speed_kmh":ego_speed} if ego_speed is not None else {})
-   if ego_speed is not None and now-last_event_diag>=1.0:
-    slw_diag=event_engine.last_diagnostics.get("slw",{})
-    print("  [V2X SLW INPUT] Source:%s Speed:%.1fkm/h Limit:%dkm/h Flag:%d"%(
-     "CLI" if event_cfg.get("test_ego_speed_kmh") is not None else "CARLA_SCENARIO",
-     float(slw_diag.get("speed_kmh",0.0)),int(slw_diag.get("speed_limit_kmh",0)),
-     int(slw_diag.get("spd_Flag",0))))
-    last_event_diag=now
-   elif args.event_scenario=="avw" and now-last_event_diag>=1.0:
-    avw_diag=event_engine.last_diagnostics.get("avw",{})
-    print("  [V2X AVW INPUT] Typed:%d Geometry:%d Stopped:%d Dwell:%.1fs"%(
-     avw_diag.get("typed",0),avw_diag.get("geometry",0),
-     avw_diag.get("stopped",0),float(avw_diag.get("dwell_seconds",0.0))))
-    last_event_diag=now
-   elif args.event_scenario=="slw" and now-last_event_diag>=1.0:
-    slw_diag=event_engine.last_diagnostics.get("slw",{})
-    if slw_diag.get("speed_available",False):
-     print("  [V2X SLW INPUT] Speed:%.1fkm/h Limit:%dkm/h Flag:%d"%(
-      float(slw_diag.get("speed_kmh",0.0)),int(slw_diag.get("speed_limit_kmh",0)),
-      int(slw_diag.get("spd_Flag",0))))
-    else:print("  [V2X SLW INPUT] Speed:UNAVAILABLE Event:SUPPRESSED")
+   ego_state={}
+   ego_error=None
+   try:
+    ego_state=read_ego_state(station.world,event_cfg.get("test_ego_role",EGO_ROLE))
+   except (RuntimeError,ValueError) as exc:
+    ego_error=str(exc)
+   if event_cfg.get("test_ego_speed_kmh") is not None:
+    ego_state["speed_kmh"]=event_cfg["test_ego_speed_kmh"]
+    ego_state["source"]="CLI_SPEED_OVERRIDE"
+   event_results=event_engine.update(fol,ego_state)
+   if now-last_event_diag>=1.0:
+    if ego_error:print("  [V2X EGO] unavailable: %s"%ego_error)
+    elif ego_state:
+     print("  [V2X EGO] id=%s Source:%s Speed:%.1fkm/h SelfExcluded:%d"%(
+      ego_state.get("actor_id","-"),ego_state.get("source","-"),
+      ego_state.get("speed_kmh",0.0),
+      event_engine.last_diagnostics.get("ego",{}).get("self_detections_excluded",0)))
+    else:print("  [V2X EGO] waiting for scenario role=%s"%event_cfg.get("test_ego_role",EGO_ROLE))
+    if args.event_scenario in ("all","avw"):
+     avw_diag=event_engine.last_diagnostics.get("avw",{})
+     print("  [V2X AVW INPUT] Typed:%d Geometry:%d Stopped:%d Dwell:%.1fs"%(
+      avw_diag.get("typed",0),avw_diag.get("geometry",0),
+      avw_diag.get("stopped",0),float(avw_diag.get("dwell_seconds",0.0))))
+    if args.event_scenario in ("all","slw"):
+     slw_diag=event_engine.last_diagnostics.get("slw",{})
+     print("  [V2X SLW INPUT] Speed:%s Limit:%dkm/h Flag:%d"%(
+      ("%.1fkm/h"%slw_diag["speed_kmh"] if "speed_kmh" in slw_diag else "UNAVAILABLE"),
+      slw_diag.get("speed_limit_kmh",0),slw_diag.get("spd_Flag",0)))
     last_event_diag=now
    for event in event_results:
     payload=encode_v2x_event(event)
