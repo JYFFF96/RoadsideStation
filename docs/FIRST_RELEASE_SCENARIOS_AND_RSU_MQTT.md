@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.84`。主车与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
+适用版本：`V0.6.12.8.2.2.85`。主车、车道安全控制与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
 
 ## 1. 运行方式
 
@@ -106,7 +106,7 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_hlw.py
 ```
 
-场景内容：1辆主车＋道路内6个静态障碍物。
+场景内容：1辆主车＋目标路口每条入口车道各1个静态障碍物；主车会在同车道障碍物前安全制动。
 
 预期：`category=HLW`、`event_sort=8`、`event_type=37`。
 
@@ -127,7 +127,7 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_slw.py --ego-speed-kmh 55
 ```
 
-场景内容：生成统一角色名`rsu_test_ego`的主车，Traffic Manager目标速度为55 km/h。
+场景内容：生成统一角色名`rsu_test_ego`的主车，车道航点控制目标速度为55 km/h。
 main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因红灯、前车而减速；实际速度超过限速才为Flag=2。预期日志示例：
 
 ```text
@@ -141,7 +141,7 @@ main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.84 scenario actors removed.
+V0.6.12.8.2.2.85 scenario actors removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
