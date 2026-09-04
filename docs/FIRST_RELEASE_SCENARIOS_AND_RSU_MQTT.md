@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.87`。主车、车道安全控制与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
+适用版本：`V0.6.12.8.2.2.88`。主车、车道安全控制与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
 
 ## 1. 运行方式
 

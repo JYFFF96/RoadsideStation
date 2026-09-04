@@ -68,12 +68,17 @@ class DachuanRsuBridgeTest(unittest.TestCase):
     def test_hlw_becomes_rsi_rte(self):
         bridge=self._bridge()
         event={"type":"event","data":{"category":"HLW","event_count":4,
-            "event_type":37,"description":"道路存在障碍物"}}
+            "event_type":37,"description":"道路存在障碍物",
+            "time":1704067200}}
         topic,payload=bridge.build_rsi(event);message=json.loads(payload)
         self.assertTrue(topic.startswith("command/traffic/event/req/"))
         self.assertTrue(topic.endswith("/rsi"))
         rte=message["value"]["rtes"][0]
         self.assertEqual(("RSI",37,5),(message["type"],rte["eventType"],rte["eventSource"]))
+        self.assertEqual((0,"RSU_0001"),(message["value"]["moy"],
+                                         message["value"]["id"]))
+        self.assertEqual({"lat":390000000,"long":1160000000,"elevation":0},
+                         message["value"]["refPos"])
 
     def test_avw_becomes_rsi_rte_at_detected_vehicle_position(self):
         bridge=self._bridge(avw_event_type=37)
@@ -97,6 +102,11 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         bridge=self._bridge()
         self.assertIsNone(bridge.build_rsi({"data":{"category":"AVW"}}))
         self.assertEqual("missing_event_type",bridge.last_diagnostic["suppressed"])
+
+    def test_rsi_id_must_match_asn1_octet_string_size(self):
+        bridge=self._bridge(rsi_id="RSU_001")
+        with self.assertRaises(ValueError):
+            bridge.build_rsi({"data":{"category":"HLW","event_type":37}})
 
     def test_slw_requires_vendor_sign_type(self):
         event={"data":{"category":"SLW","event_count":2,"speed_limit":40}}

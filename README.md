@@ -1,3 +1,11 @@
+## V0.6.12.8.2.2.88 — 完整 RSI 数据体
+
+RSI 在大椽 MQTT `type/value/category` 信封内补齐 CSAE
+`RoadSideInformation` 的 `moy`、8 字节 `id` 和 `refPos` 字段；`rtes/rtss`
+继续使用设备在线协议规定的 MEC 字段名。`eventPos` 为事件绝对经纬度，
+`refPos` 为 RSU 实测参考位置。`rsi_id` 必须配置为恰好 8 个 ASCII 字节。
+也可在启动时用 `--rsu-rsi-id RSU_0001` 覆盖配置。
+
 ## V0.6.12.8.2.2.87 — 单独打印 RSI 数据
 
 每次生成 RSI 时先用 `[RSI DATA]` 单独打印完整 JSON，再打印精简的

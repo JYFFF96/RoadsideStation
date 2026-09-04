@@ -650,6 +650,9 @@ dachuan_rsu:
   # mappings fail closed instead of being inserted into RSM.
   publish_rsi_events: true
   rsm_id: dc-rsm-roadside-1
+  # CSAE RoadSideInformation.id is OCTET STRING (SIZE(8)). Use exactly eight
+  # ASCII bytes and replace this with the deployed roadside information ID.
+  rsi_id: RSU_0001
   event_radius_m: 100
   event_source: 5
   event_priority: 1

@@ -18,6 +18,8 @@ def main():
     parser.add_argument("--scenario",choices=["vrucw","hlw","avw","slw"],required=True)
     parser.add_argument("--host",default="localhost");parser.add_argument("--port",type=int,default=1883)
     parser.add_argument("--device-id",default="DC887-002047")
+    parser.add_argument("--rsi-id",default="RSU_0001",
+                        help="CSAE RSI id: exactly 8 ASCII bytes")
     parser.add_argument("--username",default=None)
     parser.add_argument("--password-env",default="ROADSIDE_MQTT_PASSWORD")
     parser.add_argument("--latitude",type=float,required=True)
@@ -33,7 +35,7 @@ def main():
         "reference_latitude_deg":args.latitude,
         "reference_longitude_deg":args.longitude,"slw_sign_type":args.slw_sign_type,
         "avw_event_type":args.avw_event_type,
-        "device_id":args.device_id})
+        "device_id":args.device_id,"rsi_id":args.rsi_id})
     bridge.set_world_origin(0,0,0);publisher=MqttPublisher(mqtt_config);publisher.connect()
     try:
         if args.scenario=="vrucw":

@@ -3,6 +3,7 @@ from __future__ import print_function
 import hashlib
 import json
 import math
+import time
 import uuid
 
 
@@ -19,6 +20,30 @@ def _participant_id(value):
     digits="".join(ch for ch in text if ch.isdigit())
     if digits:return int(digits)%256
     return int(hashlib.sha1(text.encode("utf-8")).hexdigest()[:2],16)
+
+
+def _minute_of_year(timestamp):
+    """Return CSAE MinuteOfTheYear in UTC.
+
+    CARLA normally reaches this bridge with Unix epoch seconds.  Keep a safe
+    fallback for synthetic/unit-test timestamps that are simulation elapsed
+    seconds instead of wall-clock time.
+    """
+    value=float(timestamp or 0.0)
+    if value<946684800.0:value=time.time()
+    utc=time.gmtime(value)
+    return (int(utc.tm_yday)-1)*1440+int(utc.tm_hour)*60+int(utc.tm_min)
+
+
+def _fixed_octet_id(value,field_name):
+    """Validate JSON text used for an ASN.1 OCTET STRING (SIZE(8))."""
+    text=str(value)
+    try:length=len(text.encode("ascii"))
+    except UnicodeEncodeError:
+        raise ValueError("%s must contain exactly 8 ASCII bytes"%field_name)
+    if length!=8:
+        raise ValueError("%s must contain exactly 8 ASCII bytes"%field_name)
+    return text
 
 
 class DachuanRsuBridge(object):
@@ -116,6 +141,7 @@ class DachuanRsuBridge(object):
     def build_rsi(self,event):
         if not self.enabled:return None
         data=dict((event or {}).get("data",{}) or {});category=str(data.get("category",""))
+        timestamp=float(data.get("time",time.time()))
         if data.get("event_x") is not None and data.get("event_y") is not None:
             lat,lon=self._geodetic(data["event_x"],data["event_y"])
             elevation=self.ref_elevation_m+(float(data.get("event_z",self.origin_z))-
@@ -127,7 +153,18 @@ class DachuanRsuBridge(object):
         position={"offsetLL":{"choiceID":7,"position_LatLon":
                     {"lat":lat,"long":lon}},"offsetV":{"choiceID":7,
                     "elevation":int(round(elevation*10.0))}}
-        value={"category":"RSI","msgCnt":self._next_count(),"rtes":[],"rtss":[]}
+        # `type/value/category` is Dachuan's MQTT envelope.  The members below
+        # form the complete CSAE RoadSideInformation body.  Older revisions
+        # only emitted msgCnt/rtes/rtss, which the RSU could ingest but which
+        # was not a complete RSI data frame.
+        value={"category":"RSI","msgCnt":self._next_count(),
+               "moy":_minute_of_year(timestamp),
+               "id":_fixed_octet_id(self.config.get("rsi_id","RSU_0001"),
+                                     "dachuan_rsu.rsi_id"),
+               "refPos":{"lat":int(round(float(self.ref_lat)*1e7)),
+                         "long":int(round(float(self.ref_lon)*1e7)),
+                         "elevation":int(round(self.ref_elevation_m*10.0))},
+               "rtes":[],"rtss":[]}
         if category in ("HLW","AVW"):
             event_type=data.get("event_type")
             if event_type is None:
