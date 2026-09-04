@@ -1,4 +1,4 @@
-# V0.6.12.8.2.2.84：统一主车和独立跟随视角
+# V0.6.12.8.2.2.85：统一主车、车道安全控制和独立跟随视角
 
 主车是 CARLA 中的仿真参考车辆，用于预警场景和本车状态输入。**不与真实 OBU 的身份、定位或速度绑定**。本版不新增 FCW/BSD 等算法，也不修改已有 `category`、`event_sort`、MQTT 路由或 RSM/RSI 编码。
 
@@ -26,12 +26,21 @@ python3.7 tools/scenario_slw.py --ego-view --ego-speed-kmh 55
 
 | 场景 | 主车 | 目标 | 保留的事件映射 |
 | --- | --- | --- | --- |
-| VRUCW | 默认期望25 km/h | 12名行人 | VRUCW / 10 |
-| HLW | 默认期望25 km/h | 6个道路障碍物 | HLW / 8，event_type=37 |
-| AVW | 默认期望25 km/h，优先在目标同车道后方生成 | 1辆静止车辆 | AVW / 6 |
+| VRUCW | 默认目标18 km/h | 12名行人，主车检测到同车道前方行人后制动 | VRUCW / 10 |
+| HLW | 默认目标18 km/h | 每条入口车道各1个道路障碍物，主车在障碍物前制动 | HLW / 8，event_type=37 |
+| AVW | 默认目标18 km/h，从目标同车道后方45–65m生成 | 1辆静止车辆，主车在目标前制动 | AVW / 6 |
 | SLW | 默认期望55 km/h | 无需另造超速目标车 | SLW / 9 |
 
-`spawn_multiclass_targets.py` 的 custom 模式也带一辆主车。主车由 Traffic Manager 沿道路行驶，默认端口8000；若已有交通使用8003，可传 `--tm-port 8003`。不强行忽略红灯或前方车辆，实测速度可能低于期望速度。SLW 的 Flag=2 要求实际速度超过限速；低于或等于限速为 Flag=1。
+`spawn_multiclass_targets.py` 的 custom 模式也带一辆主车。`.85`主车不再交给 Traffic Manager，而是每约0.1秒跟随当前驾驶车道的CARLA航点；`--tm-port`仅为旧命令兼容保留。主车遇红/黄灯、同车道车辆、行人或场景障碍物会主动制动，车道偏差过大也会停车。SLW 的 Flag=2 要求实际速度超过限速；低于或等于限速为 Flag=1。
+
+正常控制日志示例：
+
+```text
+[EGO CONTROL] mode=lane_follow speed=17.8km/h lane_error=0.12m steer=0.03 hazard=None clearance=-
+[EGO CONTROL] mode=hazard_stop speed=11.2km/h lane_error=0.09m steer=0.01 hazard=123 clearance=7.4m
+```
+
+若出现`lane_departure_stop`，主车会停车而不是继续横切车道；请保留该段日志用于调整当前地图的控制参数。
 
 若只想先看静态场景：
 
@@ -83,6 +92,8 @@ python3.7 tools/ego_view.py --width 640 --height 360 --fps 15
 main.py 在事件侧接入主车位置、速度、航向及车身范围，以车身范围过滤主车自身的车辆/未知障碍物检测，避免主车停车产生自己的 AVW/HLW。**原始融合列表和 RSM 仍保持路侧感知输出**，不把主车真值注入目标列表，也不从 RSM 删除已检测到的主车。
 
 该自身过滤是空间近似：车身范围内过近目标可能被过滤，车身之外的漂移碎片可能漏过滤。行人/非机动车不参与自身过滤。后续可根据实测日志改进，不等价于已完成稳定的主车轨迹 ID 关联。
+
+安全制动同样属于仿真场景保护层，不是正式FCW/VRU算法输出，不改变现有`category`、`event_sort`、ObjectList、RSM或RSI协议内容。
 
 ## 验证
 

@@ -30,6 +30,12 @@ def load_config(path):
 def distance(a, b):return math.hypot(float(a.x) - float(b.x), float(a.y) - float(b.y))
 
 
+def _forward_score(waypoint,center):
+    location=waypoint.transform.location;forward=waypoint.transform.get_forward_vector()
+    dx=float(center.x)-float(location.x);dy=float(center.y)-float(location.y)
+    return (dx*float(forward.x)+dy*float(forward.y))/max(.01,math.hypot(dx,dy))
+
+
 def junction_center(client, config):
     station = CarlaRoadsideStation(config)
     station.client = client
@@ -142,26 +148,93 @@ def obstacle_blueprints(library):
             if any(word in bp.id.lower() for word in words)]
 
 
-def spawn_obstacles(world, world_map, center, count, rng, owned=None):
+def incoming_lane_waypoints(world_map, center, target_distance=20.0):
+    """Return one deterministic placement waypoint per junction entry lane."""
+    junctions={}
+    for wp in world_map.generate_waypoints(2.0):
+        if not wp.is_junction:continue
+        junction=wp.get_junction()
+        if junction is None:continue
+        location=junction.bounding_box.location
+        junctions[junction.id]=(distance(location,center),junction)
+    result=[]
+    if junctions:
+        junction=min(junctions.values(),key=lambda item:item[0])[1]
+        try:pairs=junction.get_waypoints(carla.LaneType.Driving)
+        except RuntimeError:pairs=[]
+        seen=set()
+        for entry,_exit in pairs:
+            key=(int(entry.road_id),int(entry.section_id),int(entry.lane_id))
+            if key in seen:continue
+            seen.add(key);options=[entry]
+            extra=max(0.0,float(target_distance)-distance(entry.transform.location,center))
+            if extra>.5:
+                try:options=entry.previous(extra) or [entry]
+                except RuntimeError:options=[entry]
+            candidates=[item for item in options if _forward_score(item,center)>.55]
+            if not candidates:candidates=options
+            result.append(min(candidates,key=lambda item:
+                abs(distance(item.transform.location,center)-target_distance)))
+    if not result:
+        groups={}
+        for wp in world_map.generate_waypoints(2.0):
+            d=distance(wp.transform.location,center)
+            if (not wp.is_junction and 12.0<=d<=32.0 and
+                    _forward_score(wp,center)>.65):
+                key=(int(wp.road_id),int(wp.section_id),int(wp.lane_id))
+                old=groups.get(key)
+                if old is None or abs(d-target_distance)<abs(
+                        distance(old.transform.location,center)-target_distance):groups[key]=wp
+        result=list(groups.values())
+    result.sort(key=lambda wp:(
+        round(math.atan2(wp.transform.location.y-center.y,
+                         wp.transform.location.x-center.x),3),
+        int(wp.road_id),int(wp.lane_id)))
+    return result
+
+
+def _copy_transform(waypoint,z_offset):
+    source=waypoint.transform
+    return carla.Transform(
+        carla.Location(x=source.location.x,y=source.location.y,
+                       z=source.location.z+float(z_offset)),
+        carla.Rotation(pitch=source.rotation.pitch,yaw=source.rotation.yaw,
+                       roll=source.rotation.roll))
+
+
+def spawn_obstacles(world, world_map, center, count, rng, owned=None,
+                    cover_all_incoming=False):
     blueprints=obstacle_blueprints(world.get_blueprint_library())
     if not blueprints:
         print("WARNING: no suitable static road-obstacle blueprints are available in this CARLA build.")
         return []
-    points=[]
-    for wp in world_map.generate_waypoints(2.0):
-        d=distance(wp.transform.location,center)
-        if 12.0<=d<=38.0 and all(distance(wp.transform.location,x.transform.location)>8.0 for x in points):
-            points.append(wp)
-    rng.shuffle(points);actors=[]
+    if cover_all_incoming:
+        points=incoming_lane_waypoints(world_map,center,target_distance=20.0)
+        print("[HLW LAYOUT] Incoming lanes=%d; placing one obstacle per lane."%len(points))
+    else:
+        points=[]
+        for wp in world_map.generate_waypoints(2.0):
+            d=distance(wp.transform.location,center)
+            if 12.0<=d<=38.0 and all(distance(wp.transform.location,x.transform.location)>8.0 for x in points):
+                points.append(wp)
+        rng.shuffle(points);points=points[:max(0,count)]
+    actors=[]
     for wp in points:
-        if len(actors)>=count:break
-        bp=rng.choice(blueprints);transform=wp.transform
-        if bp.has_attribute("role_name"):bp.set_attribute("role_name","rsu_test_obstacle")
-        transform.location.z+=0.20
-        actor=world.try_spawn_actor(bp,transform)
+        if not cover_all_incoming and len(actors)>=count:break
+        actor=None
+        attempts=list(blueprints);rng.shuffle(attempts)
+        for bp in attempts:
+            if bp.has_attribute("role_name"):bp.set_attribute("role_name","rsu_test_obstacle")
+            actor=world.try_spawn_actor(bp,_copy_transform(wp,0.20))
+            if actor is not None:break
         if actor is not None:
             actors.append(actor)
             if owned is not None:owned.append(actor)
+            print("  [HLW LANE] road=%s section=%s lane=%s obstacle=%d range=%.1fm"%(
+                wp.road_id,wp.section_id,wp.lane_id,actor.id,
+                distance(actor.get_location(),center)))
+        else:print("WARNING: failed to place obstacle on road=%s lane=%s"%(
+            wp.road_id,wp.lane_id))
     return actors
 
 
@@ -173,20 +246,14 @@ def spawn_stopped_vehicles(world, world_map, center, count, rng, owned=None):
     if not blueprints:
         print("WARNING: no four-wheel vehicle blueprints are available.")
         return []
-    points=[]
-    for wp in world_map.generate_waypoints(2.0):
-        d=distance(wp.transform.location,center)
-        if (15.0<=d<=32.0 and not wp.is_junction and
-                all(distance(wp.transform.location,x.transform.location)>10.0
-                    for x in points)):points.append(wp)
-    rng.shuffle(points);actors=[]
+    points=incoming_lane_waypoints(world_map,center,target_distance=22.0)
+    actors=[]
     for wp in points:
         if len(actors)>=count:break
         bp=rng.choice(blueprints)
         if bp.has_attribute("role_name"):
             bp.set_attribute("role_name","rsu_test_stopped_vehicle")
-        transform=wp.transform;transform.location.z+=0.30
-        actor=world.try_spawn_actor(bp,transform)
+        actor=world.try_spawn_actor(bp,_copy_transform(wp,0.30))
         if actor is None:continue
         if owned is not None:owned.append(actor)
         actor.set_autopilot(False)
@@ -227,8 +294,8 @@ def spawn_speeding_vehicles(world,world_map,center,count,rng,speed_kmh=55.0,owne
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.84 on-demand warning scenarios")
-    parser.add_argument("--config",default="config/roadside.yaml")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.85 lane-safe warning scenarios")
+    parser.add_argument("--config",default=os.path.join(PROJECT_ROOT,"config","roadside.yaml"))
     parser.add_argument("--scenario",choices=("custom","vrucw","hlw","avw","slw"),
                         default="custom")
     parser.add_argument("--walkers",type=int,default=12)
@@ -236,7 +303,7 @@ def main():
     parser.add_argument("--stopped-vehicles",type=int,default=0)
     parser.add_argument("--speeding-vehicles",type=int,default=0)
     parser.add_argument("--ego-speed-kmh",type=float,default=None,
-                        help="ego desired speed (default 25, SLW 55 km/h); 0 parks ego")
+                        help="ego target speed (default 18, SLW 55 km/h); 0 parks ego")
     parser.add_argument("--ego-role",default=None)
     parser.add_argument("--ego-view",action="store_true",help="open an independent ego camera window")
     parser.add_argument("--tm-port",type=int,default=8000)
@@ -247,14 +314,14 @@ def main():
     parser.add_argument("--walker-launch-interval",type=float,default=0.8)
     args=parser.parse_args()
     if args.ego_speed_kmh is None:
-        args.ego_speed_kmh=55.0 if args.scenario=="slw" else 25.0
+        args.ego_speed_kmh=55.0 if args.scenario=="slw" else 18.0
     if not math.isfinite(args.ego_speed_kmh) or args.ego_speed_kmh<0:
         parser.error("--ego-speed-kmh must be finite and non-negative")
     if not 1<=args.tm_port<=65535:parser.error("invalid --tm-port")
     if args.scenario=="vrucw":
         args.walkers=12;args.obstacles=0;args.stopped_vehicles=0;args.speeding_vehicles=0
     elif args.scenario=="hlw":
-        args.walkers=0;args.obstacles=6;args.stopped_vehicles=0;args.speeding_vehicles=0
+        args.walkers=0;args.obstacles=0;args.stopped_vehicles=0;args.speeding_vehicles=0
     elif args.scenario=="avw":
         args.walkers=0;args.obstacles=0;args.stopped_vehicles=1;args.speeding_vehicles=0
     elif args.scenario=="slw":
@@ -273,16 +340,18 @@ def main():
         walkers,movements=spawn_walkers(world,world_map,center,max(0,args.walkers),rng,
             args.walker_mode,max(.1,args.walker_speed),max(0.0,args.walker_launch_interval),
             owned=owned,owned_controllers=controllers)
-        obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng,owned=owned)
+        obstacles=spawn_obstacles(world,world_map,center,max(0,args.obstacles),rng,
+            owned=owned,cover_all_incoming=(args.scenario=="hlw"))
         stopped_vehicles=spawn_stopped_vehicles(world,world_map,center,
             max(0,args.stopped_vehicles),rng,owned=owned)
         # Legacy custom extra speeding targets remain available. Named SLW uses ego only.
         speeding=spawn_speeding_vehicles(world,world_map,center,
             max(0,args.speeding_vehicles),rng,args.ego_speed_kmh,owned=owned)
+        safety_targets=walkers+obstacles+stopped_vehicles
         ego.start(client,world_map,center,args.ego_speed_kmh,args.tm_port,
-                  targets=stopped_vehicles)
+                  targets=safety_targets)
         if args.ego_view:viewer=launch_ego_viewer(args.config,role)
-        print("V0.6.12.8.2.2.84 scenario=%s ego=%d walkers=%d obstacles=%d stopped=%d" %
+        print("V0.6.12.8.2.2.85 scenario=%s ego=%d walkers=%d obstacles=%d stopped=%d" %
               (args.scenario.upper(),ego.actor.id,len(walkers),len(obstacles),len(stopped_vehicles)))
         for actor in owned:
             loc=actor.get_location()
@@ -295,6 +364,7 @@ def main():
                 print("[EGO] Reference vehicle disappeared; stop and restart this scenario.")
                 break
             launch_due_walkers(movements,time.time()-started_at)
+            ego.update_control()
             for item in speeding:
                 try:item["actor"].set_target_velocity(item["velocity"])
                 except RuntimeError:pass
@@ -315,7 +385,7 @@ def main():
             try:actor.destroy()
             except RuntimeError:pass
         ego.close()
-        print("V0.6.12.8.2.2.84 scenario actors removed.")
+        print("V0.6.12.8.2.2.85 scenario actors removed.")
 
 
 if __name__=="__main__":main()
