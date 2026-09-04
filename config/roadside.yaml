@@ -660,12 +660,11 @@ output_diagnostics:
 v2x_events:
   enabled: true
   cooldown_seconds: 5.0
-  # Leave unset in normal perception runs. For the focused SLW bench test use
-  # --test-ego-speed-kmh; a real OBU adapter will replace this input later.
+  # Optional bench speed override; normally read measured CARLA ego state.
+  # No real OBU identity/location binding is required for these scenarios.
   test_ego_speed_kmh:
-  # Simulation-only: tools/scenario_slw.py creates this tagged vehicle. The
-  # real deployment replaces it with live OBU speed.
-  test_ego_role: rsu_test_speeding_vehicle
+  # All named scenarios and ego_view.py share this explicit role.
+  test_ego_role: rsu_test_ego
   # V0.6.12.8.2.2.75: event-focused, ID-independent pedestrian warning.
   # FusedObjectList already contains only road-ROI-approved camera persons.
   vrucw:

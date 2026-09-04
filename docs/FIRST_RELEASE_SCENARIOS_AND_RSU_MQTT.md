@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.83`。
+适用版本：`V0.6.12.8.2.2.84`。主车与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
 
 ## 1. 运行方式
 
@@ -15,7 +15,7 @@ main.py（只启动一次：感知、融合、事件判断、RSM -> MQTT -> RSU�
   +-- scenario_slw.py   （需要超速场景时启动）
 ```
 
-场景脚本保持运行时，测试目标一直存在；按 `Ctrl+C` 后只删除该脚本生成的目标，
+每个场景自动创建一辆主车（已有同角色主车时复用）。场景脚本保持运行时，测试目标一直存在；按 `Ctrl+C` 后只删除该脚本生成的主车和目标，
 CARLA和`main.py`不需要重启，可以接着运行另一个场景脚本。
 
 ## 2. 一次性配置MQTT和RSU坐标
@@ -95,7 +95,7 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_vrucw.py
 ```
 
-场景内容：12名行人分批横穿道路。
+场景内容：1辆主车＋12名行人分批横穿道路。
 
 预期：`category=VRUCW`、`event_sort=10`；RSM中的行人为`ptcType=3`。
 
@@ -106,7 +106,7 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_hlw.py
 ```
 
-场景内容：道路内生成6个静态障碍物。
+场景内容：1辆主车＋道路内6个静态障碍物。
 
 预期：`category=HLW`、`event_sort=8`、`event_type=37`。
 
@@ -117,7 +117,7 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_avw.py
 ```
 
-场景内容：道路内生成1辆拉手刹的静止车辆。持续约5秒后产生
+场景内容：1辆主车＋1辆拉手刹的静止目标车辆；主车优先生成在目标同车道后方。路侧感知持续确认目标静止约5秒后产生
 `category=AVW`、`event_sort=6`；RSM中的车辆为`ptcType=1`、速度接近0。
 
 ### 5.4 SLW - 超速预警
@@ -127,11 +127,12 @@ cd ~/RoadsideStation
 python3.7 tools/scenario_slw.py --ego-speed-kmh 55
 ```
 
-场景内容：生成角色名为`rsu_test_speeding_vehicle`的测试车辆并维持约55 km/h。
-main.py自动读取车辆速度，与配置中的40 km/h限速比较。预期：
+场景内容：生成统一角色名`rsu_test_ego`的主车，Traffic Manager目标速度为55 km/h。
+main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因红灯、前车而减速；实际速度超过限速才为Flag=2。预期日志示例：
 
 ```text
-[V2X SLW INPUT] Source:CARLA_SCENARIO Speed:55.0km/h Limit:40km/h Flag:2
+[V2X EGO] id=... Source:CARLA_EGO Speed:55.0km/h SelfExcluded:...
+[V2X SLW INPUT] Speed:55.0km/h Limit:40km/h Flag:2
 [V2X EVENT] ... "category":"SLW" ... "event_sort":9 ... "spd_Flag":2 ...
 ```
 
@@ -140,7 +141,7 @@ main.py自动读取车辆速度，与配置中的40 km/h限速比较。预期：
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.83 test targets removed.
+V0.6.12.8.2.2.84 scenario actors removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
