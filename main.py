@@ -39,7 +39,7 @@ def print(*args,**kwargs):
             "\nStop requested","Stopping RoadsideStation",
             "RoadsideStation stopped","MQTT shutdown warning",
             "Sensor shutdown warning","Dachuan RSU bridge:",
-            "[RSU MQTT TX] type=RSI","[RSI SUPPRESSED]")
+            "[RSI DATA]","[RSU MQTT TX] type=RSI","[RSI SUPPRESSED]")
  if _VERBOSE_OUTPUT or text.startswith(important):
   _BUILTIN_PRINT(*args,**kwargs)
 
@@ -572,7 +572,7 @@ def main():
    config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
  _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}));rsu_bridge=DachuanRsuBridge(config.get("dachuan_rsu",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.86 Compliant RSI / Quiet Logs starting...")
+ print("RoadsideStation V0.6.12.8.2.2.87 RSI Payload Logging starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  origin=(station.junction_center if station.junction_center is not None else station.base_transform.location)
  rsu_bridge.set_world_origin(origin.x,origin.y,origin.z)
@@ -582,6 +582,8 @@ def main():
    "event-driven" if rsi_enabled else "disabled"))
   if rsi_enabled and config.get("dachuan_rsu",{}).get("slw_sign_type") is None:
    print("WARNING: SLW RSI is suppressed until Dachuan confirms slw_sign_type; RSM and HLW RSI remain active.")
+ else:
+  print("WARNING: RSI data is unavailable while dachuan_rsu.enabled=false; configure the surveyed latitude/longitude and enable the bridge.")
  fc=config.get("fusion",{});eval_cfg=config.get("evaluation",{})
  if fc.get("ground_removal_enabled",True):
   gz=station.junction_center.z if station.junction_center is not None else None;print("Ground removal: enabled reference_z=%s clearance=%.2fm"%(("-" if gz is None else "%.2f"%gz),float(fc.get("ground_clearance",0.30))))
@@ -1017,9 +1019,10 @@ def main():
     if config.get("dachuan_rsu",{}).get("publish_rsi_events",False):
      rsu_rsi=rsu_bridge.build_rsi(event)
      if rsu_rsi is not None:
+      print("[RSI DATA] %s"%rsu_rsi[1])
       pub.publish(rsu_rsi[0],rsu_rsi[1]);print(
-       "[RSU MQTT TX] type=RSI category=%s topic=%s payload=%s"%(
-        event.get("data",{}).get("category","-"),rsu_rsi[0],rsu_rsi[1]))
+       "[RSU MQTT TX] type=RSI category=%s topic=%s"%(
+        event.get("data",{}).get("category","-"),rsu_rsi[0]))
      elif args.verbose:
       print("[RSI SUPPRESSED] category=%s reason=%s"%(
        event.get("data",{}).get("category","-"),
