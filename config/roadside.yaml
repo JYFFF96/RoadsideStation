@@ -622,6 +622,8 @@ mqtt:
   qos: 2
   response_topic: command///res/#
   publish_internal_outputs: true
+  # Detection-engine events are implementation details, not RSI wire messages.
+  publish_internal_event: false
   topic_object_list: roadside/RSU_001/object_list
   topic_rsm: roadside/RSU_001/rsm
   # Confirm the writable device-side topic with Dachuan before production use.
@@ -649,6 +651,11 @@ dachuan_rsu:
   publish_rsi_events: true
   rsm_id: dc-rsm-roadside-1
   event_radius_m: 100
+  event_source: 5
+  event_priority: 1
+  # AVW is transported as an RTE road obstacle. This is deliberately separate
+  # from event_sort=6, which is only the internal/HMI application identifier.
+  avw_event_type: 37
   # The supplied manual does not define the numeric RTS signType for a speed
   # limit sign. Obtain it from Dachuan/RSU firmware before enabling SLW RSI.
   slw_sign_type:

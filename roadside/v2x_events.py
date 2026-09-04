@@ -44,6 +44,11 @@ class V2XEventEngine(object):
         cooldown=float(self.config.get("cooldown_seconds",5.0))
         return now-float(self._last_emitted.get(key,-1e30))>=cooldown
 
+    @staticmethod
+    def _event_position(obj):
+        return {"event_x":float(obj.x),"event_y":float(obj.y),
+                "event_z":float(getattr(obj,"z",0.0))}
+
     def _credible_road_obstacle(self, obj, config):
         if str(obj.object_type).lower()!="unknown_obstacle":return False
         if str(getattr(obj,"track_state","confirmed")).lower()!="confirmed":return False
@@ -156,9 +161,10 @@ class V2XEventEngine(object):
                     "HLW",8,"道路存在障碍物",now,
                     int(hlw.get("direction",1)),
                     float(ego.get("speed_kmh") or 0.0),
-                    {"event_type":int(hlw.get("event_type",37)),
+                    dict({"event_type":int(hlw.get("event_type",37)),
                      "obstacle_count":len(obstacles),
-                     "trigger_mode":"road_obstacle_presence"}))
+                     "trigger_mode":"road_obstacle_presence"},
+                         **self._event_position(obstacles[0]))))
                 self._last_emitted[key]=now
         avw=self.config.get("avw",{}) or {}
         if avw.get("enabled",True):
@@ -189,12 +195,13 @@ class V2XEventEngine(object):
                 events.append(self._envelope(
                     "AVW",6,"请注意前方异常车辆",now,direction,
                     float(ego.get("speed_kmh") or 0.0),
-                    {"object_id":str(stopped[0].object_id),
+                    dict({"object_id":str(stopped[0].object_id),
                      "vehicle_count":len(stopped),
                      "stationary_seconds":round(now-self._avw_presence_since,2),
                      "classification_source":("camera_label" if typed else
                                               "lidar_vehicle_geometry"),
-                     "trigger_mode":"stopped_vehicle_presence"}))
+                     "trigger_mode":"stopped_vehicle_presence"},
+                         **self._event_position(stopped[0]))))
                 self._last_emitted[key]=now
         slw=self.config.get("slw",{}) or {}
         speed_available=ego.get("speed_kmh") is not None

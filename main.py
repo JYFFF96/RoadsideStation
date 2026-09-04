@@ -1,5 +1,5 @@
 from __future__ import print_function
-import argparse,json,signal,sys,time,yaml,math
+import argparse,builtins,json,signal,sys,time,yaml,math
 import carla
 from roadside.carla_station import CarlaRoadsideStation
 from roadside.fusion import SimpleFusion
@@ -28,6 +28,20 @@ from roadside.sim_ego import EGO_ROLE,read_ego_state
 from roadside.map_selection import carla_map_short_name,town05_switch_target
 
 _STOP_REQUESTED=False
+_VERBOSE_OUTPUT=False
+_BUILTIN_PRINT=builtins.print
+
+
+def print(*args,**kwargs):
+ """Keep normal operation concise; --verbose restores legacy diagnostics."""
+ text=str(args[0]) if args else ""
+ important=("RoadsideStation V","WARNING:","ERROR:","NOTE:",
+            "\nStop requested","Stopping RoadsideStation",
+            "RoadsideStation stopped","MQTT shutdown warning",
+            "Sensor shutdown warning","Dachuan RSU bridge:",
+            "[RSU MQTT TX] type=RSI","[RSI SUPPRESSED]")
+ if _VERBOSE_OUTPUT or text.startswith(important):
+  _BUILTIN_PRINT(*args,**kwargs)
 
 def _request_stop(signum,frame):
  global _STOP_REQUESTED
@@ -507,7 +521,7 @@ def _print_far_geometry():
  print("  [FAR GEOMETRY] InputPts:%d Components:%d TemplatePass:%d Dedupe:%d Built:%d"%(g.get("input_points",0),g.get("components",0),g.get("template_pass",0),g.get("dedupe",0),g.get("built",0)))
 
 def main():
- global _STOP_REQUESTED
+ global _STOP_REQUESTED,_VERBOSE_OUTPUT
  parser=argparse.ArgumentParser(description="RoadsideStation runtime")
  parser.add_argument("--config",default="config/roadside.yaml")
  parser.add_argument("--camera-source",choices=["none","carla_truth","detector"],default=None)
@@ -527,9 +541,13 @@ def main():
  parser.add_argument("--rsu-world-x-heading-from-east",type=float,default=None)
  parser.add_argument("--rsu-device-id",default=None)
  parser.add_argument("--rsu-slw-sign-type",type=int,default=None)
+ parser.add_argument("--verbose",action="store_true",
+                     help="restore per-second perception and evaluation diagnostics")
  args=parser.parse_args()
+ _VERBOSE_OUTPUT=bool(args.verbose)
  signal.signal(signal.SIGINT,_request_stop);signal.signal(signal.SIGTERM,_request_stop)
  config=apply_camera_runtime_overrides(load_config(args.config),args.camera_source,args.camera_model)
+ config.setdefault("fusion",{})["verbose_diagnostics"]=bool(args.verbose)
  if args.test_ego_speed_kmh is not None:
   if not math.isfinite(args.test_ego_speed_kmh) or args.test_ego_speed_kmh<0:parser.error("--test-ego-speed-kmh must be finite and non-negative")
   config.setdefault("v2x_events",{})["test_ego_speed_kmh"]=args.test_ego_speed_kmh
@@ -554,7 +572,7 @@ def main():
    config.setdefault("v2x_events",{}).setdefault(category,{})["enabled"]=(category==args.event_scenario)
  _try_load_configured_map(config);sid=config["station"]["id"];station=CarlaRoadsideStation(config);fusion=SimpleFusion(sid,config["fusion"]);pub=MqttPublisher(config["mqtt"]);event_engine=V2XEventEngine(sid,config.get("v2x_events",{}));rsu_bridge=DachuanRsuBridge(config.get("dachuan_rsu",{}))
  dc=config.get("detection_stability",{});detdiag=DetectionStabilityDiagnostics(dc.get("match_distance",3.5),dc.get("max_missed_frames",2),dc.get("fragmentation_distance",2.0));ds={};discdiag=DiscoveryDiagnostics();dds={}
- print("RoadsideStation V0.6.12.8.2.2.85 Lane-Safe Scenario Ego starting...")
+ print("RoadsideStation V0.6.12.8.2.2.86 Compliant RSI / Quiet Logs starting...")
  station.start();_print_traffic_status(station,config);fusion.set_world_transform(station.lidar_transform);fusion.set_radar_transform(station.radar_transform);fusion.set_ground_reference(station.junction_center.z if station.junction_center is not None else None);fusion.set_candidate_validator(station.validate_driving_roi);pub.connect()
  origin=(station.junction_center if station.junction_center is not None else station.base_transform.location)
  rsu_bridge.set_world_origin(origin.x,origin.y,origin.z)
@@ -773,9 +791,9 @@ def main():
    # Every downstream consumer uses the same post-association
    # object list. Camera class/size/source evidence must not disappear at MQTT.
    oj=encode_object_list(fol);rj=encode_rsm(fol);now=time.time()
-   if output_diag.get("fused_json_sample_enabled",True) and fol.objects and now-last_json_sample>=float(output_diag.get("fused_json_sample_interval",5.0)):
+   if args.verbose and output_diag.get("fused_json_sample_enabled",True) and fol.objects and now-last_json_sample>=float(output_diag.get("fused_json_sample_interval",5.0)):
     print("[FUSED OUTPUT SAMPLE] %s"%json.dumps(fol.objects[0].to_dict(),ensure_ascii=False,separators=(",",":")));last_json_sample=now
-   if now-last>=1.0:
+   if args.verbose and now-last>=1.0:
     s=fusion.last_stats;camera_frames=",".join("%s:%s"%(cid,(cameras.get(cid) or ("-",))[0]) for cid in sorted(camera_runtimes));primary_camera=cameras.get(primary_camera_id) if primary_camera_id else None;cf=camera_frames or "-";rmin=s.get("radar_nearest_min");rmin_txt="-" if rmin is None else "%.2fm"%rmin;score_avg=s.get("candidate_score_avg");score_txt="-" if score_avg is None else "%.2f"%score_avg
     sync_frames=(int(primary_camera[0])-int(lidar[0])) if primary_camera is not None and lidar is not None else None
     sync_seconds=(float(primary_camera[2])-float(lidar[2])) if primary_camera is not None and lidar is not None and primary_camera[2] is not None and lidar[2] is not None else None
@@ -915,7 +933,7 @@ def main():
      t=fusion.last_tracked_candidates[idx];size=o.size;rs="-" if o.radar_speed is None else "%.2f"%o.radar_speed;cam="-" if o.camera is None else "%s box=%s"%(o.camera.get("cameraId","?"),o.camera.get("bbox"));near=t.get("radar_nearest_xy");near_txt="-" if near is None else "%.2f"%near;raw_speed=math.hypot(t.get("raw_vx",0),t.get("raw_vy",0));fused_speed=math.hypot(o.vx,o.vy);state=t.get("track_state","confirmed");allowed=int(t.get("coast_allowed",0));q=float(t.get("track_quality",0.0));sensors=t.get("track_sensors","L")
      print("  %-12s type=%-7s state=%-9s q=%.2f sensors=%-3s coast=%d/%d pos=(%7.2f,%7.2f,%5.2f) vel=(%6.2f,%6.2f) speed=%.2f raw=%.2f size=(%.2f,%.2f,%.2f) radar=%s near=%sm hits=%d cam=%s conf=%.2f src=%s"%(o.object_id,o.object_type,state,q,sensors,int(t.get("coast_frames",0)),allowed,o.x,o.y,o.z,o.vx,o.vy,fused_speed,raw_speed,size[0],size[1],size[2],rs,near_txt,int(t.get("radar_hits",0)),cam,o.confidence,"+".join(o.sources)))
     last=now
-   if evaluator is not None and now-last_eval>=eval_interval:
+   if args.verbose and evaluator is not None and now-last_eval>=eval_interval:
     s=fusion.last_stats;ev=evaluator.evaluate(fusion.last_tracked_candidates,camera_objects,pairs,s.get("radar_matched_objects",0));geo=evaluator.evaluate_candidates(fusion.last_geometry_world);roi=evaluator.evaluate_candidates(fusion.last_roi_candidates);scored=evaluator.evaluate_candidates(fusion.last_scored_candidates);dyn=evaluator.evaluate_candidates(fusion.last_dynamic_candidates);ga=evaluator.analyze_geometry_attribution(fusion.last_geometry_world);road_ga=evaluator.analyze_road_object_recovery(fusion.last_road_object_recovery_candidates);selected_attr=evaluator.analyze_selected_enforcement_attribution(fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_tracked_candidates);selected_score=evaluator.analyze_selected_admission_score_profile(list(fusion.last_scored_candidates)+list(fusion.last_score_rejections));road_diag=fusion.road_object_recovery_diagnostics_world();road_stage=evaluator.analyze_road_object_recovery_stages(road_diag);road_stages=road_diag.get("stages",{}) or {};road_cap=evaluator.analyze_road_object_cap_comparison(fusion.last_road_object_recovery_candidates,road_stages.get("balanced_output",[]),road_stages.get("adaptive_output",[]),road_stages.get("adaptive_ranked_output",[]),road_stages.get("adaptive_stratified_output",[]),road_stages.get("adaptive_hybrid_output",[]),road_stages.get("adaptive_hybrid_gated_output",[]),road_stages.get("adaptive_hybrid_rescued_output",[]),road_stages.get("adaptive_hybrid_geometry_gated_output",[]),road_stages.get("selected_output",[]));road_adaptive=evaluator.analyze_road_object_adaptive_profile(road_stages.get("adaptive_dedupe_pass",[]));road_hybrid=evaluator.analyze_road_object_hybrid_profile(road_stages.get("adaptive_hybrid_output",[]));road_rescue=evaluator.analyze_road_object_hybrid_rescue_profile(road_stages.get("adaptive_hybrid_rescued_output",[]));truth_lifecycle=evaluator.analyze_truth_lifecycle();dd=evaluator.analyze_detection_drop_reasons(fusion.last_geometry_world,fusion.last_roi_candidates,fusion.last_scored_candidates,fusion.last_dynamic_candidates,fusion.last_roi_rejections,fusion.last_score_rejections)
     print("[EVAL %.0fm] Truth:%d Tracks:%d Matched:%d Missed:%d FP:%d Recall:%s Precision:%s PosErr:%s/%s RadarMatched:%d CamVisibleTruth:%d CamLiDAR:%d"%(evaluator.radius,ev["truth"],ev["detected"],ev["matched"],ev["missed"],ev["false_positive"],_pct(ev["recall"]),_pct(ev["precision"]),_meters(ev["mean_position_error"]),_meters(ev["max_position_error"]),ev["radar_matched"],ev["camera_visible"],ev["camera_lidar_matched"]))
     _print_multiclass(ev)
@@ -971,7 +989,7 @@ def main():
     ego_state["speed_kmh"]=event_cfg["test_ego_speed_kmh"]
     ego_state["source"]="CLI_SPEED_OVERRIDE"
    event_results=event_engine.update(fol,ego_state)
-   if now-last_event_diag>=1.0:
+   if args.verbose and now-last_event_diag>=1.0:
     if ego_error:print("  [V2X EGO] unavailable: %s"%ego_error)
     elif ego_state:
      print("  [V2X EGO] id=%s Source:%s Speed:%.1fkm/h SelfExcluded:%d"%(
@@ -992,14 +1010,20 @@ def main():
     last_event_diag=now
    for event in event_results:
     payload=encode_v2x_event(event)
-    if m.get("publish_internal_outputs",True):
+    if (m.get("publish_internal_outputs",True) and
+            m.get("publish_internal_event",False)):
      pub.publish(m.get("topic_event","roadside/%s/event"%sid),payload)
-    print("[V2X EVENT] %s"%payload)
+    if args.verbose:print("[INTERNAL EVENT] %s"%payload)
     if config.get("dachuan_rsu",{}).get("publish_rsi_events",False):
      rsu_rsi=rsu_bridge.build_rsi(event)
      if rsu_rsi is not None:
-      pub.publish(rsu_rsi[0],rsu_rsi[1]);print("[RSU MQTT TX] type=RSI category=%s topic=%s"%(
-       event.get("data",{}).get("category","-"),rsu_rsi[0]))
+      pub.publish(rsu_rsi[0],rsu_rsi[1]);print(
+       "[RSU MQTT TX] type=RSI category=%s topic=%s payload=%s"%(
+        event.get("data",{}).get("category","-"),rsu_rsi[0],rsu_rsi[1]))
+     elif args.verbose:
+      print("[RSI SUPPRESSED] category=%s reason=%s"%(
+       event.get("data",{}).get("category","-"),
+       rsu_bridge.last_diagnostic.get("suppressed","unsupported")))
    time.sleep(.05)
  except KeyboardInterrupt:_STOP_REQUESTED=True
  finally:

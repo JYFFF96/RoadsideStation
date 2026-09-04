@@ -1,3 +1,11 @@
+## V0.6.12.8.2.2.86 — 合规 RSI 与精简运行日志
+
+道路事件发送前统一编码为大椽 MEC-RSU 在线 MQTT 格式：
+`type=RSI`、`value.category=RSI`、`rtes/rtss`。AVW 作为可配置的道路
+障碍 RTE 发送，使用检测车辆的实际位置生成经纬度；内部 `event_sort`
+不再作为 RSI `eventType`。默认日志只显示重要状态及实际 RSI 发送消息，
+`python3.7 main.py --verbose` 可恢复完整诊断；场景脚本同样支持 `--verbose`。
+
 ## V0.6.12.8.2.2.85 — 车道安全主车控制
 
 主车改为 CARLA 驾驶航点跟随，禁用场景主车的 Traffic Manager 控制；

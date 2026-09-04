@@ -61,6 +61,7 @@ class ScenarioEgo(object):
         self.explicit_hazards = []
         self.last_status = {}
         self._last_report = 0.0
+        self.verbose = False
 
     def _candidate_spawn_waypoints(self, world_map, center, targets):
         candidates = []
@@ -96,9 +97,10 @@ class ScenarioEgo(object):
         return result
 
     def start(self, client, world_map, center, speed_kmh=18.0, tm_port=8000,
-              targets=()):
+              targets=(), verbose=False):
         import carla
         del client, tm_port
+        self.verbose = bool(verbose)
         self.actor = find_ego_actor(self.world, self.role_name)
         if self.actor is not None:
             print("[EGO] Reusing id=%d role=%s; original owner retains control" %
@@ -259,7 +261,7 @@ class ScenarioEgo(object):
             "hazard_id": (int(hazard[1].id) if hazard is not None else None),
             "hazard_clearance_m": (float(hazard[0]) if hazard is not None else None)}
         now = time.time()
-        if now - self._last_report >= 1.0:
+        if self.verbose and now - self._last_report >= 1.0:
             print("[EGO CONTROL] mode=%s speed=%.1fkm/h lane_error=%.2fm steer=%.2f hazard=%s clearance=%s" %
                   (mode, speed_kmh, lane_error, steer, self.last_status["hazard_id"],
                    ("-" if hazard is None else "%.1fm" % hazard[0])))

@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--latitude",type=float,required=True)
     parser.add_argument("--longitude",type=float,required=True)
     parser.add_argument("--slw-sign-type",type=int,default=None)
+    parser.add_argument("--avw-event-type",type=int,default=37)
     parser.add_argument("--wait-seconds",type=float,default=3.0)
     args=parser.parse_args()
     mqtt_config={"enabled":True,"host":args.host,"port":args.port,
@@ -31,6 +32,7 @@ def main():
     bridge=DachuanRsuBridge({"enabled":True,
         "reference_latitude_deg":args.latitude,
         "reference_longitude_deg":args.longitude,"slw_sign_type":args.slw_sign_type,
+        "avw_event_type":args.avw_event_type,
         "device_id":args.device_id})
     bridge.set_world_origin(0,0,0);publisher=MqttPublisher(mqtt_config);publisher.connect()
     try:
@@ -39,9 +41,9 @@ def main():
                             sources=["camera"])
             packet=bridge.build_rsm(FusedObjectList("RSU_001",[obj],time.time()))
         elif args.scenario=="avw":
-            obj=FusedObject("test_stopped_vehicle_1",object_type="car",
-                            size=[4.5,1.9,1.6],sources=["lidar","camera"])
-            packet=bridge.build_rsm(FusedObjectList("RSU_001",[obj],time.time()))
+            packet=bridge.build_rsi({"type":"event","data":{"category":"AVW",
+                "event_count":1,"event_x":0.0,"event_y":0.0,"event_z":0.0,
+                "description":"请注意前方异常车辆"}})
         elif args.scenario=="hlw":
             packet=bridge.build_rsi({"type":"event","data":{"category":"HLW",
                 "event_count":1,"event_type":37,"description":"道路存在障碍物"}})

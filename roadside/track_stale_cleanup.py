@@ -82,7 +82,8 @@ def install_stale_cleanup_patch():
         s["stale_miss_keep"] = int(d.get("miss_keep", 0))
         s["stale_cleaned"] = int(d.get("cleaned", 0))
         self.last_stats = s
-        if getattr(self, "_stale_cleanup_config", {}).get("track_stale_cleanup_enabled", False):
+        if (getattr(self, "_stale_cleanup_config", {}).get("track_stale_cleanup_enabled", False) and
+                getattr(self, "_stale_cleanup_config", {}).get("verbose_diagnostics", False)):
             if now - float(getattr(self, "_stale_last_print", 0.0)) >= 1.0:
                 print("  [TRACK STALE] Checked:%d MissKeep:%d QualityKeep:%d SensorProtected:%d Cleaned:%d" %
                       (s["stale_checked"], s["stale_miss_keep"], s["stale_quality_keep"],

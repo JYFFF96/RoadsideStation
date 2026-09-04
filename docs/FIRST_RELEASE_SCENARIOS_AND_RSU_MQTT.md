@@ -1,6 +1,6 @@
 # 第一版：主程序常驻、按需启动预警场景、RSM发送至RSU
 
-适用版本：`V0.6.12.8.2.2.85`。主车、车道安全控制与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
+适用版本：`V0.6.12.8.2.2.86`。主车、车道安全控制与跟随窗口详见 [SCENARIO_EGO_VIEW.md](SCENARIO_EGO_VIEW.md)。
 
 ## 1. 运行方式
 
@@ -33,6 +33,7 @@ mqtt:
   qos: 2
   response_topic: command///res/#
   publish_internal_outputs: false
+  publish_internal_event: false
 
 dachuan_rsu:
   enabled: true
@@ -43,7 +44,10 @@ dachuan_rsu:
   reference_elevation_m: 0.0
   world_x_heading_from_east_deg: 0.0
   rsm_publish_hz: 10.0
-  publish_rsi_events: false
+  publish_rsi_events: true
+  event_source: 5
+  event_priority: 1
+  avw_event_type: 37
 ```
 
 当前已验证的`localhost`命令不需要用户名和密码，因此不用设置密码环境变量。
@@ -75,16 +79,18 @@ python3.7 main.py \
 
 不要传`--event-scenario`，默认同时启用VRUCW、HLW、AVW和SLW。
 
-正常启动后应看到：
+正常启动后会保留精简日志；增加 `--verbose` 才会输出原来的逐秒感知、评估和
+主车状态诊断。RSI 触发时会直接打印实际发送的 topic 和完整 payload：
 
 ```text
 Dachuan RSU bridge: ENABLED | RSM=10Hz continuous | RSI=event-driven
 [MQTT] Connected broker=127.0.0.1:1883 qos=2
-[RSU MQTT TX] type=RSM topic=command/dachuan/DC887-002047/req/.../rsm participants=...
+[RSU MQTT TX] type=RSI category=AVW topic=command/traffic/event/req/.../rsi payload={"type":"RSI",...}
 [MQTT RX] topic=command///res/.../200 payload={"reqid":"...","return_code":200}
 ```
 
-等待竖向的`[BACKGROUND] Status:READY`后再启动场景。
+如需观察背景学习状态，请用 `python3.7 main.py --verbose ...`，等待
+`[BACKGROUND] Status:READY` 后再启动场景。
 
 ## 5. 按需启动场景
 
@@ -118,7 +124,9 @@ python3.7 tools/scenario_avw.py
 ```
 
 场景内容：1辆主车＋1辆拉手刹的静止目标车辆；主车优先生成在目标同车道后方。路侧感知持续确认目标静止约5秒后产生
-`category=AVW`、`event_sort=6`；RSM中的车辆为`ptcType=1`、速度接近0。
+内部检测事件为 `category=AVW`、`event_sort=6`；对外消息为 RSI
+`value.rtes[]`，默认使用可配置的 `eventType=37`，`eventPos` 来自该静止
+车辆的感知位置。RSM中的车辆仍为`ptcType=1`、速度接近0。
 
 ### 5.4 SLW - 超速预警
 
@@ -128,12 +136,12 @@ python3.7 tools/scenario_slw.py --ego-speed-kmh 55
 ```
 
 场景内容：生成统一角色名`rsu_test_ego`的主车，车道航点控制目标速度为55 km/h。
-main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因红灯、前车而减速；实际速度超过限速才为Flag=2。预期日志示例：
+main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因红灯、前车而减速；实际速度超过限速才为Flag=2。使用 `--verbose` 时可看到内部诊断：
 
 ```text
 [V2X EGO] id=... Source:CARLA_EGO Speed:55.0km/h SelfExcluded:...
 [V2X SLW INPUT] Speed:55.0km/h Limit:40km/h Flag:2
-[V2X EVENT] ... "category":"SLW" ... "event_sort":9 ... "spd_Flag":2 ...
+[INTERNAL EVENT] ... "category":"SLW" ... "event_sort":9 ... "spd_Flag":2 ...
 ```
 
 ## 6. 切换场景
@@ -141,7 +149,7 @@ main.py读取实际速度，与配置中的40 km/h限速比较。主车可能因
 在当前场景脚本终端按`Ctrl+C`。看到：
 
 ```text
-V0.6.12.8.2.2.85 scenario actors removed.
+V0.6.12.8.2.2.86 scenario actors removed.
 ```
 
 然后直接启动另一个`scenario_*.py`；不要停止CARLA和main.py。
@@ -159,10 +167,12 @@ command/dachuan/DC887-002047/req/{UUID}/rsm
 - 道路交通事件使用RSI的`rtes[]`，道路交通标志使用RSI的`rtss[]`。
 - RSI按协议发布到`command/traffic/event/req/{UUID}/rsi`，与现场RSM Topic分开配置。
 - HLW使用已经确认的`event_type=37`生成RSI RTE。
+- AVW不再使用`event_sort=6`冒充协议字段，而是按配置的
+  `avw_event_type=37`生成RSI RTE。
 - SLW必须取得大椽确认的`signType`后才能生成RSI RTS。
 - 本地`event_sort`是HMI预警枚举，不能直接当作RSI的`eventType`或`signType`。
 
-当前默认持续发送RSM并对已确认映射的事件发送RSI。映射未确认的事件会明确抑制，
+内部 `event2hmi` JSON 默认不再发布。当前默认持续发送RSM并对已确认映射的事件发送RSI。映射未确认的事件会明确抑制，
 不能把`event2hmi`原样伪装成RSM或把`event_sort`冒充标准事件类型。
 
 ## 8. 完整链路判定

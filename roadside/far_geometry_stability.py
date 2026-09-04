@@ -110,7 +110,8 @@ def install_far_geometry_stability_patch():
 
         now = time.time() if timestamp is None else float(timestamp)
         last_print = float(getattr(self, "_far_geometry_diag_last_print", 0.0))
-        if now - last_print >= 1.0:
+        if (getattr(self, "config", {}).get("verbose_diagnostics", False) and
+                now - last_print >= 1.0):
             print("  [FAR GEOMETRY DETAIL] InputPts:%d Components:%d TooFew:%d "
                   "LengthReject:%d WidthReject:%d HeightReject:%d TemplatePass:%d "
                   "Dedupe:%d Built:%d ROI:%d Score:%d Dynamic:%d" %

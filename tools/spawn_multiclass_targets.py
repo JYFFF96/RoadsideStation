@@ -294,7 +294,7 @@ def spawn_speeding_vehicles(world,world_map,center,count,rng,speed_kmh=55.0,owne
 
 
 def main():
-    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.85 lane-safe warning scenarios")
+    parser=argparse.ArgumentParser(description="V0.6.12.8.2.2.86 lane-safe warning scenarios")
     parser.add_argument("--config",default=os.path.join(PROJECT_ROOT,"config","roadside.yaml"))
     parser.add_argument("--scenario",choices=("custom","vrucw","hlw","avw","slw"),
                         default="custom")
@@ -306,6 +306,8 @@ def main():
                         help="ego target speed (default 18, SLW 55 km/h); 0 parks ego")
     parser.add_argument("--ego-role",default=None)
     parser.add_argument("--ego-view",action="store_true",help="open an independent ego camera window")
+    parser.add_argument("--verbose",action="store_true",
+                        help="print per-second ego lane/safety control diagnostics")
     parser.add_argument("--tm-port",type=int,default=8000)
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--walker-mode",choices=("static","manual","ai"),default="manual",
@@ -349,9 +351,9 @@ def main():
             max(0,args.speeding_vehicles),rng,args.ego_speed_kmh,owned=owned)
         safety_targets=walkers+obstacles+stopped_vehicles
         ego.start(client,world_map,center,args.ego_speed_kmh,args.tm_port,
-                  targets=safety_targets)
+                  targets=safety_targets,verbose=args.verbose)
         if args.ego_view:viewer=launch_ego_viewer(args.config,role)
-        print("V0.6.12.8.2.2.85 scenario=%s ego=%d walkers=%d obstacles=%d stopped=%d" %
+        print("V0.6.12.8.2.2.86 scenario=%s ego=%d walkers=%d obstacles=%d stopped=%d" %
               (args.scenario.upper(),ego.actor.id,len(walkers),len(obstacles),len(stopped_vehicles)))
         for actor in owned:
             loc=actor.get_location()
@@ -385,7 +387,7 @@ def main():
             try:actor.destroy()
             except RuntimeError:pass
         ego.close()
-        print("V0.6.12.8.2.2.85 scenario actors removed.")
+        print("V0.6.12.8.2.2.86 scenario actors removed.")
 
 
 if __name__=="__main__":main()

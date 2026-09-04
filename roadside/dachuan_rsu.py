@@ -116,27 +116,44 @@ class DachuanRsuBridge(object):
     def build_rsi(self,event):
         if not self.enabled:return None
         data=dict((event or {}).get("data",{}) or {});category=str(data.get("category",""))
-        lat=int(round(float(self.ref_lat)*1e7));lon=int(round(float(self.ref_lon)*1e7))
-        value={"category":"RSI","msgCnt":self._next_count(),"rtes":[],"rtss":[]}
-        if category=="HLW":
-            value["rtes"].append({"rteId":int(data.get("event_count",1))%256,
-                "eventType":int(data.get("event_type",37)),"eventSource":5,
-                "eventPos":{"offsetLL":{"choiceID":7,"position_LatLon":
+        if data.get("event_x") is not None and data.get("event_y") is not None:
+            lat,lon=self._geodetic(data["event_x"],data["event_y"])
+            elevation=self.ref_elevation_m+(float(data.get("event_z",self.origin_z))-
+                                             self.origin_z)
+        else:
+            lat=int(round(float(self.ref_lat)*1e7))
+            lon=int(round(float(self.ref_lon)*1e7))
+            elevation=self.ref_elevation_m
+        position={"offsetLL":{"choiceID":7,"position_LatLon":
                     {"lat":lat,"long":lon}},"offsetV":{"choiceID":7,
-                    "elevation":int(round(self.ref_elevation_m*10.0))}},
+                    "elevation":int(round(elevation*10.0))}}
+        value={"category":"RSI","msgCnt":self._next_count(),"rtes":[],"rtss":[]}
+        if category in ("HLW","AVW"):
+            event_type=data.get("event_type")
+            if event_type is None:
+                event_type=self.config.get("avw_event_type" if category=="AVW"
+                                           else "hlw_event_type")
+            if event_type is None:
+                self.last_diagnostic={"message_type":"RSI","category":category,
+                                      "suppressed":"missing_event_type"}
+                return None
+            value["rtes"].append({"rteId":int(data.get("event_count",1))%65536,
+                "eventType":int(event_type),"eventSource":int(
+                    self.config.get("event_source",5)),
+                "eventPos":position,
                 "eventRadius":int(self.config.get("event_radius_m",100)),
-                "description":str(data.get("description","道路存在障碍物")),"priority":1})
+                "description":str(data.get("description","道路存在障碍物")),
+                "priority":int(self.config.get("event_priority",1))})
         elif category=="SLW":
             sign_type=self.config.get("slw_sign_type")
             if sign_type is None:
                 self.last_diagnostic={"message_type":"RSI","category":"SLW",
                                       "suppressed":"missing_slw_sign_type"}
                 return None
-            value["rtss"].append({"rtsId":int(data.get("event_count",1))%256,
-                "signType":int(sign_type),"signPos":{"offsetLL":{"present":7,
-                    "lon":lon,"lat":lat},"offsetV":{"present":7,
-                    "elevation":int(round(self.ref_elevation_m*10.0))}},
-                "description":"限速%dkm/h"%int(data.get("speed_limit",0)),"priority":1})
+            value["rtss"].append({"rtsId":int(data.get("event_count",1))%65536,
+                "signType":int(sign_type),"signPos":position,
+                "description":"限速%dkm/h"%int(data.get("speed_limit",0)),
+                "priority":int(self.config.get("event_priority",1))})
         else:
             self.last_diagnostic={"message_type":"RSI","category":category,
                                   "suppressed":"participant_warning_uses_rsm"}

@@ -64,6 +64,8 @@ class V2XEventTest(unittest.TestCase):
         self.assertEqual(("HLW",8,37),(data["category"],data["event_sort"],
                                       data["event_type"]))
         self.assertEqual("road_obstacle_presence",data["trigger_mode"])
+        self.assertEqual((.2,.1,0.0),(data["event_x"],data["event_y"],
+                                     data["event_z"]))
         self.assertNotIn("object_id",data)
 
     def test_hlw_rejects_long_thin_or_untrusted_clutter(self):
@@ -88,6 +90,8 @@ class V2XEventTest(unittest.TestCase):
         self.assertEqual(1,len(events));data=events[0]["data"]
         self.assertEqual(("AVW",6,"RSU_001"),(data["category"],data["event_sort"],data["sid"]))
         self.assertEqual("vehicle_1",data["object_id"])
+        self.assertEqual((1.0,2.0,0.0),(data["event_x"],data["event_y"],
+                                       data["event_z"]))
         self.assertEqual("stopped_vehicle_presence",data["trigger_mode"])
         self.assertEqual("event",json.loads(encode_v2x_event(events[0]))["type"])
 

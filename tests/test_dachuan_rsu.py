@@ -75,6 +75,29 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         rte=message["value"]["rtes"][0]
         self.assertEqual(("RSI",37,5),(message["type"],rte["eventType"],rte["eventSource"]))
 
+    def test_avw_becomes_rsi_rte_at_detected_vehicle_position(self):
+        bridge=self._bridge(avw_event_type=37)
+        event={"type":"event","data":{"category":"AVW","event_count":7407,
+            "event_x":11.0,"event_y":20.0,"event_z":1.0,
+            "description":"请注意前方异常车辆"}}
+        topic,payload=bridge.build_rsi(event);message=json.loads(payload)
+        self.assertTrue(topic.endswith("/rsi"))
+        self.assertEqual(set(("type","value")),set(message))
+        self.assertEqual("RSI",message["value"]["category"])
+        self.assertEqual([],message["value"]["rtss"])
+        rte=message["value"]["rtes"][0]
+        self.assertEqual((7407,37,5),(rte["rteId"],rte["eventType"],
+                                      rte["eventSource"]))
+        position=rte["eventPos"]["offsetLL"]
+        self.assertEqual(7,position["choiceID"])
+        self.assertGreater(position["position_LatLon"]["long"],1160000000)
+        self.assertEqual("请注意前方异常车辆",rte["description"])
+
+    def test_avw_without_configured_event_type_fails_closed(self):
+        bridge=self._bridge()
+        self.assertIsNone(bridge.build_rsi({"data":{"category":"AVW"}}))
+        self.assertEqual("missing_event_type",bridge.last_diagnostic["suppressed"])
+
     def test_slw_requires_vendor_sign_type(self):
         event={"data":{"category":"SLW","event_count":2,"speed_limit":40}}
         bridge=self._bridge();self.assertIsNone(bridge.build_rsi(event))
@@ -83,6 +106,9 @@ class DachuanRsuBridgeTest(unittest.TestCase):
         message=json.loads(bridge.build_rsi(event)[1])
         self.assertEqual((88,"限速40km/h"),(message["value"]["rtss"][0]["signType"],
             message["value"]["rtss"][0]["description"]))
+        offset=message["value"]["rtss"][0]["signPos"]["offsetLL"]
+        self.assertEqual((7,390000000,1160000000),(offset["choiceID"],
+            offset["position_LatLon"]["lat"],offset["position_LatLon"]["long"]))
 
     def test_participant_warning_is_carried_by_rsm_not_rsi(self):
         bridge=self._bridge()
